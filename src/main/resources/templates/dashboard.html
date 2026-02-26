@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>k8s-pups - K8s Per-User Pod Service</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --orange:        #F97316;
+            --orange-dark:   #EA580C;
+            --orange-darker: #C2410C;
+            --orange-light:  #FFF7ED;
+            --orange-border: #FDBA74;
+            --bg:     #F8FAFC;
+            --card:   #FFFFFF;
+            --text:   #1E293B;
+            --muted:  #64748B;
+            --border: #E2E8F0;
+            --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 14px rgba(0,0,0,.06);
+            --shadow-hover: 0 6px 22px rgba(249,115,22,.22);
+            --radius: 14px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ── Header ──────────────────────────────────── */
+        header {
+            background: linear-gradient(135deg, var(--orange-darker) 0%, var(--orange) 100%);
+            padding: 0 28px;
+            height: 58px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 10px rgba(0,0,0,.18);
+            position: sticky; top: 0; z-index: 100;
+        }
+        .brand { display: flex; align-items: center; gap: 10px; color: white; text-decoration: none; }
+        .brand-sep { width: 1px; height: 18px; background: rgba(255,255,255,.4); margin: 0 6px; }
+        .brand-logo { font-size: 26px; line-height: 1; }
+        .brand-name { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+        .brand-tag  { font-size: 14px; font-weight: 500; }
+        .user-chip {
+            display: flex; align-items: center; gap: 8px;
+            color: rgba(255,255,255,.92); font-size: 14px; font-weight: 500;
+        }
+        .user-avatar {
+            width: 30px; height: 30px; border-radius: 50%;
+            background: rgba(255,255,255,.25);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 15px;
+        }
+
+        /* ── Main ────────────────────────────────────── */
+        main { max-width: 1000px; margin: 0 auto; padding: 36px 24px 60px; }
+
+        .section-label {
+            font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 1px;
+            color: var(--muted); margin-bottom: 14px;
+        }
+
+        /* ── Error banner ────────────────────────────── */
+        .error-banner {
+            display: none;
+            background: #FEF2F2; border: 1px solid #FCA5A5;
+            color: #B91C1C; border-radius: 10px;
+            padding: 12px 18px; margin-bottom: 24px;
+            font-size: 14px; font-weight: 500;
+        }
+
+        /* ── Session card ────────────────────────────── */
+        .session-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); border-left: 4px solid var(--orange);
+            padding: 26px 28px; margin-bottom: 32px;
+        }
+        .session-card-head {
+            display: flex; align-items: flex-start;
+            justify-content: space-between; gap: 12px; margin-bottom: 18px;
+        }
+        .session-tool-name { font-size: 20px; font-weight: 700; }
+
+        .badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 13px; border-radius: 20px;
+            font-size: 12px; font-weight: 700; letter-spacing: .3px; white-space: nowrap;
+        }
+        .badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; }
+        .badge-READY { background: #D1FAE5; color: #065F46; }
+        .badge-READY::before { background: #10B981; }
+        .badge-STARTING, .badge-CREATING { background: #FEF3C7; color: #92400E; animation: blink 1.6s ease-in-out infinite; }
+        .badge-STARTING::before, .badge-CREATING::before { background: #F59E0B; }
+        .badge-FAILED { background: #FEE2E2; color: #991B1B; }
+        .badge-FAILED::before { background: #EF4444; }
+        .badge-STOPPED, .badge-STOPPING { background: #F1F5F9; color: #475569; }
+        .badge-STOPPED::before, .badge-STOPPING::before { background: #94A3B8; }
+        @keyframes blink { 0%,100%{ opacity:1; } 50%{ opacity:.5; } }
+
+        .session-meta {
+            display: grid; grid-template-columns: max-content 1fr;
+            gap: 6px 18px; font-size: 13px; color: var(--muted); margin-bottom: 22px;
+        }
+        .session-meta .lbl { font-weight: 600; color: var(--text); }
+        .session-meta code {
+            font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+            font-size: 12px; background: #F1F5F9; padding: 1px 7px; border-radius: 5px;
+        }
+
+        .progress-wrap {
+            display: none; background: var(--orange-light);
+            border-radius: 6px; height: 5px; overflow: hidden; margin-bottom: 20px;
+        }
+        .progress-fill {
+            height: 100%; background: var(--orange); border-radius: 6px;
+            animation: sweep 1.8s ease-in-out infinite;
+        }
+        @keyframes sweep {
+            0%   { width:5%;  margin-left:0;  }
+            50%  { width:55%; margin-left:25%; }
+            100% { width:5%;  margin-left:95%; }
+        }
+        .session-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+        /* ── Buttons ─────────────────────────────────── */
+        .btn {
+            display: inline-flex; align-items: center; gap: 7px;
+            padding: 10px 22px; border-radius: 9px;
+            font-size: 14px; font-weight: 600; cursor: pointer;
+            border: none; text-decoration: none; transition: all .15s ease;
+        }
+        .btn-primary { background: var(--orange); color: white; }
+        .btn-primary:hover { background: var(--orange-dark); transform: translateY(-1px); box-shadow: var(--shadow-hover); }
+        .btn-open { background: #10B981; color: white; font-size: 15px; padding: 11px 26px; }
+        .btn-open:hover { background: #059669; transform: translateY(-1px); box-shadow: 0 6px 18px rgba(16,185,129,.25); }
+        .btn-stop { background: white; color: #EF4444; border: 1.5px solid #FCA5A5; padding: 9px 18px; font-size: 13px; }
+        .btn-stop:hover { background: #FEF2F2; }
+
+        /* ── Tool grid ───────────────────────────────── */
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+            gap: 18px;
+        }
+        .tool-card {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 26px;
+            border: 1.5px solid transparent;
+            transition: all .2s ease;
+            display: flex; flex-direction: column;
+        }
+        .tool-card:hover {
+            border-color: var(--orange-border);
+            box-shadow: var(--shadow-hover); transform: translateY(-3px);
+        }
+        .tool-icon { font-size: 40px; line-height: 1; margin-bottom: 14px; }
+        .tool-name  { font-size: 17px; font-weight: 700; margin-bottom: 7px; }
+        .tool-desc  { font-size: 13px; color: var(--muted); line-height: 1.6; flex: 1; margin-bottom: 20px; }
+        .tool-card form { margin: 0; }
+        .tool-card .btn { width: 100%; justify-content: center; }
+        .profile-select {
+            width: 100%; padding: 8px 12px; border-radius: 8px;
+            border: 1.5px solid var(--border); font-size: 13px;
+            font-weight: 500; color: var(--text); background: var(--bg);
+            margin-bottom: 10px; cursor: pointer; outline: none;
+            transition: border-color .15s ease;
+        }
+        .profile-select:focus { border-color: var(--orange); }
+
+        /* ── Status bar ──────────────────────────────── */
+        .status-bar {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 18px; border-radius: 10px;
+            font-size: 14px; font-weight: 500; margin-bottom: 24px;
+        }
+        .status-bar.active {
+            background: #D1FAE5; color: #065F46; border: 1px solid #A7F3D0;
+        }
+        .status-bar.idle {
+            background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0;
+        }
+        .status-dot {
+            width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+        }
+        .status-bar.active .status-dot { background: #10B981; }
+        .status-bar.idle .status-dot { background: #94A3B8; }
+        .status-counts {
+            display: flex; gap: 14px; margin-left: auto;
+            font-size: 12px; font-weight: 600;
+        }
+        .status-counts span { white-space: nowrap; }
+
+        /* ── Empty state ─────────────────────────────── */
+        .empty { text-align: center; padding: 56px 24px; color: var(--muted); }
+        .empty .icon { font-size: 52px; margin-bottom: 14px; }
+        .empty p { font-size: 15px; }
+    </style>
+</head>
+<body>
+
+<header>
+    <a class="brand" href="">
+        <span class="brand-logo">🐾</span>
+        <span class="brand-name">k8s-pups</span>
+        <span class="brand-sep"></span>
+        <span class="brand-tag">K8s Per-User Pod Service</span>
+    </a>
+    <div class="user-chip">
+        <div class="user-avatar">👤</div>
+        <span>{userId}</span>
+    </div>
+</header>
+
+<main>
+
+    <div class="error-banner" id="error-banner">
+        ⚠️ セッションの開始に失敗しました。しばらくしてから再試行してください。
+    </div>
+
+    {#if summary.total > 0}
+    <div class="status-bar active">
+        <span class="status-dot"></span>
+        <span>{summary.total} セッション稼働中</span>
+        <div class="status-counts">
+            {#if summary.ready > 0}<span>READY: {summary.ready}</span>{/if}
+            {#if summary.starting > 0}<span>起動中: {summary.starting}</span>{/if}
+            {#if summary.failed > 0}<span>FAILED: {summary.failed}</span>{/if}
+        </div>
+    </div>
+    {#else}
+    <div class="status-bar idle">
+        <span class="status-dot"></span>
+        <span>全セッション停止中</span>
+    </div>
+    {/if}
+
+    {#if session}
+    <p class="section-label">アクティブセッション</p>
+    <div class="session-card">
+        <div class="session-card-head">
+            <span class="session-tool-name">{session.toolName}</span>
+            <span class="badge badge-{session.state}">{session.state}</span>
+        </div>
+        <div class="session-meta">
+            <span class="lbl">Pod</span>  <code>{session.podName}</code>
+            <span class="lbl">User</span> <span>{session.userId}</span>
+        </div>
+        <div class="progress-wrap" id="progress">
+            <div class="progress-fill"></div>
+        </div>
+        <div class="session-actions">
+            {#if session.accessUrl}
+            <a class="btn btn-open" href="{session.accessUrl}" target="_blank">🚀 ツールを開く</a>
+            {/if}
+            <form method="post" action="session/stop">
+                <button type="submit" class="btn btn-stop">⏹ 停止</button>
+            </form>
+        </div>
+    </div>
+    {#else}
+    <p class="section-label">ツールを起動する</p>
+    {#if tools.isEmpty()}
+    <div class="empty">
+        <div class="icon">🔌</div>
+        <p>利用可能なツールがありません。管理者に連絡してください。</p>
+    </div>
+    {#else}
+    <div class="tools-grid">
+        {#for tool in tools}
+        <div class="tool-card">
+            <div class="tool-icon">{tool.icon}</div>
+            <div class="tool-name">{tool.displayName}</div>
+            <div class="tool-desc">{tool.description}</div>
+            <form method="post" action="session/start">
+                <input type="hidden" name="tool" value="{tool.name}">
+                {#if tool.resourceProfiles.size > 1}
+                <select name="profile" class="profile-select">
+                    {#for p in tool.resourceProfiles}
+                    <option value="{p.name}">{p.displayName}</option>
+                    {/for}
+                </select>
+                {/if}
+                <button type="submit" class="btn btn-primary">▶ 起動する</button>
+            </form>
+        </div>
+        {/for}
+    </div>
+    {/if}
+    {/if}
+
+</main>
+
+<script>
+    if (new URLSearchParams(location.search).get('error')) {
+        document.getElementById('error-banner').style.display = 'block';
+    }
+    const state = "{#if session}{session.state}{/if}";
+    if (state === "STARTING" || state === "CREATING") {
+        document.getElementById('progress').style.display = 'block';
+        setTimeout(() => location.reload(), 3000);
+    }
+</script>
+
+</body>
+</html>

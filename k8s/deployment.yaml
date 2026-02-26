@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-pups-controller
+  namespace: k8s-pups
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-pups-controller
+  template:
+    metadata:
+      labels:
+        app: k8s-pups-controller
+    spec:
+      serviceAccountName: vault-auth
+      containers:
+        - name: k8s-pups
+          image: 192.168.5.23:32000/k8s-pups:0.1.0-2602260124
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for vault secrets..."
+              while [ ! -f /vault/secrets/oidc-client-secret ]; do sleep 1; done
+              export K8S_PUPS_OIDC_SECRET=$(cat /vault/secrets/oidc-client-secret)
+              exec java -Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -jar /deployments/quarkus-run.jar
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: "http://keycloak-set2.sc-account-bg.svc:8080/sc-account-keycloak/realms/sc-account"
+          volumeMounts:
+            - name: vault-secrets
+              mountPath: /vault/secrets
+              readOnly: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /pups/q/health/live
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /pups/q/health/ready
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: vault-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: k8s-pups-spc

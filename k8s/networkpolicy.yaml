@@ -1,0 +1,105 @@
+# Default deny all in user-pods namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: user-pods
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Allow Ingress from Envoy Gateway proxy to HTTP tools
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-http
+  namespace: user-pods
+spec:
+  podSelector:
+    matchExpressions:
+      - key: tool
+        operator: NotIn
+        values: ["desktop"]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+      ports:
+        - protocol: TCP
+          port: 8090
+        - protocol: TCP
+          port: 8888
+        - protocol: TCP
+          port: 8080
+---
+# Allow DNS egress (all pods need DNS)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-dns
+  namespace: user-pods
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Allow coder-agent to reach DGX servers
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-dgx
+  namespace: user-pods
+spec:
+  podSelector:
+    matchLabels:
+      tool: coder-agent
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.5.15/32
+      ports:
+        - protocol: TCP
+          port: 8000
+    - to:
+        - ipBlock:
+            cidr: 192.168.5.13/32
+      ports:
+        - protocol: TCP
+          port: 11434
+---
+# Allow NFS egress (all pods that mount NFS)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-nfs
+  namespace: user-pods
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.5.20/32
+      ports:
+        - protocol: TCP
+          port: 2049
+        - protocol: TCP
+          port: 111
