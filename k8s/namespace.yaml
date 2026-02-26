@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k8s-pups
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: user-pods
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: baseline

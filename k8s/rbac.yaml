@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-pups-controller
+  namespace: k8s-pups
+---
+# Role in user-pods namespace: manage Pods and Services
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8s-pups-pod-manager
+  namespace: user-pods
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "persistentvolumeclaims"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-pups-pod-manager-binding
+  namespace: user-pods
+subjects:
+  - kind: ServiceAccount
+    name: vault-auth
+    namespace: k8s-pups
+roleRef:
+  kind: Role
+  name: k8s-pups-pod-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+# Role in sc-account-bg namespace: manage HTTPRoutes for session routing
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8s-pups-route-manager
+  namespace: sc-account-bg
+rules:
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["create", "delete", "get", "list"]
+  - apiGroups: ["gateway.envoyproxy.io"]
+    resources: ["securitypolicies"]
+    verbs: ["create", "delete", "get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-pups-route-manager-binding
+  namespace: sc-account-bg
+subjects:
+  - kind: ServiceAccount
+    name: vault-auth
+    namespace: k8s-pups
+roleRef:
+  kind: Role
+  name: k8s-pups-route-manager
+  apiGroup: rbac.authorization.k8s.io
