@@ -10,8 +10,8 @@ import java.util.logging.Logger;
 
 /**
  * Singleton actor that manages all user sessions.
- * Driven by POJO-actor: SessionManagerActor is a plain POJO,
- * wrapped in ActorRef by K8sPupsActorSystem.
+ * Supports multiple sessions per user (up to maxSessionsPerUser).
+ * A value of -1 for maxSessionsPerUser means unlimited.
  */
 public class SessionManagerActor {
 
@@ -22,17 +22,23 @@ public class SessionManagerActor {
     private final int maxSessions;
     private final int maxSessionsPerUser;
     private final long idleTimeoutMinutes;
+    private final Set<String> unlimitedUsers;
 
-    /** userId -> child ActorRef<SessionActor> */
+    /** sessionId -> child ActorRef<SessionActor> */
     private final Map<String, ActorRef<SessionActor>> sessions = new HashMap<>();
 
+    /** userId -> list of sessionIds owned by that user */
+    private final Map<String, List<String>> userSessions = new HashMap<>();
+
     public SessionManagerActor(K8sApiClient k8sClient, Map<String, ToolPlugin> plugins,
-                               int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes) {
+                               int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
+                               Set<String> unlimitedUsers) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
         this.maxSessions = maxSessions;
         this.maxSessionsPerUser = maxSessionsPerUser;
         this.idleTimeoutMinutes = idleTimeoutMinutes;
+        this.unlimitedUsers = unlimitedUsers;
     }
 
     /**
@@ -43,15 +49,15 @@ public class SessionManagerActor {
                                        String userId, String toolName,
                                        List<String> allowedProjects, String labId,
                                        String resourceProfile) {
-        // Check limits
+        // Check global limit
         if (sessions.size() >= maxSessions) {
             LOG.warning("Max sessions reached: " + maxSessions);
             return null;
         }
-        // sessions is keyed by userId, so one entry per user.
-        // If the user already has a session, reject.
-        if (sessions.containsKey(userId)) {
-            LOG.warning("User already has an active session: " + userId);
+        // Check per-user limit (-1 means unlimited, unlimitedUsers bypass the check)
+        int userCount = userSessions.getOrDefault(userId, List.of()).size();
+        if (!unlimitedUsers.contains(userId) && maxSessionsPerUser >= 0 && userCount >= maxSessionsPerUser) {
+            LOG.warning("User " + userId + " reached max sessions: " + maxSessionsPerUser);
             return null;
         }
 
@@ -67,53 +73,81 @@ public class SessionManagerActor {
 
         // Create as child actor
         ActorRef<SessionActor> childRef = self.createChild("session-" + sessionId, actor);
-        sessions.put(userId, childRef);
+        sessions.put(sessionId, childRef);
+        userSessions.computeIfAbsent(userId, k -> new ArrayList<>()).add(sessionId);
 
         // Tell the session to start (async, non-blocking)
-        // Pass childRef as the self reference so pod watch events are routed via the actor's message queue.
         childRef.tell(sa -> sa.start(childRef));
 
         LOG.info("Session created: user=" + userId + ", tool=" + toolName
-            + ", session=" + sessionId);
+            + ", session=" + sessionId + " (user total: " + (userCount + 1) + ")");
 
         return new SessionStatus(sessionId, userId, toolName, SessionState.STARTING, info.podName(), null);
     }
 
     /**
-     * Stop and remove a user's session.
+     * Stop and remove a session by sessionId.
      */
-    public void destroySession(String userId) {
-        ActorRef<SessionActor> ref = sessions.remove(userId);
+    public void destroySession(String sessionId) {
+        ActorRef<SessionActor> ref = sessions.remove(sessionId);
         if (ref != null) {
+            // Remove from userSessions index
+            for (var entry : userSessions.entrySet()) {
+                if (entry.getValue().remove(sessionId)) {
+                    if (entry.getValue().isEmpty()) {
+                        userSessions.remove(entry.getKey());
+                    }
+                    break;
+                }
+            }
             ref.tell(SessionActor::stop);
             ref.close();
-            LOG.info("Session destroyed for user: " + userId);
+            LOG.info("Session destroyed: " + sessionId);
         }
     }
 
     /**
-     * Get the current status of a user's session.
+     * Get the status of all sessions belonging to a user.
      */
-    public SessionStatus getSessionStatus(String userId) {
-        ActorRef<SessionActor> ref = sessions.get(userId);
-        if (ref == null) {
-            return null;
+    public List<SessionStatus> getUserSessions(String userId) {
+        List<String> sessionIds = userSessions.getOrDefault(userId, List.of());
+        List<SessionStatus> result = new ArrayList<>();
+        for (String sessionId : sessionIds) {
+            ActorRef<SessionActor> ref = sessions.get(sessionId);
+            if (ref != null) {
+                try {
+                    SessionStatus status = ref.ask(SessionActor::getStatus).get();
+                    if (status != null) {
+                        result.add(status);
+                    }
+                } catch (Exception e) {
+                    LOG.warning("Failed to get session status for " + sessionId + ": " + e.getMessage());
+                }
+            }
         }
-        try {
-            return ref.ask(SessionActor::getStatus).get();
-        } catch (Exception e) {
-            LOG.warning("Failed to get session status for " + userId + ": " + e.getMessage());
-            return null;
-        }
+        return result;
     }
 
     /**
-     * Touch a user's session to reset idle timer.
+     * Touch a session to reset idle timer.
      */
-    public void touchSession(String userId) {
-        ActorRef<SessionActor> ref = sessions.get(userId);
+    public void touchSession(String sessionId) {
+        ActorRef<SessionActor> ref = sessions.get(sessionId);
         if (ref != null) {
             ref.tell(SessionActor::touch);
+        }
+    }
+
+    /**
+     * Touch all sessions belonging to a user.
+     */
+    public void touchUserSessions(String userId) {
+        List<String> sessionIds = userSessions.getOrDefault(userId, List.of());
+        for (String sessionId : sessionIds) {
+            ActorRef<SessionActor> ref = sessions.get(sessionId);
+            if (ref != null) {
+                ref.tell(SessionActor::touch);
+            }
         }
     }
 
@@ -133,11 +167,8 @@ public class SessionManagerActor {
                 LOG.warning("Error checking idle for " + entry.getKey() + ": " + e.getMessage());
             }
         }
-        for (String userId : toRemove) {
-            ActorRef<SessionActor> ref = sessions.remove(userId);
-            if (ref != null) {
-                ref.close();
-            }
+        for (String sessionId : toRemove) {
+            destroySession(sessionId);
         }
     }
 
@@ -149,10 +180,10 @@ public class SessionManagerActor {
     }
 
     /**
-     * Check if user has an active session.
+     * Check if user has any active session.
      */
     public boolean hasSession(String userId) {
-        return sessions.containsKey(userId);
+        return userSessions.containsKey(userId) && !userSessions.get(userId).isEmpty();
     }
 
     /**
@@ -184,18 +215,7 @@ public class SessionManagerActor {
      * Used by startup reconciliation to identify orphaned k8s resources.
      */
     public Set<String> getSessionIds() {
-        Set<String> ids = new HashSet<>();
-        for (ActorRef<SessionActor> ref : sessions.values()) {
-            try {
-                String sessionId = ref.ask(SessionActor::getSessionId).get();
-                if (sessionId != null) {
-                    ids.add(sessionId);
-                }
-            } catch (Exception e) {
-                LOG.warning("Failed to get sessionId from actor: " + e.getMessage());
-            }
-        }
-        return ids;
+        return new HashSet<>(sessions.keySet());
     }
 
     /**
@@ -203,13 +223,14 @@ public class SessionManagerActor {
      */
     public void destroyAllSessions() {
         LOG.info("Destroying all sessions (" + sessions.size() + ")");
-        List<String> userIds = new ArrayList<>(sessions.keySet());
-        for (String userId : userIds) {
-            ActorRef<SessionActor> ref = sessions.remove(userId);
+        List<String> sessionIds = new ArrayList<>(sessions.keySet());
+        for (String sessionId : sessionIds) {
+            ActorRef<SessionActor> ref = sessions.remove(sessionId);
             if (ref != null) {
                 ref.tell(SessionActor::stop);
                 ref.close();
             }
         }
+        userSessions.clear();
     }
 }

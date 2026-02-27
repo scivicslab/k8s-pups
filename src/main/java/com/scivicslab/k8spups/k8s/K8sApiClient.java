@@ -428,15 +428,36 @@ public class K8sApiClient {
     /**
      * Creates a per-user PVC in the user-pods namespace if it does not already exist.
      * The PVC persists across sessions (not deleted on session stop).
+     *
+     * If the PVC already exists with a smaller size, it will be expanded to the
+     * requested size (PVC expansion must be supported by the storage class).
+     *
+     * @param userId      the user identifier
+     * @param storageSize the requested storage size (e.g. "100Gi", "1Ti")
      */
-    public void createUserPvcIfAbsent(String userId) {
+    public void createUserPvcIfAbsent(String userId, String storageSize) {
         String pvcName = userPvcName(userId);
         PersistentVolumeClaim existing = client.persistentVolumeClaims()
             .inNamespace(userPodsNamespace)
             .withName(pvcName)
             .get();
         if (existing != null) {
-            LOG.info("User PVC already exists: " + pvcName);
+            // Check if expansion is needed
+            Quantity currentSize = existing.getSpec().getResources().getRequests().get("storage");
+            Quantity requestedSize = new Quantity(storageSize);
+            if (currentSize != null && compareSizeGi(requestedSize, currentSize) > 0) {
+                try {
+                    LOG.info("Expanding PVC " + pvcName + " from " + currentSize + " to " + storageSize);
+                    existing.getSpec().getResources().getRequests().put("storage", requestedSize);
+                    client.persistentVolumeClaims().inNamespace(userPodsNamespace)
+                        .resource(existing).update();
+                } catch (Exception e) {
+                    LOG.warning("PVC expansion failed for " + pvcName
+                        + " (StorageClass may not support resize): " + e.getMessage());
+                }
+            } else {
+                LOG.info("User PVC already exists: " + pvcName + " (" + currentSize + ")");
+            }
             return;
         }
         PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
@@ -449,12 +470,23 @@ public class K8sApiClient {
             .withNewSpec()
                 .withAccessModes("ReadWriteOnce")
                 .withNewResources()
-                    .addToRequests("storage", new Quantity("20Gi"))
+                    .addToRequests("storage", new Quantity(storageSize))
                 .endResources()
             .endSpec()
             .build();
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
-        LOG.info("User PVC created: " + pvcName);
+        LOG.info("User PVC created: " + pvcName + " (" + storageSize + ")");
+    }
+
+    /**
+     * Compares two Quantity values in GiB.
+     * Returns positive if a > b, negative if a < b, zero if equal.
+     */
+    private int compareSizeGi(Quantity a, Quantity b) {
+        return Double.compare(
+            a.getNumericalAmount().doubleValue(),
+            b.getNumericalAmount().doubleValue()
+        );
     }
 
     // -- Internal --

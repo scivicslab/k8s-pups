@@ -39,7 +39,7 @@ public class GuacamolePlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/guacamole-desktop:3.1.1-2602261515";
+        return "192.168.5.23:32000/guacamole-desktop:3.1.1-2602270319";
     }
 
     @Override
@@ -73,12 +73,14 @@ public class GuacamolePlugin implements ToolPlugin {
     @Override
     public List<ResourceProfile> resourceProfiles() {
         return List.of(
-            new ResourceProfile("light", "Light (1 CPU / 2 GB)",
+            new ResourceProfile("light", "Light (1 CPU / 2 GB / 100 GB)",
                 Map.of("cpu", "250m", "memory", "512Mi"),
-                Map.of("cpu", "1", "memory", "2Gi")),
-            new ResourceProfile("standard", "Standard (2 CPU / 4 GB)",
+                Map.of("cpu", "1", "memory", "2Gi"),
+                "100Gi"),
+            new ResourceProfile("standard", "Standard (2 CPU / 4 GB / 1 TB)",
                 Map.of("cpu", "500m", "memory", "1Gi"),
-                Map.of("cpu", "2", "memory", "4Gi"))
+                Map.of("cpu", "2", "memory", "4Gi"),
+                "1Ti")
         );
     }
 

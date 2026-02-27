@@ -61,11 +61,11 @@ public class DashboardResource {
             tools = Collections.emptyList();
         }
 
-        SessionStatus status;
+        List<SessionStatus> userSessions;
         try {
-            status = sm.ask(mgr -> mgr.getSessionStatus(userId)).get();
+            userSessions = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
         } catch (Exception e) {
-            status = null;
+            userSessions = Collections.emptyList();
         }
 
         SessionSummary summary;
@@ -78,7 +78,7 @@ public class DashboardResource {
         Map<String, Object> data = new HashMap<>();
         data.put("userId", userId);
         data.put("tools", tools);
-        data.put("session", status);
+        data.put("sessions", userSessions);
         data.put("summary", summary);
 
         return dashboard.data(data).render();
@@ -113,12 +113,13 @@ public class DashboardResource {
     @POST
     @Path("/session/stop")
     @Authenticated
-    public Response stopSession() {
-        String userId = getCurrentUsername();
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    public Response stopSession(@FormParam("sessionId") String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return Response.seeOther(URI.create("/dashboard?error=missing_session_id")).build();
+        }
         ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
-
-        sm.tell(mgr -> mgr.destroySession(userId));
-
+        sm.tell(mgr -> mgr.destroySession(sessionId));
         return Response.seeOther(URI.create("/dashboard")).build();
     }
 
@@ -131,12 +132,12 @@ public class DashboardResource {
         ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
 
         try {
-            SessionStatus status = sm.ask(mgr -> mgr.getSessionStatus(userId)).get();
-            if (status == null) {
+            List<SessionStatus> statuses = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
+            if (statuses == null || statuses.isEmpty()) {
                 return Response.status(Response.Status.NOT_FOUND).build();
             }
-            sm.tell(mgr -> mgr.touchSession(userId));
-            return Response.ok(status).build();
+            sm.tell(mgr -> mgr.touchUserSessions(userId));
+            return Response.ok(statuses).build();
         } catch (Exception e) {
             return Response.serverError().build();
         }

@@ -47,8 +47,11 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.max-sessions", defaultValue = "100")
     int maxSessions;
 
-    @ConfigProperty(name = "k8spups.max-sessions-per-user", defaultValue = "1")
+    @ConfigProperty(name = "k8spups.max-sessions-per-user", defaultValue = "2")
     int maxSessionsPerUser;
+
+    @ConfigProperty(name = "k8spups.unlimited-users", defaultValue = "")
+    String unlimitedUsersStr;
 
     @ConfigProperty(name = "k8spups.session-oidc.issuer")
     String sessionOidcIssuer;
@@ -92,9 +95,16 @@ public class K8sPupsActorSystem {
             sessionOidcIssuer, sessionOidcAuthorizationEndpoint, sessionOidcTokenEndpoint,
             sessionOidcClientId, sessionOidcSecretName, sessionOidcJwksUri);
 
+        // Parse unlimited users list
+        Set<String> unlimitedUsers = new HashSet<>();
+        for (String u : unlimitedUsersStr.split(",")) {
+            String trimmed = u.trim();
+            if (!trimmed.isEmpty()) unlimitedUsers.add(trimmed);
+        }
+
         // Create SessionManagerActor
         SessionManagerActor manager = new SessionManagerActor(
-            k8sClient, plugins, maxSessions, maxSessionsPerUser, idleTimeoutMinutes);
+            k8sClient, plugins, maxSessions, maxSessionsPerUser, idleTimeoutMinutes, unlimitedUsers);
         sessionManager = actorSystem.actorOf("session-manager", manager);
 
         // Schedule idle timeout checks
