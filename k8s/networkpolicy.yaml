@@ -36,6 +36,8 @@ spec:
           port: 8888
         - protocol: TCP
           port: 8080
+        - protocol: TCP
+          port: 3000
 ---
 # Allow DNS egress (all pods need DNS)
 apiVersion: networking.k8s.io/v1

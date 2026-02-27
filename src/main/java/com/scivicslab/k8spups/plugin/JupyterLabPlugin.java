@@ -80,12 +80,14 @@ public class JupyterLabPlugin implements ToolPlugin {
     @Override
     public List<ResourceProfile> resourceProfiles() {
         return List.of(
-            new ResourceProfile("light", "Light (2 CPU / 4 GB)",
+            new ResourceProfile("light", "Light (2 CPU / 4 GB / 100 GB)",
                 Map.of("cpu", "250m", "memory", "1Gi"),
-                Map.of("cpu", "2", "memory", "4Gi")),
-            new ResourceProfile("standard", "Standard (4 CPU / 8 GB)",
+                Map.of("cpu", "2", "memory", "4Gi"),
+                "100Gi"),
+            new ResourceProfile("standard", "Standard (4 CPU / 8 GB / 1 TB)",
                 Map.of("cpu", "500m", "memory", "2Gi"),
-                Map.of("cpu", "4", "memory", "8Gi"))
+                Map.of("cpu", "4", "memory", "8Gi"),
+                "1Ti")
         );
     }
 

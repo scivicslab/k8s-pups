@@ -52,12 +52,26 @@ public class CoderAgentPlugin implements ToolPlugin {
 
     @Override
     public Map<String, String> resourceRequests() {
-        return Map.of("cpu", "500m", "memory", "1Gi");
+        return Map.of("cpu", "1", "memory", "2Gi");
     }
 
     @Override
     public Map<String, String> resourceLimits() {
-        return Map.of("cpu", "2", "memory", "4Gi");
+        return Map.of("cpu", "2", "memory", "8Gi");
+    }
+
+    @Override
+    public List<ResourceProfile> resourceProfiles() {
+        return List.of(
+            new ResourceProfile("standard", "Standard (2 CPU / 8 GB / 100 GB)",
+                Map.of("cpu", "1", "memory", "2Gi"),
+                Map.of("cpu", "2", "memory", "8Gi"),
+                "100Gi"),
+            new ResourceProfile("large", "Large (2 CPU / 8 GB / 1 TB)",
+                Map.of("cpu", "1", "memory", "2Gi"),
+                Map.of("cpu", "2", "memory", "8Gi"),
+                "1Ti")
+        );
     }
 
     @Override
@@ -68,5 +82,10 @@ public class CoderAgentPlugin implements ToolPlugin {
     @Override
     public String userDataMountPath() {
         return "/home/user";
+    }
+
+    @Override
+    public String readinessProbePath() {
+        return null;
     }
 }

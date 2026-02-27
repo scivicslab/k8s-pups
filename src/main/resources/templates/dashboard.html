@@ -79,13 +79,13 @@
         .session-card {
             background: var(--card); border-radius: var(--radius);
             box-shadow: var(--shadow); border-left: 4px solid var(--orange);
-            padding: 26px 28px; margin-bottom: 32px;
+            padding: 22px 24px; margin-bottom: 14px;
         }
         .session-card-head {
             display: flex; align-items: flex-start;
-            justify-content: space-between; gap: 12px; margin-bottom: 18px;
+            justify-content: space-between; gap: 12px; margin-bottom: 14px;
         }
-        .session-tool-name { font-size: 20px; font-weight: 700; }
+        .session-tool-name { font-size: 18px; font-weight: 700; }
 
         .badge {
             display: inline-flex; align-items: center; gap: 6px;
@@ -105,7 +105,7 @@
 
         .session-meta {
             display: grid; grid-template-columns: max-content 1fr;
-            gap: 6px 18px; font-size: 13px; color: var(--muted); margin-bottom: 22px;
+            gap: 4px 14px; font-size: 13px; color: var(--muted); margin-bottom: 16px;
         }
         .session-meta .lbl { font-weight: 600; color: var(--text); }
         .session-meta code {
@@ -115,7 +115,7 @@
 
         .progress-wrap {
             display: none; background: var(--orange-light);
-            border-radius: 6px; height: 5px; overflow: hidden; margin-bottom: 20px;
+            border-radius: 6px; height: 5px; overflow: hidden; margin-bottom: 14px;
         }
         .progress-fill {
             height: 100%; background: var(--orange); border-radius: 6px;
@@ -127,6 +127,8 @@
             100% { width:5%;  margin-left:95%; }
         }
         .session-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+        .sessions-section { margin-bottom: 32px; }
 
         /* ── Buttons ─────────────────────────────────── */
         .btn {
@@ -220,7 +222,7 @@
 <main>
 
     <div class="error-banner" id="error-banner">
-        ⚠️ セッションの開始に失敗しました。しばらくしてから再試行してください。
+        ⚠️ セッションの開始に失敗しました。上限に達しているか、しばらくしてから再試行してください。
     </div>
 
     {#if summary.total > 0}
@@ -240,30 +242,38 @@
     </div>
     {/if}
 
-    {#if session}
-    <p class="section-label">アクティブセッション</p>
-    <div class="session-card">
-        <div class="session-card-head">
-            <span class="session-tool-name">{session.toolName}</span>
-            <span class="badge badge-{session.state}">{session.state}</span>
-        </div>
-        <div class="session-meta">
-            <span class="lbl">Pod</span>  <code>{session.podName}</code>
-            <span class="lbl">User</span> <span>{session.userId}</span>
-        </div>
-        <div class="progress-wrap" id="progress">
-            <div class="progress-fill"></div>
-        </div>
-        <div class="session-actions">
-            {#if session.accessUrl}
-            <a class="btn btn-open" href="{session.accessUrl}" target="_blank">🚀 ツールを開く</a>
+    {#if !sessions.isEmpty()}
+    <div class="sessions-section">
+        <p class="section-label">アクティブセッション</p>
+        {#for s in sessions}
+        <div class="session-card">
+            <div class="session-card-head">
+                <span class="session-tool-name">{s.toolName}</span>
+                <span class="badge badge-{s.state}">{s.state}</span>
+            </div>
+            <div class="session-meta">
+                <span class="lbl">Pod</span>  <code>{s.podName}</code>
+                <span class="lbl">User</span> <span>{s.userId}</span>
+            </div>
+            {#if s.state.name == 'STARTING' || s.state.name == 'CREATING'}
+            <div class="progress-wrap" style="display:block">
+                <div class="progress-fill"></div>
+            </div>
             {/if}
-            <form method="post" action="session/stop">
-                <button type="submit" class="btn btn-stop">⏹ 停止</button>
-            </form>
+            <div class="session-actions">
+                {#if s.accessUrl}
+                <a class="btn btn-open" href="{s.accessUrl}" target="_blank">🚀 ツールを開く</a>
+                {/if}
+                <form method="post" action="session/stop">
+                    <input type="hidden" name="sessionId" value="{s.sessionId}">
+                    <button type="submit" class="btn btn-stop">⏹ 停止</button>
+                </form>
+            </div>
         </div>
+        {/for}
     </div>
-    {#else}
+    {/if}
+
     <p class="section-label">ツールを起動する</p>
     {#if tools.isEmpty()}
     <div class="empty">
@@ -292,7 +302,6 @@
         {/for}
     </div>
     {/if}
-    {/if}
 
 </main>
 
@@ -300,10 +309,13 @@
     if (new URLSearchParams(location.search).get('error')) {
         document.getElementById('error-banner').style.display = 'block';
     }
-    const state = "{#if session}{session.state}{/if}";
-    if (state === "STARTING" || state === "CREATING") {
-        document.getElementById('progress').style.display = 'block';
-        setTimeout(() => location.reload(), 3000);
+    var hasStarting = false;
+    document.querySelectorAll('.badge').forEach(function(el) {
+        var text = el.textContent.trim();
+        if (text === 'STARTING' || text === 'CREATING') hasStarting = true;
+    });
+    if (hasStarting) {
+        setTimeout(function() { location.reload(); }, 3000);
     }
 </script>
 

@@ -3,6 +3,7 @@ package com.scivicslab.k8spups.actor;
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.k8s.SessionInfo;
 import com.scivicslab.k8spups.plugin.ConnectionType;
+import com.scivicslab.k8spups.plugin.ResourceProfile;
 import com.scivicslab.pojoactor.core.ActorRef;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.Watch;
@@ -48,10 +49,14 @@ public class SessionActor {
         // All subsequent k8s API calls are blocking I/O, which virtual threads handle fine.
         try {
             if (info.toolPlugin().userDataMountPath() != null) {
-                k8sClient.createUserPvcIfAbsent(info.userId());
+                String storageSize = resolveStorageSize();
+                k8sClient.createUserPvcIfAbsent(info.userId(), storageSize);
             }
 
-            k8sClient.createPod(info).get();
+            // Create Pod, Service, and HTTPRoute in parallel.
+            // Service selector matches Pod labels, and HTTPRoute references Service —
+            // neither requires the Pod container to be running, only the Pod object to exist.
+            var podFuture = k8sClient.createPod(info);
 
             k8sClient.createService(info);
 
@@ -65,6 +70,9 @@ public class SessionActor {
                 // TODO: Re-enable after SSO issue is resolved
                 // k8sClient.createSecurityPolicy(info.sessionId(), info.userId());
             }
+
+            // Wait for Pod object to exist before setting up the watch.
+            podFuture.get();
 
             // Route pod watch events through the actor message queue via self.tell(),
             // ensuring onPodEvent runs on the actor's virtual thread (not fabric8's watch thread).
@@ -159,6 +167,19 @@ public class SessionActor {
     }
 
     // -- Internal --
+
+    private String resolveStorageSize() {
+        var profiles = info.toolPlugin().resourceProfiles();
+        String profileName = info.resourceProfile();
+        if (profileName != null) {
+            for (ResourceProfile p : profiles) {
+                if (p.name().equals(profileName)) {
+                    return p.storageSize();
+                }
+            }
+        }
+        return profiles.isEmpty() ? "20Gi" : profiles.get(0).storageSize();
+    }
 
     private void onPodEvent(Watcher.Action action, Pod pod) {
         if (action == Watcher.Action.MODIFIED) {
