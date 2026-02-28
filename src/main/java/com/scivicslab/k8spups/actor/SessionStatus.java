@@ -9,5 +9,6 @@ public record SessionStatus(
     String toolName,
     SessionState state,
     String podName,
-    String accessUrl
+    String accessUrl,
+    String memo
 ) {}

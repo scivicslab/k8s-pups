@@ -151,4 +151,15 @@ public interface ToolPlugin {
     default List<ResourceProfile> resourceProfiles() {
         return List.of(new ResourceProfile("default", "Default", resourceRequests(), resourceLimits()));
     }
+
+    /**
+     * User-provided parameters that are shown as input fields on the dashboard.
+     * Each parameter maps to an environment variable injected into the Pod.
+     * Values are provided by the user at session start time.
+     *
+     * @return list of parameter definitions (default: empty)
+     */
+    default List<UserParameter> userParameters() {
+        return Collections.emptyList();
+    }
 }

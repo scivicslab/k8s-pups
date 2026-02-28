@@ -48,7 +48,8 @@ public class SessionManagerActor {
     public SessionStatus createSession(ActorRef<SessionManagerActor> self,
                                        String userId, String toolName,
                                        List<String> allowedProjects, String labId,
-                                       String resourceProfile) {
+                                       String resourceProfile,
+                                       Map<String, String> userParams) {
         // Check global limit
         if (sessions.size() >= maxSessions) {
             LOG.warning("Max sessions reached: " + maxSessions);
@@ -68,7 +69,11 @@ public class SessionManagerActor {
         }
 
         String sessionId = UUID.randomUUID().toString().substring(0, 12);
-        SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile);
+        // Look up user's storage preference from ConfigMap
+        String storagePref = k8sClient.getUserStoragePreference(userId);
+
+        SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
+            userParams != null ? userParams : Collections.emptyMap(), storagePref);
         SessionActor actor = new SessionActor(info, k8sClient);
 
         // Create as child actor
@@ -82,7 +87,7 @@ public class SessionManagerActor {
         LOG.info("Session created: user=" + userId + ", tool=" + toolName
             + ", session=" + sessionId + " (user total: " + (userCount + 1) + ")");
 
-        return new SessionStatus(sessionId, userId, toolName, SessionState.STARTING, info.podName(), null);
+        return new SessionStatus(sessionId, userId, toolName, SessionState.STARTING, info.podName(), null, "");
     }
 
     /**
@@ -126,6 +131,16 @@ public class SessionManagerActor {
             }
         }
         return result;
+    }
+
+    /**
+     * Update the memo text for a session.
+     */
+    public void updateMemo(String sessionId, String memo) {
+        ActorRef<SessionActor> ref = sessions.get(sessionId);
+        if (ref != null) {
+            ref.tell(sa -> sa.setMemo(memo));
+        }
     }
 
     /**
@@ -216,6 +231,29 @@ public class SessionManagerActor {
      */
     public Set<String> getSessionIds() {
         return new HashSet<>(sessions.keySet());
+    }
+
+    /** Returns information about a user's PVC. */
+    public Map<String, String> getUserPvcInfo(String userId) {
+        return k8sClient.getUserPvcInfo(userId);
+    }
+
+    /** Returns the user's storage size preference, or null if not set. */
+    public String getUserStoragePreference(String userId) {
+        return k8sClient.getUserStoragePreference(userId);
+    }
+
+    /** Saves the user's storage size preference. */
+    public void saveUserStoragePreference(String userId, String storageSize) {
+        k8sClient.saveUserStoragePreference(userId, storageSize);
+    }
+
+    /**
+     * Expands the user's PVC to the given size if it exists and is smaller.
+     * Creates the PVC if it does not exist.
+     */
+    public void expandUserPvc(String userId, String storageSize) {
+        k8sClient.createUserPvcIfAbsent(userId, storageSize);
     }
 
     /**

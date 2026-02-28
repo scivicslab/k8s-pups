@@ -401,6 +401,21 @@ public class K8sApiClient {
     }
 
     /**
+     * Returns sessionIds of all Services in userPodsNamespace created by k8s-pups.
+     */
+    public List<String> listManagedServiceSessionIds() {
+        return client.services()
+            .inNamespace(userPodsNamespace)
+            .withLabelSelector(MANAGED_BY_LABEL)
+            .list()
+            .getItems()
+            .stream()
+            .map(s -> s.getMetadata().getLabels().get("session"))
+            .filter(Objects::nonNull)
+            .toList();
+    }
+
+    /**
      * Returns sessionIds of all SecurityPolicies in httpRouteNamespace created by k8s-pups.
      */
     public List<String> listManagedSecurityPolicySessionIds() {
@@ -479,6 +494,87 @@ public class K8sApiClient {
     }
 
     /**
+     * Returns information about a user's PVC.
+     *
+     * @param userId the user identifier
+     * @return map with "exists", "size", "phase" keys
+     */
+    public Map<String, String> getUserPvcInfo(String userId) {
+        String pvcName = userPvcName(userId);
+        PersistentVolumeClaim pvc = client.persistentVolumeClaims()
+            .inNamespace(userPodsNamespace)
+            .withName(pvcName)
+            .get();
+        if (pvc == null) {
+            return Map.of("exists", "false");
+        }
+        Quantity size = pvc.getSpec().getResources().getRequests().get("storage");
+        String phase = pvc.getStatus() != null && pvc.getStatus().getPhase() != null
+            ? pvc.getStatus().getPhase() : "Unknown";
+        return Map.of("exists", "true",
+            "size", size != null ? size.toString() : "0",
+            "phase", phase);
+    }
+
+    /**
+     * Reads the user's storage size preference from their ConfigMap.
+     *
+     * @param userId the user identifier
+     * @return the preferred storage size (e.g. "100Gi"), or null if not set
+     */
+    public String getUserStoragePreference(String userId) {
+        String cmName = userPrefsConfigMapName(userId);
+        ConfigMap cm = client.configMaps()
+            .inNamespace(userPodsNamespace)
+            .withName(cmName)
+            .get();
+        if (cm == null || cm.getData() == null) {
+            return null;
+        }
+        return cm.getData().get("storageSize");
+    }
+
+    /**
+     * Saves the user's storage size preference to a ConfigMap.
+     * Creates the ConfigMap if it does not exist.
+     *
+     * @param userId      the user identifier
+     * @param storageSize the storage size (e.g. "100Gi", "500Gi")
+     */
+    public void saveUserStoragePreference(String userId, String storageSize) {
+        String cmName = userPrefsConfigMapName(userId);
+        ConfigMap existing = client.configMaps()
+            .inNamespace(userPodsNamespace)
+            .withName(cmName)
+            .get();
+        if (existing != null) {
+            if (existing.getData() == null) {
+                existing.setData(new HashMap<>());
+            }
+            existing.getData().put("storageSize", storageSize);
+            client.configMaps().inNamespace(userPodsNamespace)
+                .resource(existing).update();
+        } else {
+            ConfigMap cm = new ConfigMapBuilder()
+                .withNewMetadata()
+                    .withName(cmName)
+                    .withNamespace(userPodsNamespace)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                .endMetadata()
+                .addToData("storageSize", storageSize)
+                .build();
+            client.configMaps().inNamespace(userPodsNamespace).resource(cm).create();
+        }
+        LOG.info("Saved storage preference for " + userId + ": " + storageSize);
+    }
+
+    private String userPrefsConfigMapName(String userId) {
+        return "pups-prefs-" + userId.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+    }
+
+    /**
      * Compares two Quantity values in GiB.
      * Returns positive if a > b, negative if a < b, zero if equal.
      */
@@ -530,6 +626,18 @@ public class K8sApiClient {
             .withName("PUPS_SESSION_PATH")
             .withValue("/session/" + info.sessionId() + "/")
             .build());
+
+        // Inject user-provided parameters as env vars (e.g. API keys)
+        if (info.userParams() != null) {
+            for (var entry : info.userParams().entrySet()) {
+                if (entry.getValue() != null && !entry.getValue().isBlank()) {
+                    envVars.add(new EnvVarBuilder()
+                        .withName(entry.getKey())
+                        .withValue(entry.getValue())
+                        .build());
+                }
+            }
+        }
 
         // Build resource requirements from selected profile
         ResourceProfile profile = resolveProfile(plugin, info.resourceProfile());

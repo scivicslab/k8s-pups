@@ -53,6 +53,12 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.unlimited-users", defaultValue = "")
     String unlimitedUsersStr;
 
+    @ConfigProperty(name = "k8spups.storage-size-options", defaultValue = "20Gi,50Gi,100Gi,500Gi,1Ti")
+    List<String> storageSizeOptions;
+
+    @ConfigProperty(name = "k8spups.default-storage-size", defaultValue = "100Gi")
+    String defaultStorageSize;
+
     @ConfigProperty(name = "k8spups.session-oidc.issuer")
     String sessionOidcIssuer;
 
@@ -147,6 +153,8 @@ public class K8sPupsActorSystem {
             // Collect all session IDs present in k8s across all resource types (in parallel)
             CompletableFuture<List<String>> podsFuture = CompletableFuture.supplyAsync(
                 k8sClient::listManagedPodSessionIds);
+            CompletableFuture<List<String>> servicesFuture = CompletableFuture.supplyAsync(
+                k8sClient::listManagedServiceSessionIds);
             CompletableFuture<List<String>> routesFuture = CompletableFuture.supplyAsync(
                 k8sClient::listManagedHTTPRouteSessionIds);
             CompletableFuture<List<String>> policiesFuture = CompletableFuture.supplyAsync(
@@ -154,6 +162,7 @@ public class K8sPupsActorSystem {
 
             Set<String> k8sSessions = new HashSet<>();
             k8sSessions.addAll(podsFuture.get(10, TimeUnit.SECONDS));
+            k8sSessions.addAll(servicesFuture.get(10, TimeUnit.SECONDS));
             k8sSessions.addAll(routesFuture.get(10, TimeUnit.SECONDS));
             k8sSessions.addAll(policiesFuture.get(10, TimeUnit.SECONDS));
 
@@ -190,5 +199,13 @@ public class K8sPupsActorSystem {
 
     public ActorRef<SessionManagerActor> getSessionManager() {
         return sessionManager;
+    }
+
+    public List<String> getStorageSizeOptions() {
+        return storageSizeOptions;
+    }
+
+    public String getDefaultStorageSize() {
+        return defaultStorageSize;
     }
 }
