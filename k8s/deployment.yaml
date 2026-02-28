@@ -16,7 +16,7 @@ spec:
       serviceAccountName: vault-auth
       containers:
         - name: k8s-pups
-          image: 192.168.5.23:32000/k8s-pups:0.1.0-2602281132
+          image: 192.168.5.23:32000/k8s-pups:0.1.0-2602281244
           command:
             - /bin/sh
             - -c
@@ -31,6 +31,11 @@ spec:
           env:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: "http://keycloak-set2.sc-account-bg.svc:8080/sc-account-keycloak/realms/sc-account"
+            - name: K8SPUPS_WORKSPACE_LDAP_BIND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: k8s-pups-ldap-secret
+                  key: bind-password
           volumeMounts:
             - name: vault-secrets
               mountPath: /vault/secrets

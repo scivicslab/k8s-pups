@@ -16,15 +16,17 @@ public record SessionInfo(
     String labId,
     String resourceProfile,
     Map<String, String> userParams,
-    String userStoragePreference
+    String userStoragePreference,
+    WorkspaceInfo workspaceInfo
 ) {
     /**
-     * Backward-compatible constructor (no storage preference).
+     * Backward-compatible constructor (no workspace info).
      */
     public SessionInfo(String sessionId, String userId, ToolPlugin toolPlugin,
                        List<String> allowedProjects, String labId, String resourceProfile,
-                       Map<String, String> userParams) {
-        this(sessionId, userId, toolPlugin, allowedProjects, labId, resourceProfile, userParams, null);
+                       Map<String, String> userParams, String userStoragePreference) {
+        this(sessionId, userId, toolPlugin, allowedProjects, labId, resourceProfile,
+            userParams, userStoragePreference, null);
     }
 
     /**
@@ -32,7 +34,8 @@ public record SessionInfo(
      */
     public SessionInfo(String sessionId, String userId, ToolPlugin toolPlugin,
                        List<String> allowedProjects, String labId, String resourceProfile) {
-        this(sessionId, userId, toolPlugin, allowedProjects, labId, resourceProfile, Collections.emptyMap(), null);
+        this(sessionId, userId, toolPlugin, allowedProjects, labId, resourceProfile,
+            Collections.emptyMap(), null, null);
     }
 
     public String podName() {

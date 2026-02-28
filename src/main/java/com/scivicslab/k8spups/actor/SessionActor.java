@@ -4,6 +4,7 @@ import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.k8s.SessionInfo;
 import com.scivicslab.k8spups.plugin.ConnectionType;
 import com.scivicslab.k8spups.plugin.ResourceProfile;
+import com.scivicslab.k8spups.plugin.ToolPlugin;
 import com.scivicslab.pojoactor.core.ActorRef;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.Watch;
@@ -49,7 +50,25 @@ public class SessionActor {
         // while the ForkJoinPool creates the Pod, then resumes here when done.
         // All subsequent k8s API calls are blocking I/O, which virtual threads handle fine.
         try {
-            if (info.toolPlugin().userDataMountPath() != null) {
+            ToolPlugin plugin = info.toolPlugin();
+            boolean workspaceActive = plugin.workspaceEnabled() && info.workspaceInfo() != null;
+            String workspaceMountTarget = null;
+            if (workspaceActive) {
+                workspaceMountTarget = plugin.workspaceMountPath() != null
+                    ? plugin.workspaceMountPath()
+                    : plugin.userDataMountPath();
+            }
+            boolean workspaceReplacesUserData = workspaceActive
+                && workspaceMountTarget != null
+                && workspaceMountTarget.equals(plugin.userDataMountPath());
+
+            // Create workspace NFS PV/PVC if needed
+            if (workspaceActive) {
+                k8sClient.createWorkspacePvPvcIfAbsent(info.userId(), info.workspaceInfo());
+            }
+
+            // Create per-user PVC if needed (skipped when workspace replaces it)
+            if (plugin.userDataMountPath() != null && !workspaceReplacesUserData) {
                 String storageSize = resolveStorageSize();
                 k8sClient.createUserPvcIfAbsent(info.userId(), storageSize);
             }

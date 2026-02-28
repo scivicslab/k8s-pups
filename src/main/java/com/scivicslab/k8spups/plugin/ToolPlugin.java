@@ -164,20 +164,31 @@ public interface ToolPlugin {
     }
 
     /**
-     * Name of a pre-existing PVC to mount as a workspace volume.
-     * Unlike userDataMountPath() which creates a per-user PVC, this mounts an
-     * already-provisioned PVC (e.g. an NFS share of the user's home directory).
-     * Return null (default) to skip.
+     * Whether this tool supports workspace (NFS home directory) mounting.
+     * When true and the user has a POSIX account in LDAP, the user's home directory
+     * is mounted via NFS. If false or the user has no POSIX account, the standard
+     * per-user PVC (userDataMountPath) is used instead.
      */
-    default String workspacePvcName() {
+    default boolean workspaceEnabled() {
+        return false;
+    }
+
+    /**
+     * Mount path for the workspace (NFS home directory) inside the container.
+     * Only used when workspaceEnabled() is true.
+     * If null, defaults to userDataMountPath() — workspace replaces the per-user PVC.
+     */
+    default String workspaceMountPath() {
         return null;
     }
 
     /**
-     * Mount path for the workspace PVC inside the container.
-     * Only used when workspacePvcName() is non-null.
+     * Sub-path within the user's NFS home directory to mount.
+     * Only used when workspaceEnabled() is true.
+     * If null, the entire home directory is mounted.
+     * E.g. "works" to mount only ~/works at workspaceMountPath().
      */
-    default String workspaceMountPath() {
+    default String workspaceSubPath() {
         return null;
     }
 }

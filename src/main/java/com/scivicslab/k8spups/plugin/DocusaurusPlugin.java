@@ -4,11 +4,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Docusaurus preview plugin (provisional version).
- * Mounts the user's ~/works directory via NFS PVC and runs yarn start
+ * Docusaurus preview plugin.
+ * Mounts the user's ~/works directory via NFS workspace and runs yarn start
  * on a specified Docusaurus project path.
  *
- * UID is fixed to 1002 (devteam). Multi-user support will be added later.
+ * UID/GID are determined dynamically from LDAP (POSIX account).
  */
 public class DocusaurusPlugin implements ToolPlugin {
 
@@ -19,7 +19,7 @@ public class DocusaurusPlugin implements ToolPlugin {
 
     @Override
     public String displayName() {
-        return "Docusaurus (Provisional)";
+        return "Docusaurus";
     }
 
     @Override
@@ -49,15 +49,15 @@ public class DocusaurusPlugin implements ToolPlugin {
 
     @Override
     public Map<String, String> resourceLimits() {
-        return Map.of("cpu", "1", "memory", "1Gi");
+        return Map.of("cpu", "1", "memory", "2Gi");
     }
 
     @Override
     public List<ResourceProfile> resourceProfiles() {
         return List.of(
-            new ResourceProfile("standard", "Standard (1 CPU / 1 GB)",
+            new ResourceProfile("standard", "Standard (1 CPU / 2 GB)",
                 Map.of("cpu", "100m", "memory", "256Mi"),
-                Map.of("cpu", "1", "memory", "1Gi"))
+                Map.of("cpu", "1", "memory", "2Gi"))
         );
     }
 
@@ -67,18 +67,19 @@ public class DocusaurusPlugin implements ToolPlugin {
     }
 
     @Override
-    public Long runAsUser() {
-        return 1002L;
-    }
-
-    @Override
-    public String workspacePvcName() {
-        return "devteam-works-pvc";
+    public boolean workspaceEnabled() {
+        return true;
     }
 
     @Override
     public String workspaceMountPath() {
         return "/workspace";
+    }
+
+    @Override
+    public String workspaceSubPath() {
+        // Mount only ~/works from the user's NFS home directory.
+        return "works";
     }
 
     @Override

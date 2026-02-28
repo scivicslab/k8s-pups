@@ -1,6 +1,7 @@
 package com.scivicslab.k8spups.actor;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
+import com.scivicslab.k8spups.k8s.LdapUserInfoClient;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.pojoactor.core.ActorSystem;
@@ -77,6 +78,25 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.session-oidc.jwks-uri")
     String sessionOidcJwksUri;
 
+    // Workspace (LDAP + NFS) config
+    @ConfigProperty(name = "k8spups.workspace.ldap.url", defaultValue = "")
+    String workspaceLdapUrl;
+
+    @ConfigProperty(name = "k8spups.workspace.ldap.base-dn", defaultValue = "")
+    String workspaceLdapBaseDn;
+
+    @ConfigProperty(name = "k8spups.workspace.ldap.bind-dn", defaultValue = "")
+    String workspaceLdapBindDn;
+
+    @ConfigProperty(name = "k8spups.workspace.ldap.bind-password", defaultValue = "")
+    String workspaceLdapBindPassword;
+
+    @ConfigProperty(name = "k8spups.workspace.nfs.server", defaultValue = "")
+    String workspaceNfsServer;
+
+    @ConfigProperty(name = "k8spups.workspace.nfs.base-path", defaultValue = "/Public/Users")
+    String workspaceNfsBasePath;
+
     private ActorSystem actorSystem;
     private ActorRef<SessionManagerActor> sessionManager;
     private Scheduler scheduler;
@@ -99,7 +119,18 @@ public class K8sPupsActorSystem {
         // Create K8sApiClient
         k8sClient = new K8sApiClient(userPodsNamespace, httpRouteNamespace, gatewayNames,
             sessionOidcIssuer, sessionOidcAuthorizationEndpoint, sessionOidcTokenEndpoint,
-            sessionOidcClientId, sessionOidcSecretName, sessionOidcJwksUri);
+            sessionOidcClientId, sessionOidcSecretName, sessionOidcJwksUri,
+            workspaceNfsServer, workspaceNfsBasePath);
+
+        // Create LdapUserInfoClient for workspace mounting (null if not configured)
+        LdapUserInfoClient ldapClient = null;
+        if (!workspaceLdapUrl.isBlank() && !workspaceLdapBindPassword.isBlank()) {
+            ldapClient = new LdapUserInfoClient(
+                workspaceLdapUrl, workspaceLdapBaseDn, workspaceLdapBindDn, workspaceLdapBindPassword);
+            LOG.info("Workspace LDAP client configured: " + workspaceLdapUrl);
+        } else {
+            LOG.info("Workspace LDAP not configured; workspace mounting disabled");
+        }
 
         // Parse unlimited users list
         Set<String> unlimitedUsers = new HashSet<>();
@@ -110,7 +141,8 @@ public class K8sPupsActorSystem {
 
         // Create SessionManagerActor
         SessionManagerActor manager = new SessionManagerActor(
-            k8sClient, plugins, maxSessions, maxSessionsPerUser, idleTimeoutMinutes, unlimitedUsers);
+            k8sClient, plugins, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
+            unlimitedUsers, ldapClient);
         sessionManager = actorSystem.actorOf("session-manager", manager);
 
         // Schedule idle timeout checks
