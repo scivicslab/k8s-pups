@@ -18,16 +18,20 @@ RUN apt-get update && \
 RUN corepack enable && corepack prepare yarn@stable --activate
 ENV COREPACK_ENABLE_NETWORK=0
 
-# Create devteam user with uid/gid 1002 (matching NFS host)
-RUN groupadd -g 1002 devteam && \
-    useradd -u 1002 -g 1002 -m -s /bin/bash devteam
+# Create default user with uid/gid 1000 (Ubuntu already has group 1000)
+RUN groupadd -g 1000 appuser 2>/dev/null || true && \
+    useradd -u 1000 -g 1000 -m -s /bin/bash -d /home/user appuser 2>/dev/null || true
+
+# Allow arbitrary UID to add passwd/group entries at runtime (for NFS workspace mode)
+RUN chmod 666 /etc/passwd /etc/group
 
 # Create workspace mount point
-RUN mkdir -p /workspace && chown 1002:1002 /workspace
+RUN mkdir -p /workspace && chmod 777 /workspace
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-USER devteam
+USER 1000
 WORKDIR /workspace
 
 EXPOSE 3000

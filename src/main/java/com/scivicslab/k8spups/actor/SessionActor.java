@@ -167,7 +167,7 @@ public class SessionActor {
         return new SessionStatus(
             info.sessionId(),
             info.userId(),
-            info.toolPlugin().name(),
+            info.toolPlugin().displayName(),
             state,
             info.podName(),
             url,

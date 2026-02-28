@@ -6,6 +6,18 @@
 
 set -euo pipefail
 
+# Add passwd/group entries for arbitrary UID (NFS workspace mode)
+CURRENT_UID=$(id -u)
+CURRENT_GID=$(id -g)
+if ! id -un "$CURRENT_UID" >/dev/null 2>&1; then
+    echo "appuser:x:${CURRENT_UID}:${CURRENT_GID}:App User:${HOME}:/bin/bash" >> /etc/passwd
+    echo "Added passwd entry for UID ${CURRENT_UID}"
+fi
+if ! getent group "$CURRENT_GID" >/dev/null 2>&1; then
+    echo "appuser:x:${CURRENT_GID}:" >> /etc/group
+    echo "Added group entry for GID ${CURRENT_GID}"
+fi
+
 if [ -z "${DOCUSAURUS_PATH:-}" ]; then
     echo "ERROR: DOCUSAURUS_PATH is not set." >&2
     exit 1
