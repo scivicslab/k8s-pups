@@ -28,11 +28,6 @@ public class GuacamolePlugin implements ToolPlugin {
     }
 
     @Override
-    public String icon() {
-        return "🖥️";
-    }
-
-    @Override
     public String description() {
         return "Browser-based remote Linux desktop via Apache Guacamole. Full GUI environment accessible from any browser without a VNC client.";
     }

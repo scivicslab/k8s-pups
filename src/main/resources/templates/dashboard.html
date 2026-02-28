@@ -170,7 +170,8 @@
             border-color: var(--orange-border);
             box-shadow: var(--shadow-hover); transform: translateY(-3px);
         }
-        .tool-icon { font-size: 40px; line-height: 1; margin-bottom: 14px; }
+        .tool-icon { width: 48px; height: 48px; margin-bottom: 14px; }
+        .tool-icon img { width: 100%; height: 100%; object-fit: contain; }
         .tool-name  { font-size: 17px; font-weight: 700; margin-bottom: 7px; }
         .tool-desc  { font-size: 13px; color: var(--muted); line-height: 1.6; flex: 1; margin-bottom: 20px; }
         .tool-card form { margin: 0; }
@@ -296,7 +297,7 @@
     <div class="tools-grid">
         <!-- Storage Settings card -->
         <div class="tool-card" style="border-left: 4px solid var(--orange);">
-            <div class="tool-icon">💾</div>
+            <div class="tool-icon"><img src="icons/storage.png" alt="Storage Settings"></div>
             <div class="tool-name">Storage Settings</div>
             <div class="tool-desc">
                 Configure the persistent disk size for your tool pods.
@@ -319,7 +320,7 @@
         </div>
         {#for tool in tools}
         <div class="tool-card">
-            <div class="tool-icon">{tool.icon}</div>
+            <div class="tool-icon"><img src="{tool.icon}" alt="{tool.displayName}"></div>
             <div class="tool-name">{tool.displayName}</div>
             <div class="tool-desc">{tool.description}</div>
             <form method="post" action="session/start">

@@ -26,9 +26,9 @@ public interface ToolPlugin {
     /** Whether the tool is accessed via HTTP (Ingress) or VNC (Guacamole). */
     ConnectionType connectionType();
 
-    /** Emoji icon displayed on the dashboard tool card. */
+    /** Icon path (relative to static resources root) displayed on the dashboard tool card. */
     default String icon() {
-        return "🔧";
+        return "icons/" + name() + ".png";
     }
 
     /** Short description displayed on the dashboard tool card. */

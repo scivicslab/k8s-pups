@@ -17,11 +17,6 @@ public class CoderAgentPlugin implements ToolPlugin {
     }
 
     @Override
-    public String icon() {
-        return "🤖";
-    }
-
-    @Override
     public String description() {
         return "AI-powered coding assistant using local vLLM servers.";
     }

@@ -30,11 +30,6 @@ public class JupyterLabPlugin implements ToolPlugin {
     }
 
     @Override
-    public String icon() {
-        return "📓";
-    }
-
-    @Override
     public String description() {
         return "Interactive notebooks for data analysis, visualization, and scientific computing with Python (NumPy, Pandas, Matplotlib and more).";
     }
