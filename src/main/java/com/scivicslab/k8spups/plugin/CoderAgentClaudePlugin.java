@@ -1,34 +1,33 @@
 package com.scivicslab.k8spups.plugin;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-public class CoderAgentPlugin implements ToolPlugin {
+public class CoderAgentClaudePlugin implements ToolPlugin {
 
     @Override
     public String name() {
-        return "coder-agent";
+        return "coder-agent-claude";
     }
 
     @Override
     public String displayName() {
-        return "Coding Agent (Local LLM)";
+        return "Coding Agent (Claude)";
     }
 
     @Override
     public String icon() {
-        return "🤖";
+        return "🧠";
     }
 
     @Override
     public String description() {
-        return "AI-powered coding assistant using local vLLM servers.";
+        return "AI-powered coding assistant using Claude Code.";
     }
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/quarkus-coder-agent:1.0.2-2602280935";
+        return "192.168.5.23:32000/quarkus-coder-agent-claude:1.0.2-2602280858";
     }
 
     @Override
@@ -44,10 +43,10 @@ public class CoderAgentPlugin implements ToolPlugin {
     @Override
     public Map<String, String> environmentVariables() {
         return Map.of(
-            "CODER_AGENT_MODE", "local-llm",
-            "CODER_AGENT_LLM_SERVERS", "http://192.168.5.15:8000,http://192.168.5.13:8000",
+            "CODER_AGENT_MODE", "claude",
             "HOME", "/home/user",
-            "CODER_AGENT_LLM_WORKING_DIR", "/home/user"
+            "CODER_AGENT_LLM_WORKING_DIR", "/home/user",
+            "CODER_AGENT_TITLE", "Coding Agent (Claude)"
         );
     }
 
@@ -72,8 +71,11 @@ public class CoderAgentPlugin implements ToolPlugin {
     }
 
     @Override
-    public List<String> writablePaths() {
-        return Collections.emptyList();
+    public List<UserParameter> userParameters() {
+        return List.of(
+            new UserParameter("ANTHROPIC_API_KEY", "Anthropic API Key",
+                "sk-ant-... (optional if OIDC authenticated)", true, false)
+        );
     }
 
     @Override

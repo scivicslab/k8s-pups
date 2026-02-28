@@ -12,8 +12,8 @@ metadata:
   namespace: user-pods
 rules:
   - apiGroups: [""]
-    resources: ["pods", "services", "persistentvolumeclaims"]
-    verbs: ["create", "delete", "get", "list", "watch"]
+    resources: ["pods", "services", "persistentvolumeclaims", "configmaps"]
+    verbs: ["create", "delete", "get", "list", "watch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

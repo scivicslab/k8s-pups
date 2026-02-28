@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -128,6 +128,15 @@
         }
         .session-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
+        .memo-input {
+            width: 100%; padding: 4px 8px; border-radius: 6px;
+            border: 1.5px solid var(--border); font-size: 13px;
+            color: var(--text); background: var(--bg); outline: none;
+            transition: border-color .15s ease;
+        }
+        .memo-input:focus { border-color: var(--orange); }
+        .memo-input::placeholder { color: #94A3B8; }
+
         .sessions-section { margin-bottom: 32px; }
 
         /* ── Buttons ─────────────────────────────────── */
@@ -222,29 +231,29 @@
 <main>
 
     <div class="error-banner" id="error-banner">
-        ⚠️ セッションの開始に失敗しました。上限に達しているか、しばらくしてから再試行してください。
+        Failed to start session. You may have reached the limit, or please try again later.
     </div>
 
     {#if summary.total > 0}
     <div class="status-bar active">
         <span class="status-dot"></span>
-        <span>{summary.total} セッション稼働中</span>
+        <span>{summary.total} session(s) active</span>
         <div class="status-counts">
             {#if summary.ready > 0}<span>READY: {summary.ready}</span>{/if}
-            {#if summary.starting > 0}<span>起動中: {summary.starting}</span>{/if}
+            {#if summary.starting > 0}<span>STARTING: {summary.starting}</span>{/if}
             {#if summary.failed > 0}<span>FAILED: {summary.failed}</span>{/if}
         </div>
     </div>
     {#else}
     <div class="status-bar idle">
         <span class="status-dot"></span>
-        <span>全セッション停止中</span>
+        <span>All sessions stopped</span>
     </div>
     {/if}
 
     {#if !sessions.isEmpty()}
     <div class="sessions-section">
-        <p class="section-label">アクティブセッション</p>
+        <p class="section-label">Active Sessions</p>
         {#for s in sessions}
         <div class="session-card">
             <div class="session-card-head">
@@ -254,6 +263,9 @@
             <div class="session-meta">
                 <span class="lbl">Pod</span>  <code>{s.podName}</code>
                 <span class="lbl">User</span> <span>{s.userId}</span>
+                <span class="lbl">Memo</span>
+                <input type="text" value="{s.memo}" placeholder="Add memo..."
+                       class="memo-input" data-session-id="{s.sessionId}">
             </div>
             {#if s.state.name == 'STARTING' || s.state.name == 'CREATING'}
             <div class="progress-wrap" style="display:block">
@@ -262,11 +274,11 @@
             {/if}
             <div class="session-actions">
                 {#if s.accessUrl}
-                <a class="btn btn-open" href="{s.accessUrl}" target="_blank">🚀 ツールを開く</a>
+                <a class="btn btn-open" href="{s.accessUrl}" target="_blank">Open Tool</a>
                 {/if}
                 <form method="post" action="session/stop">
                     <input type="hidden" name="sessionId" value="{s.sessionId}">
-                    <button type="submit" class="btn btn-stop">⏹ 停止</button>
+                    <button type="submit" class="btn btn-stop">Stop</button>
                 </form>
             </div>
         </div>
@@ -274,14 +286,37 @@
     </div>
     {/if}
 
-    <p class="section-label">ツールを起動する</p>
+    <p class="section-label">Launch a Tool</p>
     {#if tools.isEmpty()}
     <div class="empty">
         <div class="icon">🔌</div>
-        <p>利用可能なツールがありません。管理者に連絡してください。</p>
+        <p>No tools available. Please contact an administrator.</p>
     </div>
     {#else}
     <div class="tools-grid">
+        <!-- Storage Settings card -->
+        <div class="tool-card" style="border-left: 4px solid var(--orange);">
+            <div class="tool-icon">💾</div>
+            <div class="tool-name">Storage Settings</div>
+            <div class="tool-desc">
+                Configure the persistent disk size for your tool pods.
+                {#if pvcInfo.get('exists') == 'true'}
+                <br><br>
+                <strong>Current PVC:</strong> {pvcInfo.get('size')} ({pvcInfo.get('phase')})
+                {#else}
+                <br><br>
+                <em>No PVC yet. It will be created when you launch a tool.</em>
+                {/if}
+            </div>
+            <form method="post" action="storage/save">
+                <select name="storageSize" class="profile-select">
+                    {#for opt in storageSizeOptions}
+                    <option value="{opt}" {#if opt == currentStorageSize}selected{/if}>{opt}</option>
+                    {/for}
+                </select>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </form>
+        </div>
         {#for tool in tools}
         <div class="tool-card">
             <div class="tool-icon">{tool.icon}</div>
@@ -296,7 +331,15 @@
                     {/for}
                 </select>
                 {/if}
-                <button type="submit" class="btn btn-primary">▶ 起動する</button>
+                {#for param in tool.userParameters}
+                <input type="{#if param.secret}password{#else}text{/if}"
+                       name="userParam_{param_index}"
+                       placeholder="{param.label}"
+                       class="profile-select"
+                       style="margin-top:6px;font-size:0.85rem;"
+                       {#if param.required}required{/if}>
+                {/for}
+                <button type="submit" class="btn btn-primary">Launch</button>
             </form>
         </div>
         {/for}
@@ -317,6 +360,21 @@
     if (hasStarting) {
         setTimeout(function() { location.reload(); }, 3000);
     }
+    document.querySelectorAll('.memo-input').forEach(function(input) {
+        var original = input.value;
+        input.addEventListener('blur', function() {
+            if (input.value === original) return;
+            original = input.value;
+            var body = 'sessionId=' + encodeURIComponent(input.dataset.sessionId)
+                     + '&memo=' + encodeURIComponent(input.value);
+            fetch('session/memo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body,
+                redirect: 'follow'
+            });
+        });
+    });
 </script>
 
 </body>

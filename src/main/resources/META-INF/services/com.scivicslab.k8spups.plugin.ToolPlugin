@@ -1,3 +1,5 @@
-com.scivicslab.k8spups.plugin.CoderAgentPlugin
 com.scivicslab.k8spups.plugin.GuacamolePlugin
 com.scivicslab.k8spups.plugin.JupyterLabPlugin
+com.scivicslab.k8spups.plugin.CoderAgentPlugin
+com.scivicslab.k8spups.plugin.CoderAgentClaudePlugin
+com.scivicslab.k8spups.plugin.CoderAgentCodexPlugin

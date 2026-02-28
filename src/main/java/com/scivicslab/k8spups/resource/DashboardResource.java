@@ -5,6 +5,7 @@ import com.scivicslab.k8spups.actor.SessionManagerActor;
 import com.scivicslab.k8spups.actor.SessionStatus;
 import com.scivicslab.k8spups.actor.SessionSummary;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
+import com.scivicslab.k8spups.plugin.UserParameter;
 import com.scivicslab.pojoactor.core.ActorRef;
 
 import io.quarkus.oidc.IdToken;
@@ -75,11 +76,24 @@ public class DashboardResource {
             summary = new SessionSummary(0, 0, 0, 0);
         }
 
+        // Storage settings
+        String userStoragePref = null;
+        Map<String, String> pvcInfo = Map.of("exists", "false");
+        try {
+            userStoragePref = sm.ask(mgr -> mgr.getUserStoragePreference(userId)).get();
+            pvcInfo = sm.ask(mgr -> mgr.getUserPvcInfo(userId)).get();
+        } catch (Exception e) {
+            LOG.warning("Failed to load storage info: " + e.getMessage());
+        }
+
         Map<String, Object> data = new HashMap<>();
         data.put("userId", userId);
         data.put("tools", tools);
         data.put("sessions", userSessions);
         data.put("summary", summary);
+        data.put("storageSizeOptions", actorSystem.getStorageSizeOptions());
+        data.put("currentStorageSize", userStoragePref != null ? userStoragePref : actorSystem.getDefaultStorageSize());
+        data.put("pvcInfo", pvcInfo);
 
         return dashboard.data(data).render();
     }
@@ -89,13 +103,20 @@ public class DashboardResource {
     @Authenticated
     @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
     public Response startSession(@FormParam("tool") String toolName,
-                                  @FormParam("profile") String profile) {
+                                  @FormParam("profile") String profile,
+                                  @FormParam("userParam_0") String userParam0,
+                                  @FormParam("userParam_1") String userParam1,
+                                  @FormParam("userParam_2") String userParam2) {
         String userId = getCurrentUsername();
         ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
 
+        // Resolve user-provided parameters to env var name -> value map
+        Map<String, String> userParams = resolveUserParams(
+            toolName, userParam0, userParam1, userParam2);
+
         try {
             SessionStatus status = sm.ask(mgr ->
-                mgr.createSession(sm, userId, toolName, Collections.emptyList(), null, profile)
+                mgr.createSession(sm, userId, toolName, Collections.emptyList(), null, profile, userParams)
             ).get();
 
             if (status == null) {
@@ -123,6 +144,20 @@ public class DashboardResource {
         return Response.seeOther(URI.create("/dashboard")).build();
     }
 
+    @POST
+    @Path("/session/memo")
+    @Authenticated
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    public Response updateMemo(@FormParam("sessionId") String sessionId,
+                               @FormParam("memo") String memo) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return Response.seeOther(URI.create("/dashboard")).build();
+        }
+        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        sm.tell(mgr -> mgr.updateMemo(sessionId, memo != null ? memo.strip() : ""));
+        return Response.seeOther(URI.create("/dashboard")).build();
+    }
+
     @GET
     @Path("/session/status")
     @Authenticated
@@ -141,6 +176,64 @@ public class DashboardResource {
         } catch (Exception e) {
             return Response.serverError().build();
         }
+    }
+
+    @POST
+    @Path("/storage/save")
+    @Authenticated
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    public Response saveStoragePreference(@FormParam("storageSize") String storageSize) {
+        String userId = getCurrentUsername();
+        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+
+        if (storageSize == null || !actorSystem.getStorageSizeOptions().contains(storageSize)) {
+            return Response.seeOther(URI.create("/dashboard?error=invalid_storage_size")).build();
+        }
+
+        try {
+            sm.tell(mgr -> mgr.saveUserStoragePreference(userId, storageSize));
+            sm.tell(mgr -> mgr.expandUserPvc(userId, storageSize));
+        } catch (Exception e) {
+            LOG.severe("Failed to save storage preference: " + e.getMessage());
+            return Response.seeOther(URI.create("/dashboard?error=storage_save_failed")).build();
+        }
+
+        return Response.seeOther(URI.create("/dashboard")).build();
+    }
+
+    /**
+     * Maps form field values (userParam_0, _1, _2) to env var names
+     * defined in the tool's userParameters().
+     */
+    private Map<String, String> resolveUserParams(String toolName,
+                                                   String... values) {
+        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        List<ToolPlugin> tools;
+        try {
+            tools = sm.ask(SessionManagerActor::listAvailableTools).get();
+        } catch (Exception e) {
+            return Collections.emptyMap();
+        }
+
+        ToolPlugin plugin = null;
+        for (ToolPlugin t : tools) {
+            if (t.name().equals(toolName)) {
+                plugin = t;
+                break;
+            }
+        }
+        if (plugin == null) {
+            return Collections.emptyMap();
+        }
+
+        List<UserParameter> params = plugin.userParameters();
+        Map<String, String> result = new HashMap<>();
+        for (int i = 0; i < params.size() && i < values.length; i++) {
+            if (values[i] != null && !values[i].isBlank()) {
+                result.put(params.get(i).envVarName(), values[i]);
+            }
+        }
+        return result;
     }
 
     private String getCurrentUsername() {

@@ -26,6 +26,7 @@ public class SessionActor {
     private SessionState state = SessionState.CREATING;
     private Instant lastAccessTime = Instant.now();
     private Watch podWatch;
+    private String memo = "";
 
     public SessionActor(SessionInfo info, K8sApiClient k8sClient) {
         this.info = info;
@@ -150,7 +151,8 @@ public class SessionActor {
             info.toolPlugin().name(),
             state,
             info.podName(),
-            url
+            url,
+            memo
         );
     }
 
@@ -166,9 +168,18 @@ public class SessionActor {
         return info.userId();
     }
 
+    /** Set a user-provided memo for this session. */
+    public void setMemo(String text) {
+        this.memo = text != null ? text : "";
+    }
+
     // -- Internal --
 
     private String resolveStorageSize() {
+        // User's storage preference takes priority over plugin default
+        if (info.userStoragePreference() != null && !info.userStoragePreference().isBlank()) {
+            return info.userStoragePreference();
+        }
         var profiles = info.toolPlugin().resourceProfiles();
         String profileName = info.resourceProfile();
         if (profileName != null) {
