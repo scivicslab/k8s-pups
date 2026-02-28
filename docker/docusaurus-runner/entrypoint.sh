@@ -64,4 +64,6 @@ EOF
 trap "rm -f '${PROJECT_DIR}/${WRAPPER}'" EXIT
 
 echo "Starting Docusaurus at $PROJECT_DIR with baseUrl=$BASE_URL"
+# Enable polling for file watching (inotify does not work on NFS)
+export WATCHPACK_POLLING=true
 exec npx docusaurus start --config "$WRAPPER" --host 0.0.0.0 --port 3000

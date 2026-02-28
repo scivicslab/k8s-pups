@@ -29,7 +29,7 @@ public class DocusaurusPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/docusaurus-runner:0.1.3-2602281625";
+        return "192.168.5.23:32000/docusaurus-runner:0.1.3-2602281735";
     }
 
     @Override
