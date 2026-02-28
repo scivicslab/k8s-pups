@@ -36,7 +36,7 @@ public class JupyterLabPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/jupyter-lab:4.5.5-2602260304";
+        return "192.168.5.23:32000/jupyter-lab:4.5.5-2602281600";
     }
 
     @Override
@@ -75,14 +75,12 @@ public class JupyterLabPlugin implements ToolPlugin {
     @Override
     public List<ResourceProfile> resourceProfiles() {
         return List.of(
-            new ResourceProfile("light", "Light (2 CPU / 4 GB / 100 GB)",
-                Map.of("cpu", "250m", "memory", "1Gi"),
-                Map.of("cpu", "2", "memory", "4Gi"),
-                "100Gi"),
-            new ResourceProfile("standard", "Standard (4 CPU / 8 GB / 1 TB)",
-                Map.of("cpu", "500m", "memory", "2Gi"),
-                Map.of("cpu", "4", "memory", "8Gi"),
-                "1Ti")
+            new ResourceProfile("light", "Light (4 CPU / 4 GB)",
+                Map.of("cpu", "250m", "memory", "512Mi"),
+                Map.of("cpu", "4", "memory", "4Gi")),
+            new ResourceProfile("standard", "Standard (8 CPU / 8 GB)",
+                Map.of("cpu", "500m", "memory", "1Gi"),
+                Map.of("cpu", "8", "memory", "8Gi"))
         );
     }
 

@@ -115,7 +115,7 @@ public class SessionManagerActor {
         LOG.info("Session created: user=" + userId + ", tool=" + toolName
             + ", session=" + sessionId + " (user total: " + (userCount + 1) + ")");
 
-        return new SessionStatus(sessionId, userId, toolName, SessionState.STARTING, info.podName(), null, autoMemo);
+        return new SessionStatus(sessionId, userId, plugin.displayName(), SessionState.STARTING, info.podName(), null, autoMemo);
     }
 
     /**

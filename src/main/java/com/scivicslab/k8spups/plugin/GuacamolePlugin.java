@@ -7,13 +7,16 @@ import java.util.Map;
 /**
  * Tool plugin for Apache Guacamole remote desktop.
  *
- * The container image must be an all-in-one image that includes:
- *   - guacd (Guacamole protocol daemon)
- *   - Guacamole web application (Tomcat)
- *   - A desktop environment (e.g. Xfce) + VNC server
+ * The container image includes:
+ *   - guacd (Guacamole protocol daemon) + Tomcat (Guacamole web app)
+ *   - MATE desktop environment + TigerVNC server
+ *
+ * In standalone mode (no workspace), all services run in a single container as UID 1000.
+ * In workspace mode (NFS home mounted), the Pod splits into two sidecar containers:
+ *   - "tool" (Guacamole): guacd + Tomcat, UID 1000 (image default, lightweight)
+ *   - "desktop" (VNC + MATE): runs as LDAP UID for correct NFS ownership
  *
  * Guacamole listens on port 8080 (Tomcat).
- * The container must run as UID 1000 (non-root).
  */
 public class GuacamolePlugin implements ToolPlugin {
 
@@ -34,7 +37,7 @@ public class GuacamolePlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/guacamole-desktop:3.1.1-2602270319";
+        return "192.168.5.23:32000/guacamole-desktop:3.1.1-2602281555";
     }
 
     @Override
@@ -68,14 +71,12 @@ public class GuacamolePlugin implements ToolPlugin {
     @Override
     public List<ResourceProfile> resourceProfiles() {
         return List.of(
-            new ResourceProfile("light", "Light (1 CPU / 2 GB / 100 GB)",
+            new ResourceProfile("light", "Light (4 CPU / 4 GB)",
                 Map.of("cpu", "250m", "memory", "512Mi"),
-                Map.of("cpu", "1", "memory", "2Gi"),
-                "100Gi"),
-            new ResourceProfile("standard", "Standard (2 CPU / 4 GB / 1 TB)",
+                Map.of("cpu", "4", "memory", "4Gi")),
+            new ResourceProfile("standard", "Standard (8 CPU / 8 GB)",
                 Map.of("cpu", "500m", "memory", "1Gi"),
-                Map.of("cpu", "2", "memory", "4Gi"),
-                "1Ti")
+                Map.of("cpu", "8", "memory", "8Gi"))
         );
     }
 
@@ -138,5 +139,19 @@ public class GuacamolePlugin implements ToolPlugin {
     @Override
     public int readinessProbePeriod() {
         return 2;
+    }
+
+    @Override
+    public SidecarSpec workspaceSidecar() {
+        // In workspace mode, split into two containers:
+        // - "tool": Guacamole gateway (guacd + Tomcat) as UID 1000 (lightweight)
+        // - "desktop": VNC + MATE as LDAP UID with NFS mounted (gets profile resources)
+        return new SidecarSpec(
+            List.of("/usr/local/bin/entrypoint-guacamole.sh"),
+            Map.of("cpu", "100m", "memory", "128Mi"),
+            Map.of("cpu", "500m", "memory", "512Mi"),
+            List.of("/usr/local/bin/entrypoint-desktop.sh"),
+            Map.of("HOME", "/home/user", "DISPLAY", ":1")
+        );
     }
 }

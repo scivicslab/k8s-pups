@@ -1,6 +1,7 @@
 package com.scivicslab.k8spups.k8s;
 
 import com.scivicslab.k8spups.plugin.ResourceProfile;
+import com.scivicslab.k8spups.plugin.SidecarSpec;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
 import io.fabric8.kubernetes.api.model.*;
 import io.fabric8.kubernetes.api.model.gatewayapi.v1.*;
@@ -638,7 +639,7 @@ public class K8sApiClient {
                         .addToVolumeAttributes("server", nfsServer)
                         .addToVolumeAttributes("share", nfsPath)
                     .endCsi()
-                    .withMountOptions(List.of("nfsvers=4.1"))
+                    .withMountOptions(List.of("nfsvers=4"))
                 .endSpec()
                 .build();
             client.persistentVolumes().resource(pv).create();
@@ -731,10 +732,10 @@ public class K8sApiClient {
 
         // Build resource requirements from selected profile
         ResourceProfile profile = resolveProfile(plugin, info.resourceProfile());
-        Map<String, Quantity> requests = new HashMap<>();
-        profile.requests().forEach((k, v) -> requests.put(k, new Quantity(v)));
-        Map<String, Quantity> limits = new HashMap<>();
-        profile.limits().forEach((k, v) -> limits.put(k, new Quantity(v)));
+        Map<String, Quantity> profileRequests = new HashMap<>();
+        profile.requests().forEach((k, v) -> profileRequests.put(k, new Quantity(v)));
+        Map<String, Quantity> profileLimits = new HashMap<>();
+        profile.limits().forEach((k, v) -> profileLimits.put(k, new Quantity(v)));
         LOG.info("Pod " + info.podName() + " using resource profile: " + profile.name()
             + " (" + profile.displayName() + ")");
 
@@ -750,7 +751,35 @@ public class K8sApiClient {
             && workspaceMountTarget != null
             && workspaceMountTarget.equals(plugin.userDataMountPath());
 
-        // Build volume mounts: /tmp always + plugin-specific writable paths + optional user PVC + workspace
+        Map<String, String> labels = Map.of(
+            "app", "k8s-pups-user",
+            "managed-by", "k8s-pups",
+            "tool", plugin.name(),
+            "session", info.sessionId(),
+            "user", info.userId()
+        );
+
+        // Sidecar mode: when workspace is active and the plugin defines a sidecar spec,
+        // the Pod splits into two containers with different UIDs.
+        SidecarSpec sidecar = workspaceActive ? plugin.workspaceSidecar() : null;
+        if (sidecar != null) {
+            return buildSidecarPod(info, plugin, sidecar, envVars,
+                profileRequests, profileLimits, workspaceMountTarget, labels);
+        }
+
+        return buildSingleContainerPod(info, plugin, envVars, profileRequests, profileLimits,
+            workspaceActive, workspaceMountTarget, workspaceReplacesUserData, labels);
+    }
+
+    /**
+     * Builds a single-container Pod (standard mode).
+     */
+    private Pod buildSingleContainerPod(SessionInfo info, ToolPlugin plugin,
+            List<EnvVar> envVars, Map<String, Quantity> requests, Map<String, Quantity> limits,
+            boolean workspaceActive, String workspaceMountTarget,
+            boolean workspaceReplacesUserData, Map<String, String> labels) {
+
+        // Volume mounts: /tmp always + plugin-specific writable paths + optional user PVC + workspace
         List<VolumeMount> mounts = new ArrayList<>();
         mounts.add(new VolumeMountBuilder().withName("tmp").withMountPath("/tmp").build());
         for (int i = 0; i < plugin.writablePaths().size(); i++) {
@@ -759,14 +788,12 @@ public class K8sApiClient {
                 .withMountPath(plugin.writablePaths().get(i))
                 .build());
         }
-        // Per-user PVC (skipped when workspace replaces it at the same mount path)
         if (plugin.userDataMountPath() != null && !workspaceReplacesUserData) {
             mounts.add(new VolumeMountBuilder()
                 .withName("user-data")
                 .withMountPath(plugin.userDataMountPath())
                 .build());
         }
-        // Workspace NFS mount
         if (workspaceActive && workspaceMountTarget != null) {
             VolumeMountBuilder vmb = new VolumeMountBuilder()
                 .withName("workspace")
@@ -801,17 +828,20 @@ public class K8sApiClient {
                 .build());
         }
 
-        // Determine UID/GID: workspace overrides plugin default with LDAP values
-        Long runAsUid = workspaceActive ? info.workspaceInfo().uid() : plugin.runAsUser();
-        Long runAsGid = workspaceActive ? info.workspaceInfo().gid() : plugin.runAsUser();
-
-        Map<String, String> labels = Map.of(
-            "app", "k8s-pups-user",
-            "managed-by", "k8s-pups",
-            "tool", plugin.name(),
-            "session", info.sessionId(),
-            "user", info.userId()
-        );
+        // When workspace is active (NFS home mounted) and no sidecar is used,
+        // run the container as the LDAP UID so it can read/write NFS files.
+        // Also disable readOnlyRootFilesystem so the entrypoint can add the UID
+        // to /etc/passwd (required by Python's pwd module, dbus, etc.).
+        Long runAsUid = plugin.runAsUser();
+        Long runAsGid = plugin.runAsUser();
+        boolean readOnlyRoot = plugin.readOnlyRootFilesystem();
+        if (workspaceActive && info.workspaceInfo() != null) {
+            runAsUid = info.workspaceInfo().uid();
+            runAsGid = info.workspaceInfo().gid();
+            readOnlyRoot = false;
+            LOG.info("Pod " + info.podName() + " workspace mode: running as UID "
+                + runAsUid + " (LDAP) instead of " + plugin.runAsUser() + " (image default)");
+        }
 
         return new PodBuilder()
             .withNewMetadata()
@@ -842,10 +872,138 @@ public class K8sApiClient {
                     .withVolumeMounts(mounts)
                     .withNewSecurityContext()
                         .withAllowPrivilegeEscalation(false)
+                        .withReadOnlyRootFilesystem(readOnlyRoot)
+                        .withNewCapabilities().addToDrop("ALL").endCapabilities()
+                    .endSecurityContext()
+                    .withReadinessProbe(buildReadinessProbe(plugin))
+                .endContainer()
+                .withVolumes(volumes)
+                .withRestartPolicy("Never")
+            .endSpec()
+            .build();
+    }
+
+    /**
+     * Builds a two-container Pod (sidecar mode for workspace).
+     * Container "tool": runs the service (containerPort) as the plugin's default UID.
+     * Container "desktop": runs the workspace environment as the LDAP UID with NFS mounted.
+     * Both containers share the Pod network namespace (localhost).
+     */
+    private Pod buildSidecarPod(SessionInfo info, ToolPlugin plugin, SidecarSpec sidecar,
+            List<EnvVar> envVars, Map<String, Quantity> profileRequests,
+            Map<String, Quantity> profileLimits, String workspaceMountTarget,
+            Map<String, String> labels) {
+
+        WorkspaceInfo ws = info.workspaceInfo();
+
+        // -- Volumes (Pod-level, shared by both containers) --
+        List<Volume> volumes = new ArrayList<>();
+        volumes.add(new VolumeBuilder().withName("tmp")
+            .withNewEmptyDir().withSizeLimit(new Quantity("1Gi")).endEmptyDir().build());
+        if (workspaceMountTarget != null) {
+            volumes.add(new VolumeBuilder().withName("workspace")
+                .withNewPersistentVolumeClaim()
+                    .withClaimName(workspacePvcName(info.userId()))
+                    .withReadOnly(false)
+                .endPersistentVolumeClaim()
+                .build());
+        }
+
+        // -- "tool" container: service gateway (e.g. guacd + Tomcat) --
+        // Runs as plugin's default UID. Lightweight resources. No NFS mount needed.
+        List<VolumeMount> toolMounts = List.of(
+            new VolumeMountBuilder().withName("tmp").withMountPath("/tmp").build());
+
+        Map<String, Quantity> toolRequests = new HashMap<>();
+        sidecar.toolResourceRequests().forEach((k, v) -> toolRequests.put(k, new Quantity(v)));
+        Map<String, Quantity> toolLimits = new HashMap<>();
+        sidecar.toolResourceLimits().forEach((k, v) -> toolLimits.put(k, new Quantity(v)));
+
+        // -- "desktop" container: workspace environment (e.g. VNC + MATE) --
+        // Runs as LDAP UID for correct NFS file ownership. Gets user-selected profile resources.
+        List<VolumeMount> desktopMounts = new ArrayList<>();
+        desktopMounts.add(new VolumeMountBuilder().withName("tmp").withMountPath("/tmp").build());
+        if (workspaceMountTarget != null) {
+            VolumeMountBuilder vmb = new VolumeMountBuilder()
+                .withName("workspace")
+                .withMountPath(workspaceMountTarget);
+            if (plugin.workspaceSubPath() != null) {
+                vmb.withSubPath(plugin.workspaceSubPath());
+            }
+            desktopMounts.add(vmb.build());
+        }
+
+        List<EnvVar> desktopEnvVars = new ArrayList<>(sidecar.desktopEnv().entrySet().stream()
+            .map(e -> new EnvVarBuilder().withName(e.getKey()).withValue(e.getValue()).build())
+            .toList());
+        if (info.userParams() != null) {
+            for (var entry : info.userParams().entrySet()) {
+                if (entry.getValue() != null && !entry.getValue().isBlank()) {
+                    desktopEnvVars.add(new EnvVarBuilder()
+                        .withName(entry.getKey())
+                        .withValue(entry.getValue())
+                        .build());
+                }
+            }
+        }
+
+        LOG.info("Pod " + info.podName() + " using sidecar mode: tool (UID "
+            + plugin.runAsUser() + ") + desktop (UID " + ws.uid() + ")");
+
+        return new PodBuilder()
+            .withNewMetadata()
+                .withName(info.podName())
+                .withNamespace(userPodsNamespace)
+                .withLabels(labels)
+            .endMetadata()
+            .withNewSpec()
+                .withAutomountServiceAccountToken(false)
+                .withNewSecurityContext()
+                    .withRunAsNonRoot(true)
+                    .withNewSeccompProfile().withType(plugin.seccompProfileType()).endSeccompProfile()
+                .endSecurityContext()
+                // Container 1: service gateway (e.g. Guacamole)
+                .addNewContainer()
+                    .withName("tool")
+                    .withImage(plugin.containerImage())
+                    .withCommand(sidecar.toolCommand())
+                    .addNewPort()
+                        .withContainerPort(plugin.containerPort())
+                        .withProtocol("TCP")
+                    .endPort()
+                    .withEnv(envVars)
+                    .withNewResources()
+                        .withRequests(toolRequests)
+                        .withLimits(toolLimits)
+                    .endResources()
+                    .withVolumeMounts(toolMounts)
+                    .withNewSecurityContext()
+                        .withRunAsUser(plugin.runAsUser())
+                        .withRunAsGroup(plugin.runAsUser())
+                        .withAllowPrivilegeEscalation(false)
                         .withReadOnlyRootFilesystem(plugin.readOnlyRootFilesystem())
                         .withNewCapabilities().addToDrop("ALL").endCapabilities()
                     .endSecurityContext()
                     .withReadinessProbe(buildReadinessProbe(plugin))
+                .endContainer()
+                // Container 2: workspace desktop (e.g. VNC + MATE)
+                .addNewContainer()
+                    .withName("desktop")
+                    .withImage(plugin.containerImage())
+                    .withCommand(sidecar.desktopCommand())
+                    .withEnv(desktopEnvVars)
+                    .withNewResources()
+                        .withRequests(profileRequests)
+                        .withLimits(profileLimits)
+                    .endResources()
+                    .withVolumeMounts(desktopMounts)
+                    .withNewSecurityContext()
+                        .withRunAsUser(ws.uid())
+                        .withRunAsGroup(ws.gid())
+                        .withAllowPrivilegeEscalation(false)
+                        .withReadOnlyRootFilesystem(plugin.readOnlyRootFilesystem())
+                        .withNewCapabilities().addToDrop("ALL").endCapabilities()
+                    .endSecurityContext()
                 .endContainer()
                 .withVolumes(volumes)
                 .withRestartPolicy("Never")

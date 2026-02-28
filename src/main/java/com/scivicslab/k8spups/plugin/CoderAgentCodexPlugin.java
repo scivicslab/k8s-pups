@@ -22,7 +22,7 @@ public class CoderAgentCodexPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/quarkus-coder-agent-codex:1.0.2-2602280858";
+        return "192.168.5.23:32000/quarkus-coder-agent-codex:1.0.2-2602281625";
     }
 
     @Override
@@ -58,10 +58,9 @@ public class CoderAgentCodexPlugin implements ToolPlugin {
     @Override
     public List<ResourceProfile> resourceProfiles() {
         return List.of(
-            new ResourceProfile("standard", "Standard (2 CPU / 8 GB / 100 GB)",
+            new ResourceProfile("standard", "Standard (2 CPU / 8 GB)",
                 Map.of("cpu", "250m", "memory", "512Mi"),
-                Map.of("cpu", "2", "memory", "8Gi"),
-                "100Gi")
+                Map.of("cpu", "2", "memory", "8Gi"))
         );
     }
 
@@ -76,6 +75,11 @@ public class CoderAgentCodexPlugin implements ToolPlugin {
     @Override
     public String userDataMountPath() {
         return "/home/user";
+    }
+
+    @Override
+    public boolean workspaceEnabled() {
+        return true;
     }
 
     @Override

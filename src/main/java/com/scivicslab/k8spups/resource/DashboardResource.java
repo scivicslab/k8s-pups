@@ -20,7 +20,11 @@ import jakarta.ws.rs.core.Response;
 
 import org.eclipse.microprofile.jwt.JsonWebToken;
 
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.logging.Logger;
 
@@ -42,9 +46,112 @@ public class DashboardResource {
     @Inject
     Template dashboard;
 
+    @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/pups")
+    String basePath;
+
+    @ConfigProperty(name = "k8spups.session-oidc.issuer")
+    String oidcIssuer;
+
     @GET
-    public Response index() {
-        return Response.seeOther(URI.create("/dashboard")).build();
+    @Produces(MediaType.TEXT_HTML)
+    public String index() {
+        return ("""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>k8s-pups - K8s Per-User Pod Service</title>
+            <style>
+                *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+                    background: #F8FAFC; color: #1E293B;
+                    display: flex; align-items: center; justify-content: center;
+                    min-height: 100vh;
+                }
+                .landing {
+                    text-align: center; max-width: 440px; padding: 24px;
+                }
+                .logo {
+                    font-size: 64px; margin-bottom: 12px; line-height: 1;
+                }
+                h1 {
+                    font-size: 32px; font-weight: 800; letter-spacing: -.5px;
+                    margin-bottom: 6px;
+                }
+                .tagline {
+                    font-size: 15px; color: #64748B; margin-bottom: 32px;
+                    line-height: 1.6;
+                }
+                .btn-login {
+                    display: inline-flex; align-items: center; gap: 8px;
+                    padding: 14px 36px; border-radius: 10px;
+                    background: linear-gradient(135deg, #EA580C 0%, #F97316 100%);
+                    color: white; text-decoration: none;
+                    font-size: 16px; font-weight: 700;
+                    box-shadow: 0 4px 14px rgba(249,115,22,.3);
+                    transition: all .15s ease;
+                }
+                .btn-login:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 6px 22px rgba(249,115,22,.4);
+                }
+                .features {
+                    display: flex; gap: 24px; margin-top: 40px;
+                    justify-content: center; flex-wrap: wrap;
+                }
+                .feature {
+                    font-size: 13px; color: #64748B; display: flex;
+                    align-items: center; gap: 6px;
+                }
+                .feature::before {
+                    content: ''; width: 6px; height: 6px;
+                    border-radius: 50%; background: #F97316; flex-shrink: 0;
+                }
+            </style>
+            </head>
+            <body>
+            <div class="landing">
+                <div class="logo">\uD83D\uDC3E</div>
+                <h1>k8s-pups</h1>
+                <p class="tagline">
+                    Launch isolated tool environments &mdash; IDEs, notebooks, desktops
+                    &mdash; each in its own Kubernetes Pod.
+                </p>
+                <a href="{{BASE}}/dashboard" class="btn-login">Log in to Dashboard</a>
+                <div class="features">
+                    <span class="feature">Jupyter Lab</span>
+                    <span class="feature">Remote Desktop</span>
+                    <span class="feature">Coding Agents</span>
+                </div>
+            </div>
+            </body>
+            </html>
+            """).replace("{{BASE}}", basePath);
+    }
+
+    @GET
+    @Path("/logout")
+    @Authenticated
+    public Response logout() {
+        String endSessionUrl = oidcIssuer + "/protocol/openid-connect/logout";
+        String postLogoutUri = URLEncoder.encode(
+            "https://192.168.5.25" + basePath + "/",
+            StandardCharsets.UTF_8);
+        String rawToken = idToken != null ? idToken.getRawToken() : "";
+        String redirectUrl = endSessionUrl
+            + "?client_id=k8s-pups"
+            + "&id_token_hint=" + URLEncoder.encode(rawToken, StandardCharsets.UTF_8)
+            + "&post_logout_redirect_uri=" + postLogoutUri;
+        return Response.seeOther(URI.create(redirectUrl))
+            .cookie(new jakarta.ws.rs.core.NewCookie.Builder("q_session")
+                .path(basePath).maxAge(0).build())
+            .cookie(new jakarta.ws.rs.core.NewCookie.Builder("pups-dashboard-id")
+                .path("/pups").maxAge(0).build())
+            .cookie(new jakarta.ws.rs.core.NewCookie.Builder("pups-dashboard-id")
+                .path("/").maxAge(0).build())
+            .build();
     }
 
     @GET

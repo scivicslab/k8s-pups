@@ -191,4 +191,20 @@ public interface ToolPlugin {
     default String workspaceSubPath() {
         return null;
     }
+
+    /**
+     * Sidecar specification for workspace mode.
+     * When workspace is active and this returns non-null, the Pod is created with
+     * two containers instead of one:
+     * - "tool": runs the service (containerPort), keeps the plugin's default UID
+     * - "desktop": runs the user workspace as the LDAP UID with NFS mounted
+     *
+     * This allows services like Guacamole (which require UID 1000 for Tomcat) to
+     * coexist with a desktop running as the NFS-owning LDAP UID.
+     *
+     * Return null (default) to use single-container mode.
+     */
+    default SidecarSpec workspaceSidecar() {
+        return null;
+    }
 }

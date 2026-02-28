@@ -56,6 +56,14 @@
             display: flex; align-items: center; justify-content: center;
             font-size: 15px;
         }
+        .btn-logout {
+            margin-left: 6px; padding: 5px 14px; border-radius: 7px;
+            font-size: 13px; font-weight: 600; color: rgba(255,255,255,.9);
+            background: rgba(255,255,255,.15); text-decoration: none;
+            border: 1px solid rgba(255,255,255,.3);
+            transition: all .15s ease;
+        }
+        .btn-logout:hover { background: rgba(255,255,255,.28); color: white; }
 
         /* ── Main ────────────────────────────────────── */
         main { max-width: 1000px; margin: 0 auto; padding: 36px 24px 60px; }
@@ -226,6 +234,7 @@
     <div class="user-chip">
         <div class="user-avatar">👤</div>
         <span>{userId}</span>
+        <a href="logout" class="btn-logout">Logout</a>
     </div>
 </header>
 

@@ -29,7 +29,7 @@ public class DocusaurusPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/docusaurus-runner:0.1.3-2602281055";
+        return "192.168.5.23:32000/docusaurus-runner:0.1.3-2602281625";
     }
 
     @Override
@@ -59,6 +59,12 @@ public class DocusaurusPlugin implements ToolPlugin {
                 Map.of("cpu", "100m", "memory", "256Mi"),
                 Map.of("cpu", "1", "memory", "2Gi"))
         );
+    }
+
+    @Override
+    public String userDataMountPath() {
+        // PVC fallback when no NFS workspace exists.
+        return "/workspace";
     }
 
     @Override
