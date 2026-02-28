@@ -16,7 +16,7 @@ spec:
       serviceAccountName: vault-auth
       containers:
         - name: k8s-pups
-          image: 192.168.5.23:32000/k8s-pups:0.1.0-2602280442
+          image: 192.168.5.23:32000/k8s-pups:0.1.0-2602281132
           command:
             - /bin/sh
             - -c

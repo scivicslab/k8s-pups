@@ -23,11 +23,6 @@ public class DocusaurusPlugin implements ToolPlugin {
     }
 
     @Override
-    public String icon() {
-        return "\uD83D\uDCD6";
-    }
-
-    @Override
     public String description() {
         return "Preview Docusaurus sites from your ~/works directory.";
     }
@@ -49,20 +44,20 @@ public class DocusaurusPlugin implements ToolPlugin {
 
     @Override
     public Map<String, String> resourceRequests() {
-        return Map.of("cpu", "250m", "memory", "512Mi");
+        return Map.of("cpu", "100m", "memory", "256Mi");
     }
 
     @Override
     public Map<String, String> resourceLimits() {
-        return Map.of("cpu", "2", "memory", "4Gi");
+        return Map.of("cpu", "1", "memory", "1Gi");
     }
 
     @Override
     public List<ResourceProfile> resourceProfiles() {
         return List.of(
-            new ResourceProfile("standard", "Standard (2 CPU / 4 GB)",
-                Map.of("cpu", "250m", "memory", "512Mi"),
-                Map.of("cpu", "2", "memory", "4Gi"))
+            new ResourceProfile("standard", "Standard (1 CPU / 1 GB)",
+                Map.of("cpu", "100m", "memory", "256Mi"),
+                Map.of("cpu", "1", "memory", "1Gi"))
         );
     }
 
