@@ -46,9 +46,14 @@ public class K8sApiClient {
     private final String oidcSecretName;
     private final String oidcJwksUri;
 
+    // NFS workspace config
+    private final String nfsServer;
+    private final String nfsBasePath;
+
     public K8sApiClient(String userPodsNamespace, String httpRouteNamespace, List<String> gatewayNames,
                         String oidcIssuer, String oidcAuthorizationEndpoint, String oidcTokenEndpoint,
-                        String oidcClientId, String oidcSecretName, String oidcJwksUri) {
+                        String oidcClientId, String oidcSecretName, String oidcJwksUri,
+                        String nfsServer, String nfsBasePath) {
         this.client = CDI.current().select(KubernetesClient.class).get();
         this.userPodsNamespace = userPodsNamespace;
         this.httpRouteNamespace = httpRouteNamespace;
@@ -59,6 +64,8 @@ public class K8sApiClient {
         this.oidcClientId = oidcClientId;
         this.oidcSecretName = oidcSecretName;
         this.oidcJwksUri = oidcJwksUri;
+        this.nfsServer = nfsServer;
+        this.nfsBasePath = nfsBasePath;
     }
 
     // -- Pod operations --
@@ -585,6 +592,89 @@ public class K8sApiClient {
         );
     }
 
+    // -- Workspace PV/PVC operations (NFS home directory) --
+
+    /**
+     * Returns the workspace PVC name for a given userId.
+     */
+    private String workspacePvcName(String userId) {
+        return "pups-workspace-" + userId.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+    }
+
+    /**
+     * Creates a PV + PVC pair for mounting the user's NFS home directory.
+     * The PV uses the nfs.csi.k8s.io CSI driver to mount the user's home directory
+     * from the NFS server. The PVC binds to this specific PV via volumeName.
+     *
+     * <p>Both PV and PVC are created only if they don't already exist.
+     * They persist across sessions (not deleted on session stop).</p>
+     *
+     * @param userId        the user identifier
+     * @param workspaceInfo POSIX account info from LDAP
+     */
+    public void createWorkspacePvPvcIfAbsent(String userId, WorkspaceInfo workspaceInfo) {
+        String pvName = workspacePvcName(userId);
+        String pvcName = pvName;
+        String nfsPath = nfsBasePath + "/" + workspaceInfo.username();
+
+        // Create PV if absent (cluster-scoped)
+        PersistentVolume existingPv = client.persistentVolumes().withName(pvName).get();
+        if (existingPv == null) {
+            PersistentVolume pv = new PersistentVolumeBuilder()
+                .withNewMetadata()
+                    .withName(pvName)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                .endMetadata()
+                .withNewSpec()
+                    .withCapacity(Map.of("storage", new Quantity("1Ti")))
+                    .withAccessModes("ReadWriteMany")
+                    .withPersistentVolumeReclaimPolicy("Retain")
+                    .withStorageClassName("")
+                    .withNewCsi()
+                        .withDriver("nfs.csi.k8s.io")
+                        .withVolumeHandle(pvName)
+                        .addToVolumeAttributes("server", nfsServer)
+                        .addToVolumeAttributes("share", nfsPath)
+                    .endCsi()
+                    .withMountOptions(List.of("nfsvers=4.1"))
+                .endSpec()
+                .build();
+            client.persistentVolumes().resource(pv).create();
+            LOG.info("Workspace PV created: " + pvName + " -> " + nfsServer + ":" + nfsPath);
+        } else {
+            LOG.info("Workspace PV already exists: " + pvName);
+        }
+
+        // Create PVC if absent (namespace-scoped)
+        PersistentVolumeClaim existingPvc = client.persistentVolumeClaims()
+            .inNamespace(userPodsNamespace).withName(pvcName).get();
+        if (existingPvc == null) {
+            PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+                .withNewMetadata()
+                    .withName(pvcName)
+                    .withNamespace(userPodsNamespace)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                .endMetadata()
+                .withNewSpec()
+                    .withAccessModes("ReadWriteMany")
+                    .withStorageClassName("")
+                    .withVolumeName(pvName)
+                    .withNewResources()
+                        .addToRequests("storage", new Quantity("1Ti"))
+                    .endResources()
+                .endSpec()
+                .build();
+            client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+            LOG.info("Workspace PVC created: " + pvcName);
+        } else {
+            LOG.info("Workspace PVC already exists: " + pvcName);
+        }
+    }
+
     // -- Internal --
 
     private ResourceProfile resolveProfile(ToolPlugin plugin, String profileName) {
@@ -648,7 +738,19 @@ public class K8sApiClient {
         LOG.info("Pod " + info.podName() + " using resource profile: " + profile.name()
             + " (" + profile.displayName() + ")");
 
-        // Build volume mounts: /tmp always + plugin-specific writable paths + optional user PVC
+        // Determine workspace state
+        boolean workspaceActive = plugin.workspaceEnabled() && info.workspaceInfo() != null;
+        String workspaceMountTarget = null;
+        if (workspaceActive) {
+            workspaceMountTarget = plugin.workspaceMountPath() != null
+                ? plugin.workspaceMountPath()
+                : plugin.userDataMountPath();
+        }
+        boolean workspaceReplacesUserData = workspaceActive
+            && workspaceMountTarget != null
+            && workspaceMountTarget.equals(plugin.userDataMountPath());
+
+        // Build volume mounts: /tmp always + plugin-specific writable paths + optional user PVC + workspace
         List<VolumeMount> mounts = new ArrayList<>();
         mounts.add(new VolumeMountBuilder().withName("tmp").withMountPath("/tmp").build());
         for (int i = 0; i < plugin.writablePaths().size(); i++) {
@@ -657,17 +759,22 @@ public class K8sApiClient {
                 .withMountPath(plugin.writablePaths().get(i))
                 .build());
         }
-        if (plugin.userDataMountPath() != null) {
+        // Per-user PVC (skipped when workspace replaces it at the same mount path)
+        if (plugin.userDataMountPath() != null && !workspaceReplacesUserData) {
             mounts.add(new VolumeMountBuilder()
                 .withName("user-data")
                 .withMountPath(plugin.userDataMountPath())
                 .build());
         }
-        if (plugin.workspacePvcName() != null && plugin.workspaceMountPath() != null) {
-            mounts.add(new VolumeMountBuilder()
+        // Workspace NFS mount
+        if (workspaceActive && workspaceMountTarget != null) {
+            VolumeMountBuilder vmb = new VolumeMountBuilder()
                 .withName("workspace")
-                .withMountPath(plugin.workspaceMountPath())
-                .build());
+                .withMountPath(workspaceMountTarget);
+            if (plugin.workspaceSubPath() != null) {
+                vmb.withSubPath(plugin.workspaceSubPath());
+            }
+            mounts.add(vmb.build());
         }
 
         List<Volume> volumes = new ArrayList<>();
@@ -677,7 +784,7 @@ public class K8sApiClient {
             volumes.add(new VolumeBuilder().withName("writable-" + i)
                 .withNewEmptyDir().withSizeLimit(new Quantity("500Mi")).endEmptyDir().build());
         }
-        if (plugin.userDataMountPath() != null) {
+        if (plugin.userDataMountPath() != null && !workspaceReplacesUserData) {
             volumes.add(new VolumeBuilder().withName("user-data")
                 .withNewPersistentVolumeClaim()
                     .withClaimName(userPvcName(info.userId()))
@@ -685,14 +792,18 @@ public class K8sApiClient {
                 .endPersistentVolumeClaim()
                 .build());
         }
-        if (plugin.workspacePvcName() != null && plugin.workspaceMountPath() != null) {
+        if (workspaceActive && workspaceMountTarget != null) {
             volumes.add(new VolumeBuilder().withName("workspace")
                 .withNewPersistentVolumeClaim()
-                    .withClaimName(plugin.workspacePvcName())
+                    .withClaimName(workspacePvcName(info.userId()))
                     .withReadOnly(false)
                 .endPersistentVolumeClaim()
                 .build());
         }
+
+        // Determine UID/GID: workspace overrides plugin default with LDAP values
+        Long runAsUid = workspaceActive ? info.workspaceInfo().uid() : plugin.runAsUser();
+        Long runAsGid = workspaceActive ? info.workspaceInfo().gid() : plugin.runAsUser();
 
         Map<String, String> labels = Map.of(
             "app", "k8s-pups-user",
@@ -712,8 +823,8 @@ public class K8sApiClient {
                 .withAutomountServiceAccountToken(false)
                 .withNewSecurityContext()
                     .withRunAsNonRoot(plugin.runAsNonRoot())
-                    .withRunAsUser(plugin.runAsUser())
-                    .withRunAsGroup(plugin.runAsUser())
+                    .withRunAsUser(runAsUid)
+                    .withRunAsGroup(runAsGid)
                     .withNewSeccompProfile().withType(plugin.seccompProfileType()).endSeccompProfile()
                 .endSecurityContext()
                 .addNewContainer()

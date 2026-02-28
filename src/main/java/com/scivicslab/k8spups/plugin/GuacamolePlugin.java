@@ -91,6 +91,12 @@ public class GuacamolePlugin implements ToolPlugin {
     }
 
     @Override
+    public boolean workspaceEnabled() {
+        // Mount user's NFS $HOME at /home/user when POSIX account exists.
+        return true;
+    }
+
+    @Override
     public boolean readOnlyRootFilesystem() {
         // Desktop environment writes to /var/log, /run, /var/lib etc. at startup.
         return false;

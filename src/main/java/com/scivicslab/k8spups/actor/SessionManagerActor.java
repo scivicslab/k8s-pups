@@ -1,7 +1,9 @@
 package com.scivicslab.k8spups.actor;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
+import com.scivicslab.k8spups.k8s.LdapUserInfoClient;
 import com.scivicslab.k8spups.k8s.SessionInfo;
+import com.scivicslab.k8spups.k8s.WorkspaceInfo;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
 import com.scivicslab.pojoactor.core.ActorRef;
 
@@ -23,6 +25,7 @@ public class SessionManagerActor {
     private final int maxSessionsPerUser;
     private final long idleTimeoutMinutes;
     private final Set<String> unlimitedUsers;
+    private final LdapUserInfoClient ldapClient;
 
     /** sessionId -> child ActorRef<SessionActor> */
     private final Map<String, ActorRef<SessionActor>> sessions = new HashMap<>();
@@ -32,13 +35,14 @@ public class SessionManagerActor {
 
     public SessionManagerActor(K8sApiClient k8sClient, Map<String, ToolPlugin> plugins,
                                int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
-                               Set<String> unlimitedUsers) {
+                               Set<String> unlimitedUsers, LdapUserInfoClient ldapClient) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
         this.maxSessions = maxSessions;
         this.maxSessionsPerUser = maxSessionsPerUser;
         this.idleTimeoutMinutes = idleTimeoutMinutes;
         this.unlimitedUsers = unlimitedUsers;
+        this.ldapClient = ldapClient;
     }
 
     /**
@@ -72,8 +76,14 @@ public class SessionManagerActor {
         // Look up user's storage preference from ConfigMap
         String storagePref = k8sClient.getUserStoragePreference(userId);
 
+        // Look up POSIX account for workspace mounting (silently skip if not found)
+        WorkspaceInfo workspaceInfo = null;
+        if (plugin.workspaceEnabled() && ldapClient != null) {
+            workspaceInfo = ldapClient.lookup(userId).orElse(null);
+        }
+
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
-            userParams != null ? userParams : Collections.emptyMap(), storagePref);
+            userParams != null ? userParams : Collections.emptyMap(), storagePref, workspaceInfo);
         SessionActor actor = new SessionActor(info, k8sClient);
 
         // Create as child actor
