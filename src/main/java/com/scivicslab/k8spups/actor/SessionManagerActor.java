@@ -81,13 +81,31 @@ public class SessionManagerActor {
         sessions.put(sessionId, childRef);
         userSessions.computeIfAbsent(userId, k -> new ArrayList<>()).add(sessionId);
 
+        // Auto-populate memo from the first non-secret user parameter (e.g. project path)
+        String autoMemo = "";
+        if (userParams != null && plugin.userParameters() != null) {
+            for (var p : plugin.userParameters()) {
+                if (!p.secret()) {
+                    String val = userParams.get(p.envVarName());
+                    if (val != null && !val.isBlank()) {
+                        autoMemo = val;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!autoMemo.isEmpty()) {
+            String m = autoMemo;
+            childRef.tell(sa -> sa.setMemo(m));
+        }
+
         // Tell the session to start (async, non-blocking)
         childRef.tell(sa -> sa.start(childRef));
 
         LOG.info("Session created: user=" + userId + ", tool=" + toolName
             + ", session=" + sessionId + " (user total: " + (userCount + 1) + ")");
 
-        return new SessionStatus(sessionId, userId, toolName, SessionState.STARTING, info.podName(), null, "");
+        return new SessionStatus(sessionId, userId, toolName, SessionState.STARTING, info.podName(), null, autoMemo);
     }
 
     /**

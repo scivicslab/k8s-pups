@@ -162,4 +162,22 @@ public interface ToolPlugin {
     default List<UserParameter> userParameters() {
         return Collections.emptyList();
     }
+
+    /**
+     * Name of a pre-existing PVC to mount as a workspace volume.
+     * Unlike userDataMountPath() which creates a per-user PVC, this mounts an
+     * already-provisioned PVC (e.g. an NFS share of the user's home directory).
+     * Return null (default) to skip.
+     */
+    default String workspacePvcName() {
+        return null;
+    }
+
+    /**
+     * Mount path for the workspace PVC inside the container.
+     * Only used when workspacePvcName() is non-null.
+     */
+    default String workspaceMountPath() {
+        return null;
+    }
 }

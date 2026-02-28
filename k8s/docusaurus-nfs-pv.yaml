@@ -1,0 +1,34 @@
+# NFS PV/PVC for mounting devteam's ~/works directory into tool Pods.
+# Provisional: hardcoded to devteam's home. Future multi-user support
+# will create per-user PV/PVCs dynamically.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: devteam-works-pv
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  csi:
+    driver: nfs.csi.k8s.io
+    readOnly: false
+    volumeHandle: "192.168.5.20#/Public/Users/devteam/works"
+    volumeAttributes:
+      server: "192.168.5.20"
+      share: "/Public/Users/devteam/works"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: devteam-works-pvc
+  namespace: user-pods
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 500Gi
+  volumeName: devteam-works-pv
