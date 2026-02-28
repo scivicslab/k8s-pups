@@ -663,6 +663,12 @@ public class K8sApiClient {
                 .withMountPath(plugin.userDataMountPath())
                 .build());
         }
+        if (plugin.workspacePvcName() != null && plugin.workspaceMountPath() != null) {
+            mounts.add(new VolumeMountBuilder()
+                .withName("workspace")
+                .withMountPath(plugin.workspaceMountPath())
+                .build());
+        }
 
         List<Volume> volumes = new ArrayList<>();
         volumes.add(new VolumeBuilder().withName("tmp")
@@ -675,6 +681,14 @@ public class K8sApiClient {
             volumes.add(new VolumeBuilder().withName("user-data")
                 .withNewPersistentVolumeClaim()
                     .withClaimName(userPvcName(info.userId()))
+                    .withReadOnly(false)
+                .endPersistentVolumeClaim()
+                .build());
+        }
+        if (plugin.workspacePvcName() != null && plugin.workspaceMountPath() != null) {
+            volumes.add(new VolumeBuilder().withName("workspace")
+                .withNewPersistentVolumeClaim()
+                    .withClaimName(plugin.workspacePvcName())
                     .withReadOnly(false)
                 .endPersistentVolumeClaim()
                 .build());
@@ -700,7 +714,6 @@ public class K8sApiClient {
                     .withRunAsNonRoot(plugin.runAsNonRoot())
                     .withRunAsUser(plugin.runAsUser())
                     .withRunAsGroup(plugin.runAsUser())
-                    .withFsGroup(plugin.runAsUser())
                     .withNewSeccompProfile().withType(plugin.seccompProfileType()).endSeccompProfile()
                 .endSecurityContext()
                 .addNewContainer()
