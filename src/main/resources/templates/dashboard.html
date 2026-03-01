@@ -439,14 +439,67 @@
     if (new URLSearchParams(location.search).get('error')) {
         document.getElementById('error-banner').style.display = 'block';
     }
+
+    // Poll session status via fetch() and update DOM without full page reload
+    function pollSessionStatus() {
+        fetch('session/status', { credentials: 'same-origin' })
+            .then(function(r) { return r.ok ? r.json() : []; })
+            .then(function(sessions) {
+                var stillPolling = false;
+                sessions.forEach(function(s) {
+                    var card = document.querySelector('[data-session-id="' + s.sessionId + '"]');
+                    if (!card) return;
+                    var sessionCard = card.closest('.session-card');
+                    if (!sessionCard) return;
+
+                    // Update badge
+                    var badge = sessionCard.querySelector('.badge');
+                    if (badge) {
+                        badge.className = 'badge badge-' + s.state;
+                        badge.textContent = s.state;
+                    }
+
+                    // Show/hide progress bar
+                    var progress = sessionCard.querySelector('.progress-wrap');
+                    if (progress) {
+                        progress.style.display = (s.state === 'STARTING' || s.state === 'CREATING') ? 'block' : 'none';
+                    }
+
+                    // Show/hide Open Tool button
+                    var actions = sessionCard.querySelector('.session-actions');
+                    if (actions && s.state === 'READY' && s.accessUrl && !actions.querySelector('.btn-open')) {
+                        var a = document.createElement('a');
+                        a.className = 'btn btn-open';
+                        a.href = s.accessUrl;
+                        a.target = '_blank';
+                        a.textContent = 'Open Tool';
+                        actions.insertBefore(a, actions.firstChild);
+                    }
+
+                    if (s.state === 'STARTING' || s.state === 'CREATING') {
+                        stillPolling = true;
+                    }
+                });
+                if (stillPolling) {
+                    setTimeout(pollSessionStatus, 3000);
+                }
+            })
+            .catch(function() {
+                // Retry on error
+                setTimeout(pollSessionStatus, 5000);
+            });
+    }
+
     var hasStarting = false;
     document.querySelectorAll('.badge').forEach(function(el) {
         var text = el.textContent.trim();
         if (text === 'STARTING' || text === 'CREATING') hasStarting = true;
     });
     if (hasStarting) {
-        setTimeout(function() { location.reload(); }, 3000);
+        setTimeout(pollSessionStatus, 3000);
     }
+
+    // Memo save on blur (no page reload)
     document.querySelectorAll('.memo-input').forEach(function(input) {
         var original = input.value;
         input.addEventListener('blur', function() {

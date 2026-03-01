@@ -7,11 +7,14 @@ import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.pojoactor.core.ActorSystem;
 import com.scivicslab.pojoactor.core.scheduler.Scheduler;
 
+import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+import io.fabric8.kubernetes.api.model.Pod;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -29,6 +32,7 @@ import java.util.logging.Logger;
  * Creates SessionManagerActor and schedules idle timeout checks.
  */
 @ApplicationScoped
+@Startup
 public class K8sPupsActorSystem {
 
     private static final Logger LOG = Logger.getLogger(K8sPupsActorSystem.class.getName());
@@ -181,52 +185,77 @@ public class K8sPupsActorSystem {
     private void reconcileOrphanedResources() {
         LOG.info("Starting orphan resource reconciliation...");
         try {
-            // Known sessions at startup (empty since actor system just started)
-            Set<String> knownSessions = sessionManager.ask(SessionManagerActor::getSessionIds)
-                .get(10, TimeUnit.SECONDS);
+            // Fetch all managed Pods (with full Pod objects for label extraction and status check)
+            List<Pod> managedPods = k8sClient.listManagedPods();
 
-            // Collect all session IDs present in k8s across all resource types (in parallel)
-            CompletableFuture<List<String>> podsFuture = CompletableFuture.supplyAsync(
-                k8sClient::listManagedPodSessionIds);
+            // Collect orphaned session IDs from Services and HTTPRoutes (no Pod counterpart)
             CompletableFuture<List<String>> servicesFuture = CompletableFuture.supplyAsync(
                 k8sClient::listManagedServiceSessionIds);
             CompletableFuture<List<String>> routesFuture = CompletableFuture.supplyAsync(
                 k8sClient::listManagedHTTPRouteSessionIds);
-            CompletableFuture<List<String>> policiesFuture = CompletableFuture.supplyAsync(
-                k8sClient::listManagedSecurityPolicySessionIds);
 
-            Set<String> k8sSessions = new HashSet<>();
-            k8sSessions.addAll(podsFuture.get(10, TimeUnit.SECONDS));
-            k8sSessions.addAll(servicesFuture.get(10, TimeUnit.SECONDS));
-            k8sSessions.addAll(routesFuture.get(10, TimeUnit.SECONDS));
-            k8sSessions.addAll(policiesFuture.get(10, TimeUnit.SECONDS));
-
-            // Orphans = in k8s but not known to this controller
-            k8sSessions.removeAll(knownSessions);
-
-            if (k8sSessions.isEmpty()) {
-                LOG.info("No orphaned resources found.");
-                return;
+            // Build set of session IDs that have a Pod
+            Set<String> podSessionIds = new HashSet<>();
+            for (Pod pod : managedPods) {
+                String sid = pod.getMetadata().getLabels().get("session");
+                if (sid != null) podSessionIds.add(sid);
             }
 
-            LOG.info("Found " + k8sSessions.size() + " orphaned session(s): " + k8sSessions);
-            for (String sessionId : k8sSessions) {
-                LOG.info("Deleting orphaned resources for session: " + sessionId);
-                // TODO: Re-enable after SSO issue is resolved
-                // try { k8sClient.deleteSecurityPolicy(sessionId); } catch (Exception e) {
-                //     LOG.warning("Failed to delete orphaned SecurityPolicy for " + sessionId + ": " + e.getMessage());
-                // }
+            // Restore Running Pods, delete non-Running Pods
+            int restored = 0;
+            int deleted = 0;
+            for (Pod pod : managedPods) {
+                Map<String, String> labels = pod.getMetadata().getLabels();
+                String sessionId = labels.get("session");
+                String toolName = labels.get("tool");
+                String userId = labels.get("user");
+                if (sessionId == null || toolName == null || userId == null) {
+                    LOG.warning("Pod missing required labels, deleting: " + pod.getMetadata().getName());
+                    try { k8sClient.deleteOrphanedPodBySession(sessionId != null ? sessionId : "unknown"); }
+                    catch (Exception e) { LOG.warning("Failed to delete unlabeled pod: " + e.getMessage()); }
+                    continue;
+                }
+
+                boolean running = pod.getStatus() != null
+                    && "Running".equals(pod.getStatus().getPhase());
+                if (running) {
+                    // Restore this session
+                    sessionManager.tell(sm -> sm.restoreSession(sessionManager, sessionId, userId, toolName, pod));
+                    restored++;
+                } else {
+                    // Non-running Pod — delete all associated resources
+                    LOG.info("Deleting non-running orphaned session: " + sessionId
+                        + " (phase=" + (pod.getStatus() != null ? pod.getStatus().getPhase() : "null") + ")");
+                    try { k8sClient.deleteHTTPRoute(sessionId); } catch (Exception e) {
+                        LOG.warning("Failed to delete orphaned HTTPRoute for " + sessionId + ": " + e.getMessage());
+                    }
+                    try { k8sClient.deleteService("pups-svc-" + sessionId); } catch (Exception e) {
+                        LOG.warning("Failed to delete orphaned Service for " + sessionId + ": " + e.getMessage());
+                    }
+                    try { k8sClient.deleteOrphanedPodBySession(sessionId); } catch (Exception e) {
+                        LOG.warning("Failed to delete orphaned Pod for " + sessionId + ": " + e.getMessage());
+                    }
+                    deleted++;
+                }
+            }
+
+            // Clean up orphaned Services/HTTPRoutes that have no corresponding Pod
+            Set<String> orphanedNonPodSessions = new HashSet<>();
+            orphanedNonPodSessions.addAll(servicesFuture.get(10, TimeUnit.SECONDS));
+            orphanedNonPodSessions.addAll(routesFuture.get(10, TimeUnit.SECONDS));
+            orphanedNonPodSessions.removeAll(podSessionIds);
+            for (String sessionId : orphanedNonPodSessions) {
+                LOG.info("Deleting orphaned non-pod resources for session: " + sessionId);
                 try { k8sClient.deleteHTTPRoute(sessionId); } catch (Exception e) {
                     LOG.warning("Failed to delete orphaned HTTPRoute for " + sessionId + ": " + e.getMessage());
                 }
                 try { k8sClient.deleteService("pups-svc-" + sessionId); } catch (Exception e) {
                     LOG.warning("Failed to delete orphaned Service for " + sessionId + ": " + e.getMessage());
                 }
-                try { k8sClient.deleteOrphanedPodBySession(sessionId); } catch (Exception e) {
-                    LOG.warning("Failed to delete orphaned Pod for " + sessionId + ": " + e.getMessage());
-                }
+                deleted++;
             }
-            LOG.info("Orphan reconciliation complete.");
+
+            LOG.info("Orphan reconciliation complete: restored=" + restored + ", deleted=" + deleted);
         } catch (Exception e) {
             LOG.warning("Orphan reconciliation failed: " + e.getMessage());
         }
