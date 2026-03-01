@@ -24,6 +24,7 @@ public class SessionManagerActor {
     private final int maxSessions;
     private final int maxSessionsPerUser;
     private final long idleTimeoutMinutes;
+    private final long maxLifetimeMinutes;
     private final Set<String> unlimitedUsers;
     private final LdapUserInfoClient ldapClient;
 
@@ -35,12 +36,14 @@ public class SessionManagerActor {
 
     public SessionManagerActor(K8sApiClient k8sClient, Map<String, ToolPlugin> plugins,
                                int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
+                               long maxLifetimeMinutes,
                                Set<String> unlimitedUsers, LdapUserInfoClient ldapClient) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
         this.maxSessions = maxSessions;
         this.maxSessionsPerUser = maxSessionsPerUser;
         this.idleTimeoutMinutes = idleTimeoutMinutes;
+        this.maxLifetimeMinutes = maxLifetimeMinutes;
         this.unlimitedUsers = unlimitedUsers;
         this.ldapClient = ldapClient;
     }
@@ -202,7 +205,7 @@ public class SessionManagerActor {
         for (var entry : sessions.entrySet()) {
             try {
                 Boolean idle = entry.getValue()
-                    .ask(sa -> sa.checkIdle(idleTimeoutMinutes)).get();
+                    .ask(sa -> sa.checkIdle(idleTimeoutMinutes, maxLifetimeMinutes)).get();
                 if (Boolean.TRUE.equals(idle)) {
                     toRemove.add(entry.getKey());
                 }
