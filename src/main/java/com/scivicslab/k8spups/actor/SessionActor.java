@@ -106,6 +106,52 @@ public class SessionActor {
     }
 
     /**
+     * Attach to an existing Running Pod (used for session restoration on controller restart).
+     * Does NOT create Pod/Service/HTTPRoute — they already exist in k8s.
+     */
+    public void attachToExisting(ActorRef<SessionActor> self, Pod pod) {
+        LOG.info("Restoring session: user=" + info.userId()
+            + ", tool=" + info.toolPlugin().name()
+            + ", session=" + info.sessionId());
+
+        // Check if Pod is Running and Ready
+        boolean running = pod.getStatus() != null && "Running".equals(pod.getStatus().getPhase());
+        boolean ready = running && pod.getStatus().getConditions() != null
+            && pod.getStatus().getConditions().stream()
+                .anyMatch(c -> "Ready".equals(c.getType()) && "True".equals(c.getStatus()));
+
+        if (ready) {
+            state = SessionState.READY;
+        } else if (running) {
+            state = SessionState.STARTING;
+        } else {
+            LOG.warning("Pod not running during restore: " + info.podName()
+                + " phase=" + (pod.getStatus() != null ? pod.getStatus().getPhase() : "null"));
+            state = SessionState.FAILED;
+            return;
+        }
+
+        // Restore memo from Pod annotation
+        if (pod.getMetadata().getAnnotations() != null) {
+            String savedMemo = pod.getMetadata().getAnnotations().get("k8s-pups/memo");
+            if (savedMemo != null) {
+                this.memo = savedMemo;
+            }
+        }
+
+        // Set up pod watch for ongoing status monitoring
+        try {
+            podWatch = k8sClient.watchPod(info.podName(),
+                (action, p) -> self.tell(sa -> sa.onPodEvent(action, p)));
+            LOG.info("Session restored: " + info.sessionId() + " state=" + state
+                + (memo.isEmpty() ? "" : " memo=\"" + memo + "\""));
+        } catch (Exception ex) {
+            LOG.severe("Failed to set up pod watch for restored session " + info.sessionId() + ": " + ex.getMessage());
+            state = SessionState.FAILED;
+        }
+    }
+
+    /**
      * Stop the session: delete HTTPRoute, Service, and Pod.
      */
     public void stop() {
@@ -195,9 +241,14 @@ public class SessionActor {
         return info.userId();
     }
 
-    /** Set a user-provided memo for this session. */
+    /** Set a user-provided memo for this session. Persists to Pod annotation. */
     public void setMemo(String text) {
         this.memo = text != null ? text : "";
+        try {
+            k8sClient.setPodAnnotation(info.podName(), "k8s-pups/memo", this.memo);
+        } catch (Exception e) {
+            LOG.warning("Failed to persist memo to pod annotation: " + e.getMessage());
+        }
     }
 
     // -- Internal --

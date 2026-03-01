@@ -6,6 +6,7 @@ import com.scivicslab.k8spups.k8s.SessionInfo;
 import com.scivicslab.k8spups.k8s.WorkspaceInfo;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
 import com.scivicslab.pojoactor.core.ActorRef;
+import io.fabric8.kubernetes.api.model.Pod;
 
 import java.util.*;
 import java.util.logging.Logger;
@@ -119,6 +120,42 @@ public class SessionManagerActor {
             + ", session=" + sessionId + " (user total: " + (userCount + 1) + ")");
 
         return new SessionStatus(sessionId, userId, plugin.displayName(), SessionState.STARTING, info.podName(), null, autoMemo);
+    }
+
+    /**
+     * Restore a session from an existing Running Pod (used after controller restart).
+     * Does NOT create Pod/Service/HTTPRoute — they already exist in k8s.
+     */
+    public void restoreSession(ActorRef<SessionManagerActor> self,
+                                String sessionId, String userId, String toolName, Pod pod) {
+        ToolPlugin plugin = plugins.get(toolName);
+        if (plugin == null) {
+            LOG.warning("Cannot restore session " + sessionId + ": unknown tool '" + toolName + "'");
+            return;
+        }
+        if (sessions.containsKey(sessionId)) {
+            LOG.info("Session already known, skipping restore: " + sessionId);
+            return;
+        }
+
+        // Look up POSIX account for workspace mounting (silently skip if not found)
+        WorkspaceInfo workspaceInfo = null;
+        if (plugin.workspaceEnabled() && ldapClient != null) {
+            workspaceInfo = ldapClient.lookup(userId).orElse(null);
+        }
+
+        SessionInfo info = new SessionInfo(sessionId, userId, plugin, null, null, null,
+            Collections.emptyMap(), null, workspaceInfo);
+        SessionActor actor = new SessionActor(info, k8sClient);
+
+        ActorRef<SessionActor> childRef = self.createChild("session-" + sessionId, actor);
+        sessions.put(sessionId, childRef);
+        userSessions.computeIfAbsent(userId, k -> new ArrayList<>()).add(sessionId);
+
+        // Attach to existing Pod (async)
+        childRef.tell(sa -> sa.attachToExisting(childRef, pod));
+
+        LOG.info("Session restored: user=" + userId + ", tool=" + toolName + ", session=" + sessionId);
     }
 
     /**

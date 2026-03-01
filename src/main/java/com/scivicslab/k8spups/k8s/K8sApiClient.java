@@ -98,6 +98,14 @@ public class K8sApiClient {
         LOG.info("Orphaned pod(s) deleted for session: " + sessionId);
     }
 
+    /** Set an annotation on a managed Pod. */
+    public void setPodAnnotation(String podName, String key, String value) {
+        client.pods().inNamespace(userPodsNamespace).withName(podName)
+            .edit(p -> new PodBuilder(p)
+                .editMetadata().addToAnnotations(key, value).endMetadata()
+                .build());
+    }
+
     public String getPodPhase(String podName) {
         Pod pod = client.pods().inNamespace(userPodsNamespace).withName(podName).get();
         if (pod == null || pod.getStatus() == null) {
@@ -379,6 +387,18 @@ public class K8sApiClient {
     // -- Orphan resource discovery (for startup reconciliation) --
 
     private static final String MANAGED_BY_LABEL = "managed-by=k8s-pups";
+
+    /**
+     * Returns all Pods in userPodsNamespace created by k8s-pups.
+     * Used during startup reconciliation to restore or clean up sessions.
+     */
+    public List<Pod> listManagedPods() {
+        return client.pods()
+            .inNamespace(userPodsNamespace)
+            .withLabelSelector(MANAGED_BY_LABEL)
+            .list()
+            .getItems();
+    }
 
     /**
      * Returns sessionIds of all Pods in userPodsNamespace created by k8s-pups.
