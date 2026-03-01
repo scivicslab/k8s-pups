@@ -29,6 +29,13 @@ for dir in .config .cache .local .dbus .gvfs; do
 done
 mkdir -p "$HOME/.config" "$HOME/.cache" "$HOME/.local/share"
 
+# Copy default fcitx5 profile (Mozc) if not present
+if [ ! -f "$HOME/.config/fcitx5/profile" ]; then
+    mkdir -p "$HOME/.config/fcitx5"
+    cp /etc/skel/.config/fcitx5/profile "$HOME/.config/fcitx5/profile"
+    echo "Copied default fcitx5 profile (Mozc)"
+fi
+
 DISPLAY_NUM=1
 VNC_PORT=5901
 
@@ -65,6 +72,12 @@ QT_IM_MODULE=fcitx \
 XMODIFIERS=@im=fcitx \
     dbus-launch --exit-with-session mate-session &
 echo "MATE session started"
+
+sleep 2
+
+# Start fcitx5 input method daemon (Mozc)
+DISPLAY=:${DISPLAY_NUM} fcitx5 -d --replace 2>/dev/null &
+echo "fcitx5 started"
 
 # Keep container alive while background processes are running
 wait

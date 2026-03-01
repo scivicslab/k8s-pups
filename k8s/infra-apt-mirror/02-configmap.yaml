@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apt-mirror-config
+  namespace: infra-apt-mirror
+data:
+  mirror.list: |
+    ############ config ##################
+    set base_path    /var/spool/apt-mirror
+    set nthreads     5
+    set _tilde       0
+    ############ end config ##############
+
+    deb-amd64 http://archive.ubuntu.com/ubuntu noble           main restricted universe multiverse
+    deb-amd64 http://archive.ubuntu.com/ubuntu noble-updates    main restricted universe multiverse
+    deb-amd64 http://archive.ubuntu.com/ubuntu noble-backports  main restricted universe multiverse
+    deb-amd64 http://security.ubuntu.com/ubuntu noble-security  main restricted universe multiverse
+
+    clean http://archive.ubuntu.com/ubuntu
+    clean http://security.ubuntu.com/ubuntu
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apt-mirror-nginx-config
+  namespace: infra-apt-mirror
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+
+        location / {
+            root /usr/share/nginx/html;
+            autoindex on;
+        }
+    }

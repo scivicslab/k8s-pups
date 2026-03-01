@@ -2,6 +2,16 @@ FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
+# ---- Optional local apt-mirror for faster builds ----
+ARG APT_MIRROR_URL=""
+RUN if [ -n "$APT_MIRROR_URL" ]; then \
+      rm -f /etc/apt/sources.list.d/ubuntu.sources && \
+      echo "deb ${APT_MIRROR_URL}/archive.ubuntu.com/ubuntu noble main restricted universe multiverse" > /etc/apt/sources.list && \
+      echo "deb ${APT_MIRROR_URL}/archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
+      echo "deb ${APT_MIRROR_URL}/archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse" >> /etc/apt/sources.list && \
+      echo "deb ${APT_MIRROR_URL}/security.ubuntu.com/ubuntu noble-security main restricted universe multiverse" >> /etc/apt/sources.list; \
+    fi
+
 # ---- Desktop environment + Guacamole deps + Japanese ----
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -35,6 +45,55 @@ RUN apt-get update && \
         wget \
         curl \
     && rm -rf /var/lib/apt/lists/*
+
+# ---- package-set-3: Development tools, editors, Python, build essentials ----
+RUN apt-get update && \
+    apt-get install -y \
+        # Network
+        cadaver git lftp net-tools xvfb \
+        # Editor / Misc
+        emacs vim imagemagick tree \
+        # GCC / Build
+        build-essential gfortran gcc-doc flex bison \
+        automake autoconf libtool autogen shtool \
+        libc6-dev libarchive-dev cmake clang \
+        # Python
+        python3 python3-pip python-is-python3 \
+        # Python/pyenv build deps
+        libffi-dev libssl-dev zlib1g-dev liblzma-dev libbz2-dev \
+        libreadline-dev libsqlite3-dev libopencv-dev tk-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---- package-set-1: R packages (r-cran-* and r-bioc-*) ----
+# Installs all available R CRAN and Bioconductor packages.
+# This pulls in ~7000 dependencies including C numerical libraries.
+# || true tolerates individual package failures.
+RUN apt-get update && \
+    apt-cache search '^r-cran-' | awk '{print $1}' | \
+        xargs -r apt-get install -y || true && \
+    apt-cache search '^r-bioc-' | awk '{print $1}' | \
+        xargs -r apt-get install -y || true && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---- package-set-2: Genome / biology / bioinformatics packages ----
+# Extracted from https://packages.ubuntu.com/noble/science/ by SciencePackageExtractor
+COPY package-set-2-names.txt /tmp/package-set-2-names.txt
+RUN apt-get update && \
+    xargs -a /tmp/package-set-2-names.txt apt-get install -y || true && \
+    rm -rf /var/lib/apt/lists/* /tmp/package-set-2-names.txt
+
+# ---- TeX Live (full) ----
+RUN apt-get update && \
+    apt-get install -y texlive-full texlive-lang-all && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---- Container runtime: Apptainer (provides singularity compat) + Docker CLI ----
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository -y ppa:apptainer/ppa && \
+    apt-get update && \
+    apt-get install -y apptainer docker.io && \
+    rm -rf /var/lib/apt/lists/*
 
 # ---- Japanese locale ----
 RUN locale-gen ja_JP.UTF-8 && \
@@ -96,6 +155,10 @@ RUN sed -i 's|</head>|<script src="auto-login.js"></script></head>|' \
 
 # ---- Ownership: all files under UID 1000 ----
 RUN chown -R user:user /opt/tomcat /etc/guacamole /home/user
+
+# ---- fcitx5 default profile: Mozc as default input method ----
+RUN mkdir -p /etc/skel/.config/fcitx5
+COPY fcitx5-profile /etc/skel/.config/fcitx5/profile
 
 # ---- Allow arbitrary UID in sidecar mode ----
 # When the desktop container runs as a LDAP UID (e.g. 1002), it needs to add

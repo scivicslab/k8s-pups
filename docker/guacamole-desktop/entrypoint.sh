@@ -12,6 +12,13 @@ for dir in .config .cache .local .dbus .gvfs; do
 done
 mkdir -p "$HOME/.config" "$HOME/.cache" "$HOME/.local/share"
 
+# Copy default fcitx5 profile (Mozc) if not present
+if [ ! -f "$HOME/.config/fcitx5/profile" ]; then
+    mkdir -p "$HOME/.config/fcitx5"
+    cp /etc/skel/.config/fcitx5/profile "$HOME/.config/fcitx5/profile"
+    echo "Copied default fcitx5 profile (Mozc)"
+fi
+
 DISPLAY_NUM=1
 VNC_PORT=5901
 
@@ -50,6 +57,12 @@ XMODIFIERS=@im=fcitx \
 echo "MATE session started"
 
 sleep 2
+
+# Start fcitx5 input method daemon (Mozc)
+DISPLAY=:${DISPLAY_NUM} fcitx5 -d --replace 2>/dev/null &
+echo "fcitx5 started"
+
+sleep 1
 
 # Start guacd (Guacamole protocol daemon) on localhost:4822
 guacd -b 127.0.0.1 -l 4822 -L info -f &
