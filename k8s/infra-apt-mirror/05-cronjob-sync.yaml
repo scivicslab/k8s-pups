@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: apt-mirror-sync
+  namespace: infra-apt-mirror
+spec:
+  schedule: "0 3 * * 0"
+  timeZone: "Asia/Tokyo"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      backoffLimit: 1
+      activeDeadlineSeconds: 43200
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: apt-mirror
+            image: ubuntu:24.04
+            command:
+            - /bin/bash
+            - -c
+            - |
+              apt-get update && apt-get install -y apt-mirror
+              cp /config/mirror.list /etc/apt/mirror.list
+              echo "Starting apt-mirror sync at $(date)"
+              apt-mirror
+              echo "Sync completed at $(date)"
+            volumeMounts:
+            - name: mirror-data
+              mountPath: /var/spool/apt-mirror
+            - name: config
+              mountPath: /config
+              readOnly: true
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "500m"
+              limits:
+                memory: "2Gi"
+                cpu: "2"
+          volumes:
+          - name: mirror-data
+            persistentVolumeClaim:
+              claimName: apt-mirror-data-pvc
+          - name: config
+            configMap:
+              name: apt-mirror-config

@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: apt-mirror-data-pv
+  labels:
+    project: infra-apt-mirror
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: 192.168.5.30
+    path: /volume1/Public/k8s-volumes/infra-apt-mirror/data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: apt-mirror-data-pvc
+  namespace: infra-apt-mirror
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 500Gi
+  volumeName: apt-mirror-data-pv
