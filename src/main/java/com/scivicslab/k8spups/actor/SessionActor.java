@@ -25,6 +25,7 @@ public class SessionActor {
     private final K8sApiClient k8sClient;
 
     private SessionState state = SessionState.CREATING;
+    private final Instant createdTime = Instant.now();
     private Instant lastAccessTime = Instant.now();
     private Watch podWatch;
     private String memo = "";
@@ -136,15 +137,22 @@ public class SessionActor {
     }
 
     /**
-     * Check if session has been idle longer than the given timeout.
-     * Returns true if idle and stop() was called.
+     * Check if session has been idle longer than the given timeout,
+     * or exceeded maximum lifetime. Returns true if stopped.
      */
-    public boolean checkIdle(long idleTimeoutMinutes) {
+    public boolean checkIdle(long idleTimeoutMinutes, long maxLifetimeMinutes) {
         if (state != SessionState.READY) {
             return false;
         }
+        long lifetimeMinutes = java.time.Duration.between(createdTime, Instant.now()).toMinutes();
+        if (maxLifetimeMinutes > 0 && lifetimeMinutes >= maxLifetimeMinutes) {
+            LOG.info("Session max lifetime reached: " + info.sessionId()
+                + " (alive " + lifetimeMinutes + " min, limit " + maxLifetimeMinutes + " min)");
+            stop();
+            return true;
+        }
         long idleMinutes = java.time.Duration.between(lastAccessTime, Instant.now()).toMinutes();
-        if (idleMinutes >= idleTimeoutMinutes) {
+        if (idleTimeoutMinutes > 0 && idleMinutes >= idleTimeoutMinutes) {
             LOG.info("Session idle timeout: " + info.sessionId()
                 + " (idle " + idleMinutes + " min)");
             stop();
