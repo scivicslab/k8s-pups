@@ -193,11 +193,21 @@ public class DashboardResource {
             LOG.warning("Failed to load storage info: " + e.getMessage());
         }
 
+        // Cluster resource info
+        Map<String, Object> clusterResources;
+        try {
+            clusterResources = actorSystem.getK8sClient().getClusterResourceSummary();
+        } catch (Exception e) {
+            LOG.warning("Failed to load cluster resources: " + e.getMessage());
+            clusterResources = Collections.emptyMap();
+        }
+
         Map<String, Object> data = new HashMap<>();
         data.put("userId", userId);
         data.put("tools", tools);
         data.put("sessions", userSessions);
         data.put("summary", summary);
+        data.put("clusterResources", clusterResources);
         data.put("storageSizeOptions", actorSystem.getStorageSizeOptions());
         data.put("currentStorageSize", userStoragePref != null ? userStoragePref : actorSystem.getDefaultStorageSize());
         data.put("pvcInfo", pvcInfo);

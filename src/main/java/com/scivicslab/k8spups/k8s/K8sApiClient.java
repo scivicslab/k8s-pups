@@ -15,6 +15,9 @@ import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 
 import jakarta.enterprise.inject.spi.CDI;
 
+import io.fabric8.kubernetes.api.model.metrics.v1beta1.NodeMetrics;
+import io.fabric8.kubernetes.api.model.metrics.v1beta1.NodeMetricsList;
+
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
@@ -1009,5 +1012,149 @@ public class K8sApiClient {
                 .withRestartPolicy("Never")
             .endSpec()
             .build();
+    }
+
+    // -- Cluster resource summary --
+
+    /**
+     * Returns per-node cluster resource usage by combining Node capacity/allocatable
+     * with real-time metrics from metrics-server.
+     */
+    public Map<String, Object> getClusterResourceSummary() {
+        Map<String, Object> summary = new LinkedHashMap<>();
+
+        var nodes = client.nodes().list().getItems();
+        int nodeCount = nodes.size();
+        long totalCpuMillis = 0;
+        long totalMemBytes = 0;
+
+        for (var node : nodes) {
+            var allocatable = node.getStatus().getAllocatable();
+            totalCpuMillis += parseCpuToMillis(allocatable.get("cpu").toString());
+            totalMemBytes += parseMemoryToBytes(allocatable.get("memory").toString());
+        }
+
+        // Actual usage from metrics-server
+        long usedCpuMillis = 0;
+        long usedMemBytes = 0;
+        boolean metricsAvailable = false;
+        try {
+            NodeMetricsList metricsList = client.top().nodes().metrics();
+            for (NodeMetrics nm : metricsList.getItems()) {
+                usedCpuMillis += parseCpuToMillis(nm.getUsage().get("cpu").toString());
+                usedMemBytes += parseMemoryToBytes(nm.getUsage().get("memory").toString());
+            }
+            metricsAvailable = true;
+        } catch (Exception e) {
+            LOG.warning("Failed to fetch node metrics: " + e.getMessage());
+        }
+
+        // Sum of requests and limits from all running pods
+        long requestsCpuMillis = 0;
+        long requestsMemBytes = 0;
+        long limitsCpuMillis = 0;
+        long limitsMemBytes = 0;
+        var pods = client.pods().inAnyNamespace().list().getItems();
+        for (var pod : pods) {
+            if (pod.getStatus() == null || !"Running".equals(pod.getStatus().getPhase())) {
+                continue;
+            }
+            for (var container : pod.getSpec().getContainers()) {
+                var resources = container.getResources();
+                if (resources == null) continue;
+                var req = resources.getRequests();
+                if (req != null) {
+                    if (req.get("cpu") != null)
+                        requestsCpuMillis += parseCpuToMillis(req.get("cpu").toString());
+                    if (req.get("memory") != null)
+                        requestsMemBytes += parseMemoryToBytes(req.get("memory").toString());
+                }
+                var lim = resources.getLimits();
+                if (lim != null) {
+                    if (lim.get("cpu") != null)
+                        limitsCpuMillis += parseCpuToMillis(lim.get("cpu").toString());
+                    if (lim.get("memory") != null)
+                        limitsMemBytes += parseMemoryToBytes(lim.get("memory").toString());
+                }
+            }
+        }
+
+        summary.put("nodeCount", nodeCount);
+        summary.put("cpuCores", totalCpuMillis / 1000);
+        summary.put("memoryGi", totalMemBytes / (1024L * 1024 * 1024));
+        // Actual usage
+        summary.put("cpuUsedCores", usedCpuMillis / 1000);
+        summary.put("memoryUsedGi", usedMemBytes / (1024L * 1024 * 1024));
+        summary.put("cpuPercent", totalCpuMillis > 0 ? (int) (usedCpuMillis * 100 / totalCpuMillis) : 0);
+        summary.put("memoryPercent", totalMemBytes > 0 ? (int) (usedMemBytes * 100 / totalMemBytes) : 0);
+        // Requests (guaranteed)
+        summary.put("cpuReqCores", requestsCpuMillis / 1000);
+        summary.put("memoryReqGi", requestsMemBytes / (1024L * 1024 * 1024));
+        summary.put("cpuReqPercent", totalCpuMillis > 0 ? (int) (requestsCpuMillis * 100 / totalCpuMillis) : 0);
+        summary.put("memoryReqPercent", totalMemBytes > 0 ? (int) (requestsMemBytes * 100 / totalMemBytes) : 0);
+        // Limits (burst max)
+        summary.put("cpuLimCores", limitsCpuMillis / 1000);
+        summary.put("memoryLimGi", limitsMemBytes / (1024L * 1024 * 1024));
+        summary.put("cpuLimPercent", totalCpuMillis > 0 ? (int) (limitsCpuMillis * 100 / totalCpuMillis) : 0);
+        summary.put("memoryLimPercent", totalMemBytes > 0 ? (int) (limitsMemBytes * 100 / totalMemBytes) : 0);
+        summary.put("metricsAvailable", metricsAvailable);
+
+        // PVC storage summary
+        long pvcTotalBytes = 0;
+        int pvcCount = 0;
+        var pvcList = client.persistentVolumeClaims().inAnyNamespace().list().getItems();
+        for (var pvc : pvcList) {
+            var req = pvc.getSpec().getResources().getRequests();
+            if (req != null && req.get("storage") != null) {
+                pvcTotalBytes += parseMemoryToBytes(req.get("storage").toString());
+                pvcCount++;
+            }
+        }
+        summary.put("pvcCount", pvcCount);
+        summary.put("pvcTotalGi", pvcTotalBytes / (1024L * 1024 * 1024));
+
+        // ResourceQuota summary across all namespaces
+        long quotaStorageBytes = 0;
+        boolean hasStorageQuota = false;
+        var quotaList = client.resourceQuotas().inAnyNamespace().list().getItems();
+        for (var quota : quotaList) {
+            var hard = quota.getSpec().getHard();
+            if (hard != null && hard.get("requests.storage") != null) {
+                quotaStorageBytes += parseMemoryToBytes(hard.get("requests.storage").toString());
+                hasStorageQuota = true;
+            }
+        }
+        summary.put("hasStorageQuota", hasStorageQuota);
+        summary.put("storageQuotaGi", quotaStorageBytes / (1024L * 1024 * 1024));
+
+        return summary;
+    }
+
+    /** Parses CPU quantity string (e.g. "64", "3623m", "500n") to millicores. */
+    private long parseCpuToMillis(String cpu) {
+        if (cpu.endsWith("n")) {
+            return Long.parseLong(cpu.substring(0, cpu.length() - 1)) / 1_000_000;
+        } else if (cpu.endsWith("u")) {
+            return Long.parseLong(cpu.substring(0, cpu.length() - 1)) / 1_000;
+        } else if (cpu.endsWith("m")) {
+            return Long.parseLong(cpu.substring(0, cpu.length() - 1));
+        } else {
+            return Long.parseLong(cpu) * 1000;
+        }
+    }
+
+    /** Parses memory quantity string (e.g. "131728508Ki", "19274Mi", "1024") to bytes. */
+    private long parseMemoryToBytes(String mem) {
+        if (mem.endsWith("Ki")) {
+            return Long.parseLong(mem.substring(0, mem.length() - 2)) * 1024;
+        } else if (mem.endsWith("Mi")) {
+            return Long.parseLong(mem.substring(0, mem.length() - 2)) * 1024 * 1024;
+        } else if (mem.endsWith("Gi")) {
+            return Long.parseLong(mem.substring(0, mem.length() - 2)) * 1024L * 1024 * 1024;
+        } else if (mem.endsWith("Ti")) {
+            return Long.parseLong(mem.substring(0, mem.length() - 2)) * 1024L * 1024 * 1024 * 1024;
+        } else {
+            return Long.parseLong(mem);
+        }
     }
 }
