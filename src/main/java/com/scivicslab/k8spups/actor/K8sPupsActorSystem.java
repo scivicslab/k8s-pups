@@ -42,8 +42,11 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.gateway-names", defaultValue = "sc-account-set1-gateway,sc-account-set2-gateway")
     List<String> gatewayNames;
 
-    @ConfigProperty(name = "k8spups.idle-timeout-minutes", defaultValue = "30")
+    @ConfigProperty(name = "k8spups.idle-timeout-minutes", defaultValue = "1440")
     long idleTimeoutMinutes;
+
+    @ConfigProperty(name = "k8spups.max-lifetime-minutes", defaultValue = "10080")
+    long maxLifetimeMinutes;
 
     @ConfigProperty(name = "k8spups.max-sessions", defaultValue = "100")
     int maxSessions;
@@ -142,7 +145,7 @@ public class K8sPupsActorSystem {
         // Create SessionManagerActor
         SessionManagerActor manager = new SessionManagerActor(
             k8sClient, plugins, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
-            unlimitedUsers, ldapClient);
+            maxLifetimeMinutes, unlimitedUsers, ldapClient);
         sessionManager = actorSystem.actorOf("session-manager", manager);
 
         // Schedule idle timeout checks
@@ -239,5 +242,9 @@ public class K8sPupsActorSystem {
 
     public String getDefaultStorageSize() {
         return defaultStorageSize;
+    }
+
+    public K8sApiClient getK8sClient() {
+        return k8sClient;
     }
 }

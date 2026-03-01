@@ -194,27 +194,51 @@
         .profile-select:focus { border-color: var(--orange); }
 
         /* ── Status bar ──────────────────────────────── */
-        .status-bar {
-            display: flex; align-items: center; gap: 10px;
-            padding: 12px 18px; border-radius: 10px;
-            font-size: 14px; font-weight: 500; margin-bottom: 24px;
+        /* ── Cluster overview grid ──────────────────── */
+        .cs-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 14px; margin-bottom: 28px;
         }
-        .status-bar.active {
-            background: #D1FAE5; color: #065F46; border: 1px solid #A7F3D0;
+        .cs-panel {
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 16px 20px;
+            font-size: 13px; color: var(--text);
         }
-        .status-bar.idle {
-            background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0;
+        .cs-title {
+            font-weight: 700; color: var(--muted); font-size: 11px;
+            text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px;
         }
-        .status-dot {
-            width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+        .cs-row {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
         }
-        .status-bar.active .status-dot { background: #10B981; }
-        .status-bar.idle .status-dot { background: #94A3B8; }
-        .status-counts {
-            display: flex; gap: 14px; margin-left: auto;
-            font-size: 12px; font-weight: 600;
+        .cs-row-label {
+            width: 60px; font-size: 11px; font-weight: 600; color: var(--muted);
+            flex-shrink: 0;
         }
-        .status-counts span { white-space: nowrap; }
+        .cs-bar-bg {
+            flex: 1; height: 8px; background: #F1F5F9;
+            border-radius: 4px; overflow: hidden;
+        }
+        .cs-bar-fill {
+            height: 100%; border-radius: 4px; transition: width .3s ease;
+        }
+        .cs-bar-fill.low  { background: #10B981; }
+        .cs-bar-fill.mid  { background: #F59E0B; }
+        .cs-bar-fill.high { background: #EF4444; }
+        .cs-val {
+            font-size: 11px; text-align: right; flex-shrink: 0; white-space: nowrap;
+        }
+        /* Text info panels */
+        .cs-info-line {
+            font-size: 13px; color: var(--text); margin-bottom: 6px;
+        }
+        .cs-info-line .num { font-weight: 700; }
+        .cs-dot {
+            display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+            margin-right: 4px; vertical-align: middle;
+        }
+        .cs-dot.active { background: #10B981; }
+        .cs-dot.idle   { background: #94A3B8; }
 
         /* ── Empty state ─────────────────────────────── */
         .empty { text-align: center; padding: 56px 24px; color: var(--muted); }
@@ -244,21 +268,74 @@
         Failed to start session. You may have reached the limit, or please try again later.
     </div>
 
-    {#if summary.total > 0}
-    <div class="status-bar active">
-        <span class="status-dot"></span>
-        <span>{summary.total} session(s) active</span>
-        <div class="status-counts">
-            {#if summary.ready > 0}<span>READY: {summary.ready}</span>{/if}
-            {#if summary.starting > 0}<span>STARTING: {summary.starting}</span>{/if}
-            {#if summary.failed > 0}<span>FAILED: {summary.failed}</span>{/if}
+    {#if clusterResources.get('nodeCount') != null}
+    {#let cr=clusterResources}
+    <div class="cs-grid">
+        <div class="cs-panel">
+            <div class="cs-title">CPU &mdash; {cr.get('cpuCores')} cores ({cr.get('nodeCount')} nodes)</div>
+            <div class="cs-row">
+                <span class="cs-row-label">Actual</span>
+                <div class="cs-bar-bg">
+                    <div class="cs-bar-fill {#if cr.get('cpuPercent').intValue() < 50}low{#else}{#if cr.get('cpuPercent').intValue() < 80}mid{#else}high{/if}{/if}"
+                         style="width:{cr.get('cpuPercent')}%"></div>
+                </div>
+                <span class="cs-val">{cr.get('cpuUsedCores')}/{cr.get('cpuCores')} ({cr.get('cpuPercent')}%)</span>
+            </div>
+            <div class="cs-row">
+                <span class="cs-row-label">Requests</span>
+                <div class="cs-bar-bg">
+                    <div class="cs-bar-fill {#if cr.get('cpuReqPercent').intValue() < 50}low{#else}{#if cr.get('cpuReqPercent').intValue() < 80}mid{#else}high{/if}{/if}"
+                         style="width:{cr.get('cpuReqPercent')}%"></div>
+                </div>
+                <span class="cs-val">{cr.get('cpuReqCores')}/{cr.get('cpuCores')} ({cr.get('cpuReqPercent')}%)</span>
+            </div>
+            <div class="cs-row">
+                <span class="cs-row-label">Limits</span>
+                <div class="cs-bar-bg">
+                    <div class="cs-bar-fill {#if cr.get('cpuLimPercent').intValue() < 50}low{#else}{#if cr.get('cpuLimPercent').intValue() < 80}mid{#else}high{/if}{/if}"
+                         style="width:{cr.get('cpuLimPercent')}%"></div>
+                </div>
+                <span class="cs-val">{cr.get('cpuLimCores')}/{cr.get('cpuCores')} ({cr.get('cpuLimPercent')}%)</span>
+            </div>
+        </div>
+        <div class="cs-panel">
+            <div class="cs-title">Memory &mdash; {cr.get('memoryGi')} GB</div>
+            <div class="cs-row">
+                <span class="cs-row-label">Actual</span>
+                <div class="cs-bar-bg">
+                    <div class="cs-bar-fill {#if cr.get('memoryPercent').intValue() < 50}low{#else}{#if cr.get('memoryPercent').intValue() < 80}mid{#else}high{/if}{/if}"
+                         style="width:{cr.get('memoryPercent')}%"></div>
+                </div>
+                <span class="cs-val">{cr.get('memoryUsedGi')}/{cr.get('memoryGi')} GB ({cr.get('memoryPercent')}%)</span>
+            </div>
+            <div class="cs-row">
+                <span class="cs-row-label">Requests</span>
+                <div class="cs-bar-bg">
+                    <div class="cs-bar-fill {#if cr.get('memoryReqPercent').intValue() < 50}low{#else}{#if cr.get('memoryReqPercent').intValue() < 80}mid{#else}high{/if}{/if}"
+                         style="width:{cr.get('memoryReqPercent')}%"></div>
+                </div>
+                <span class="cs-val">{cr.get('memoryReqGi')}/{cr.get('memoryGi')} GB ({cr.get('memoryReqPercent')}%)</span>
+            </div>
+            <div class="cs-row">
+                <span class="cs-row-label">Limits</span>
+                <div class="cs-bar-bg">
+                    <div class="cs-bar-fill {#if cr.get('memoryLimPercent').intValue() < 50}low{#else}{#if cr.get('memoryLimPercent').intValue() < 80}mid{#else}high{/if}{/if}"
+                         style="width:{cr.get('memoryLimPercent')}%"></div>
+                </div>
+                <span class="cs-val">{cr.get('memoryLimGi')}/{cr.get('memoryGi')} GB ({cr.get('memoryLimPercent')}%)</span>
+            </div>
+        </div>
+        <div class="cs-panel">
+            <div class="cs-title">Storage (PVC)</div>
+            <div class="cs-info-line">PVC: <span class="num">{cr.get('pvcCount')}</span> claims &mdash; <span class="num">{cr.get('pvcTotalGi')}</span> GB</div>
+            <div class="cs-info-line">Quota: {#if cr.get('hasStorageQuota')}<span class="num">{cr.get('storageQuotaGi')}</span> GB{#else}unlimited{/if}</div>
+        </div>
+        <div class="cs-panel">
+            <div class="cs-title">Sessions</div>
+            <div class="cs-info-line">{#if summary.total > 0}<span class="cs-dot active"></span> <span class="num">{summary.total}</span> active{#if summary.ready > 0} &mdash; ready: {summary.ready}{/if}{#if summary.starting > 0} &mdash; starting: {summary.starting}{/if}{#if summary.failed > 0} &mdash; failed: {summary.failed}{/if}{#else}<span class="cs-dot idle"></span> No active sessions{/if}</div>
         </div>
     </div>
-    {#else}
-    <div class="status-bar idle">
-        <span class="status-dot"></span>
-        <span>All sessions stopped</span>
-    </div>
+    {/let}
     {/if}
 
     {#if !sessions.isEmpty()}
