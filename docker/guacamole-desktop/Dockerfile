@@ -47,39 +47,103 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # ---- package-set-3: Development tools, editors, Python, build essentials ----
+# Install one by one so a single failure does not block the rest.
+COPY <<'EOF' /tmp/package-set-3.txt
+cadaver
+git
+lftp
+net-tools
+xvfb
+emacs
+vim
+imagemagick
+tree
+build-essential
+gfortran
+gcc-doc
+flex
+bison
+automake
+autoconf
+libtool
+autogen
+shtool
+libc6-dev
+libarchive-dev
+cmake
+clang
+python3
+python3-pip
+python-is-python3
+libffi-dev
+libssl-dev
+zlib1g-dev
+liblzma-dev
+libbz2-dev
+libreadline-dev
+libsqlite3-dev
+libopencv-dev
+tk-dev
+EOF
 RUN apt-get update && \
-    apt-get install -y \
-        # Network
-        cadaver git lftp net-tools xvfb \
-        # Editor / Misc
-        emacs vim imagemagick tree \
-        # GCC / Build
-        build-essential gfortran gcc-doc flex bison \
-        automake autoconf libtool autogen shtool \
-        libc6-dev libarchive-dev cmake clang \
-        # Python
-        python3 python3-pip python-is-python3 \
-        # Python/pyenv build deps
-        libffi-dev libssl-dev zlib1g-dev liblzma-dev libbz2-dev \
-        libreadline-dev libsqlite3-dev libopencv-dev tk-dev \
-    && rm -rf /var/lib/apt/lists/*
+    total=$(wc -l < /tmp/package-set-3.txt) && \
+    n=0 && failed=0 && \
+    while IFS= read -r pkg || [ -n "$pkg" ]; do \
+        pkg=$(echo "$pkg" | tr -d '[:space:]'); \
+        [ -z "$pkg" ] && continue; \
+        n=$((n+1)); \
+        if apt-get install -y "$pkg" > /dev/null 2>&1; then \
+            echo "[${n}/${total}] OK: ${pkg}"; \
+        else \
+            echo "[${n}/${total}] FAILED: ${pkg}"; \
+            failed=$((failed+1)); \
+        fi; \
+    done < /tmp/package-set-3.txt && \
+    echo "package-set-3 done: ${n} attempted, ${failed} failed" && \
+    rm -f /tmp/package-set-3.txt && \
+    rm -rf /var/lib/apt/lists/*
 
 # ---- package-set-1: R packages (r-cran-* and r-bioc-*) ----
-# Installs all available R CRAN and Bioconductor packages.
+# Installs all available R CRAN and Bioconductor packages one by one.
 # This pulls in ~7000 dependencies including C numerical libraries.
-# || true tolerates individual package failures.
+# Individual failures are logged but do not block other packages.
 RUN apt-get update && \
-    apt-cache search '^r-cran-' | awk '{print $1}' | \
-        xargs -r apt-get install -y || true && \
-    apt-cache search '^r-bioc-' | awk '{print $1}' | \
-        xargs -r apt-get install -y || true && \
+    apt-cache search '^r-cran-' | awk '{print $1}' | sort > /tmp/r-cran-list.txt && \
+    apt-cache search '^r-bioc-' | awk '{print $1}' | sort > /tmp/r-bioc-list.txt && \
+    total=$(cat /tmp/r-cran-list.txt /tmp/r-bioc-list.txt | wc -l) && \
+    n=0 && failed=0 && \
+    for pkg in $(cat /tmp/r-cran-list.txt /tmp/r-bioc-list.txt); do \
+        n=$((n+1)); \
+        if apt-get install -y --no-install-recommends "$pkg" > /dev/null 2>&1; then \
+            echo "[${n}/${total}] OK: ${pkg}"; \
+        else \
+            echo "[${n}/${total}] FAILED: ${pkg}"; \
+            failed=$((failed+1)); \
+        fi; \
+    done && \
+    echo "package-set-1 done: ${n} attempted, ${failed} failed" && \
+    rm -f /tmp/r-cran-list.txt /tmp/r-bioc-list.txt && \
     rm -rf /var/lib/apt/lists/*
 
 # ---- package-set-2: Genome / biology / bioinformatics packages ----
 # Extracted from https://packages.ubuntu.com/noble/science/ by SciencePackageExtractor
+# Install one by one so a single failure does not block the rest.
 COPY package-set-2-names.txt /tmp/package-set-2-names.txt
 RUN apt-get update && \
-    xargs -a /tmp/package-set-2-names.txt apt-get install -y || true && \
+    total=$(wc -l < /tmp/package-set-2-names.txt) && \
+    n=0 && failed=0 && \
+    while IFS= read -r pkg || [ -n "$pkg" ]; do \
+        pkg=$(echo "$pkg" | tr -d '[:space:]'); \
+        [ -z "$pkg" ] && continue; \
+        n=$((n+1)); \
+        if apt-get install -y --no-install-recommends "$pkg" > /dev/null 2>&1; then \
+            echo "[${n}/${total}] OK: ${pkg}"; \
+        else \
+            echo "[${n}/${total}] FAILED: ${pkg}"; \
+            failed=$((failed+1)); \
+        fi; \
+    done < /tmp/package-set-2-names.txt && \
+    echo "package-set-2 done: ${n} attempted, ${failed} failed" && \
     rm -rf /var/lib/apt/lists/* /tmp/package-set-2-names.txt
 
 # ---- TeX Live (full) ----

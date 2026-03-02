@@ -166,16 +166,22 @@ public class SessionActor {
             podWatch = null;
         }
 
-        try {
-            if (info.toolPlugin().connectionType() == ConnectionType.HTTP) {
-                // TODO: Re-enable after SSO issue is resolved
-                // k8sClient.deleteSecurityPolicy(info.sessionId());
+        if (info.toolPlugin().connectionType() == ConnectionType.HTTP) {
+            try {
                 k8sClient.deleteHTTPRoute(info.sessionId());
+            } catch (Exception e) {
+                LOG.warning("Failed to delete HTTPRoute for " + info.sessionId() + ": " + e.getMessage());
             }
+        }
+        try {
             k8sClient.deleteService(info.serviceName());
+        } catch (Exception e) {
+            LOG.warning("Failed to delete Service for " + info.sessionId() + ": " + e.getMessage());
+        }
+        try {
             k8sClient.deletePod(info.podName());
         } catch (Exception e) {
-            LOG.warning("Error during session cleanup " + info.sessionId() + ": " + e.getMessage());
+            LOG.warning("Failed to delete Pod for " + info.sessionId() + ": " + e.getMessage());
         }
 
         state = SessionState.STOPPED;
