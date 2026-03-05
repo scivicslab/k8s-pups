@@ -1,3 +1,4 @@
+com.scivicslab.k8spups.plugin.StorageSettingsPlugin
 com.scivicslab.k8spups.plugin.GuacamolePlugin
 com.scivicslab.k8spups.plugin.JupyterLabPlugin
 com.scivicslab.k8spups.plugin.CoderAgentPlugin

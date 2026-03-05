@@ -66,4 +66,58 @@ trap "rm -f '${PROJECT_DIR}/${WRAPPER}'" EXIT
 echo "Starting Docusaurus at $PROJECT_DIR with baseUrl=$BASE_URL"
 # Enable polling for file watching (inotify does not work on NFS)
 export WATCHPACK_POLLING=true
-exec npx docusaurus start --config "$WRAPPER" --host 0.0.0.0 --port 3000
+
+# --- Auto-recovery for hot-reload crashes ---
+# Docusaurus dev server can crash when .docusaurus/ metadata cache gets
+# corrupted by a race condition during rapid file edits (hot reload writes
+# a JSON file while another compilation reads it mid-write, causing
+# "Unterminated string in JSON" SyntaxError).
+#
+# Strategy:
+#   - If the server ran for >= STABLE_THRESHOLD seconds, it was a hot-reload
+#     crash. Clear .docusaurus/ cache and restart (unlimited retries, reset counter).
+#   - If the server ran for < STABLE_THRESHOLD seconds, it is a startup error
+#     (bad config, missing deps, etc.). Retry up to MAX_STARTUP_RETRIES times.
+# Disable set -e for the retry loop (non-zero exit is expected on crash)
+set +e
+
+MAX_STARTUP_RETRIES=3
+STABLE_THRESHOLD=30
+startup_failures=0
+
+while true; do
+    start_time=$(date +%s)
+
+    # Run without exec so the script stays alive after a crash
+    npx docusaurus start --config "$WRAPPER" --host 0.0.0.0 --port 3000
+    exit_code=$?
+
+    # Clean exit (SIGTERM from k8s pod deletion) — stop the loop
+    if [ $exit_code -eq 0 ] || [ $exit_code -eq 143 ]; then
+        echo "Docusaurus exited cleanly (code $exit_code). Shutting down."
+        exit 0
+    fi
+
+    elapsed=$(( $(date +%s) - start_time ))
+
+    if [ $elapsed -ge $STABLE_THRESHOLD ]; then
+        # Hot-reload crash: server was running fine, then crashed.
+        # Clear cache and restart. Reset failure counter.
+        startup_failures=0
+        echo "Docusaurus crashed after ${elapsed}s (exit code $exit_code). Likely a hot-reload cache corruption."
+        echo "Clearing .docusaurus/ cache and restarting..."
+        rm -rf .docusaurus
+        sleep 2
+    else
+        # Startup failure: server crashed before becoming stable.
+        startup_failures=$((startup_failures + 1))
+        if [ $startup_failures -ge $MAX_STARTUP_RETRIES ]; then
+            echo "ERROR: Docusaurus failed to start $MAX_STARTUP_RETRIES times (exit code $exit_code). Giving up." >&2
+            exit 1
+        fi
+        echo "Docusaurus crashed after ${elapsed}s (exit code $exit_code). Startup failure $startup_failures/$MAX_STARTUP_RETRIES."
+        echo "Clearing .docusaurus/ cache and retrying..."
+        rm -rf .docusaurus
+        sleep 3
+    fi
+done

@@ -1,6 +1,7 @@
 package com.scivicslab.k8spups.actor;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
+import com.scivicslab.k8spups.k8s.MountSpec;
 import com.scivicslab.k8spups.k8s.SessionInfo;
 import com.scivicslab.k8spups.plugin.ConnectionType;
 import com.scivicslab.k8spups.plugin.ResourceProfile;
@@ -11,6 +12,9 @@ import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.logging.Logger;
 
 /**
@@ -52,26 +56,72 @@ public class SessionActor {
         // All subsequent k8s API calls are blocking I/O, which virtual threads handle fine.
         try {
             ToolPlugin plugin = info.toolPlugin();
-            boolean workspaceActive = plugin.workspaceEnabled() && info.workspaceInfo() != null;
-            String workspaceMountTarget = null;
-            if (workspaceActive) {
-                workspaceMountTarget = plugin.workspaceMountPath() != null
-                    ? plugin.workspaceMountPath()
-                    : plugin.userDataMountPath();
-            }
-            boolean workspaceReplacesUserData = workspaceActive
-                && workspaceMountTarget != null
-                && workspaceMountTarget.equals(plugin.userDataMountPath());
+            String storageType = resolveStorageType();
 
-            // Create workspace NFS PV/PVC if needed
-            if (workspaceActive) {
+            // Storage type determines what gets mounted at userDataMountPath:
+            //   nfs-home  -> workspace NFS home directory (LDAP POSIX account)
+            //   longhorn  -> Longhorn PVC (RWO block storage)
+            //   nfs-k8s   -> NFS k8s-dedicated PVC (RWX)
+            boolean useNfsHome = "nfs-home".equals(storageType)
+                && plugin.workspaceEnabled() && info.workspaceInfo() != null;
+
+            // Create workspace NFS PV/PVC if nfs-home is selected
+            if (useNfsHome) {
                 k8sClient.createWorkspacePvPvcIfAbsent(info.userId(), info.workspaceInfo());
             }
 
-            // Create per-user PVC if needed (skipped when workspace replaces it)
-            if (plugin.userDataMountPath() != null && !workspaceReplacesUserData) {
-                String storageSize = resolveStorageSize();
-                k8sClient.createUserPvcIfAbsent(info.userId(), storageSize);
+            // Verify that the selected storage PVC exists (no auto-creation)
+            if (plugin.userDataMountPath() != null && !useNfsHome) {
+                String pvcName = k8sClient.userPvcName(info.userId(), storageType);
+                Map<String, String> pvcInfo = k8sClient.getUserPvcInfo(info.userId(), storageType);
+                if (!"true".equals(pvcInfo.get("exists"))) {
+                    LOG.warning("Session start rejected: PVC not found: " + pvcName
+                        + " (user=" + info.userId() + ", type=" + storageType + ")."
+                        + " Create the PVC in Storage Settings first.");
+                    state = SessionState.FAILED;
+                    memo = "Storage PVC not found. Create it in Storage Settings first.";
+                    return;
+                }
+                // RWO conflict check for Longhorn
+                if ("longhorn".equals(storageType) && k8sClient.isUserPvcInUse(info.userId(), storageType)) {
+                    LOG.warning("Session start rejected: Longhorn PVC " + pvcName
+                        + " is already mounted by another Pod (RWO)");
+                    state = SessionState.FAILED;
+                    memo = "Longhorn PVC is in use by another session. Stop it first.";
+                    return;
+                }
+            }
+
+            // Validate additional mounts
+            if (info.additionalMounts() != null && !info.additionalMounts().isEmpty()) {
+                Set<String> usedPaths = new HashSet<>();
+                if (plugin.userDataMountPath() != null) {
+                    usedPaths.add(plugin.userDataMountPath());
+                }
+                for (MountSpec extra : info.additionalMounts()) {
+                    // Mount path conflict check
+                    if (!usedPaths.add(extra.mountPath())) {
+                        state = SessionState.FAILED;
+                        memo = "Duplicate mount path: " + extra.mountPath();
+                        return;
+                    }
+                    // PVC existence check
+                    String extraPvcName = extra.sharedFrom() != null
+                        ? k8sClient.sharedPvcName(info.userId(), extra.sharedFrom())
+                        : k8sClient.userPvcName(info.userId(), extra.storageType());
+                    Map<String, String> extraPvcInfo = k8sClient.getUserPvcInfo(info.userId(), extra.storageType());
+                    if (extra.sharedFrom() == null && !"true".equals(extraPvcInfo.get("exists"))) {
+                        state = SessionState.FAILED;
+                        memo = "Additional mount PVC not found: " + extraPvcName;
+                        return;
+                    }
+                    // RWO conflict check for Longhorn
+                    if ("longhorn".equals(extra.storageType()) && k8sClient.isUserPvcInUse(info.userId(), extra.storageType())) {
+                        state = SessionState.FAILED;
+                        memo = "Longhorn PVC is in use by another session (additional mount).";
+                        return;
+                    }
+                }
             }
 
             // Create Pod, Service, and HTTPRoute in parallel.
@@ -107,7 +157,7 @@ public class SessionActor {
 
     /**
      * Attach to an existing Running Pod (used for session restoration on controller restart).
-     * Does NOT create Pod/Service/HTTPRoute — they already exist in k8s.
+     * Re-creates Service and HTTPRoute if they are missing (e.g. after controller restart).
      */
     public void attachToExisting(ActorRef<SessionActor> self, Pod pod) {
         LOG.info("Restoring session: user=" + info.userId()
@@ -136,6 +186,25 @@ public class SessionActor {
             String savedMemo = pod.getMetadata().getAnnotations().get("k8s-pups/memo");
             if (savedMemo != null) {
                 this.memo = savedMemo;
+            }
+        }
+
+        // Re-create Service and HTTPRoute if missing (they may have been lost on controller restart)
+        try {
+            k8sClient.ensureService(info);
+        } catch (Exception e) {
+            LOG.warning("Failed to ensure Service for " + info.sessionId() + ": " + e.getMessage());
+        }
+        if (info.toolPlugin().connectionType() == ConnectionType.HTTP) {
+            try {
+                k8sClient.ensureHTTPRoute(
+                    info.sessionId(),
+                    info.serviceName(),
+                    info.toolPlugin().containerPort(),
+                    info.toolPlugin().passthroughPath()
+                );
+            } catch (Exception e) {
+                LOG.warning("Failed to ensure HTTPRoute for " + info.sessionId() + ": " + e.getMessage());
             }
         }
 
@@ -231,7 +300,8 @@ public class SessionActor {
             state,
             info.podName(),
             url,
-            memo
+            memo,
+            info.userStorageType()
         );
     }
 
@@ -241,6 +311,10 @@ public class SessionActor {
 
     public String getSessionId() {
         return info.sessionId();
+    }
+
+    public String getToolName() {
+        return info.toolPlugin().name();
     }
 
     public String getUserId() {
@@ -260,7 +334,6 @@ public class SessionActor {
     // -- Internal --
 
     private String resolveStorageSize() {
-        // User's storage preference takes priority over plugin default
         if (info.userStoragePreference() != null && !info.userStoragePreference().isBlank()) {
             return info.userStoragePreference();
         }
@@ -274,6 +347,14 @@ public class SessionActor {
             }
         }
         return profiles.isEmpty() ? "20Gi" : profiles.get(0).storageSize();
+    }
+
+    private String resolveStorageType() {
+        // SessionInfo.userStorageType() carries activeStorageType from ConfigMap
+        if (info.userStorageType() != null && !info.userStorageType().isBlank()) {
+            return info.userStorageType();
+        }
+        return "longhorn";
     }
 
     private void onPodEvent(Watcher.Action action, Pod pod) {

@@ -10,5 +10,14 @@ public record SessionStatus(
     SessionState state,
     String podName,
     String accessUrl,
-    String memo
-) {}
+    String memo,
+    String storageType
+) {
+    /**
+     * Backward-compatible constructor (no storageType).
+     */
+    public SessionStatus(String sessionId, String userId, String toolName,
+                         SessionState state, String podName, String accessUrl, String memo) {
+        this(sessionId, userId, toolName, state, podName, accessUrl, memo, null);
+    }
+}

@@ -23,7 +23,7 @@ public class CoderAgentPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "10.0.0.23:32000/quarkus-coder-agent:1.0.2-2602281625";
+        return "10.0.0.23:32000/quarkus-coder-agent:1.0.1-2603041512";
     }
 
     @Override
