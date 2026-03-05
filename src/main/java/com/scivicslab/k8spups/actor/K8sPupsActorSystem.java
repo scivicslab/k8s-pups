@@ -67,6 +67,12 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.default-storage-size", defaultValue = "100Gi")
     String defaultStorageSize;
 
+    @ConfigProperty(name = "k8spups.storage-type-options", defaultValue = "nfs-k8s,longhorn,nfs-home")
+    List<String> storageTypeOptions;
+
+    @ConfigProperty(name = "k8spups.default-storage-type", defaultValue = "nfs-k8s")
+    String defaultStorageType;
+
     @ConfigProperty(name = "k8spups.session-oidc.issuer")
     String sessionOidcIssuer;
 
@@ -104,6 +110,13 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.workspace.nfs.base-path", defaultValue = "/Public/Users")
     String workspaceNfsBasePath;
 
+    // NFS k8s-dedicated storage config
+    @ConfigProperty(name = "k8spups.nfs-k8s.server", defaultValue = "")
+    String nfsK8sServer;
+
+    @ConfigProperty(name = "k8spups.nfs-k8s.base-path", defaultValue = "/Public/k8s-pups-data")
+    String nfsK8sBasePath;
+
     private ActorSystem actorSystem;
     private ActorRef<SessionManagerActor> sessionManager;
     private Scheduler scheduler;
@@ -127,7 +140,8 @@ public class K8sPupsActorSystem {
         k8sClient = new K8sApiClient(userPodsNamespace, httpRouteNamespace, gatewayNames,
             sessionOidcIssuer, sessionOidcAuthorizationEndpoint, sessionOidcTokenEndpoint,
             sessionOidcClientId, sessionOidcSecretName, sessionOidcJwksUri,
-            workspaceNfsServer, workspaceNfsBasePath);
+            workspaceNfsServer, workspaceNfsBasePath,
+            nfsK8sServer, nfsK8sBasePath);
 
         // Create LdapUserInfoClient for workspace mounting (null if not configured)
         LdapUserInfoClient ldapClient = null;
@@ -271,6 +285,14 @@ public class K8sPupsActorSystem {
 
     public String getDefaultStorageSize() {
         return defaultStorageSize;
+    }
+
+    public List<String> getStorageTypeOptions() {
+        return storageTypeOptions;
+    }
+
+    public String getDefaultStorageType() {
+        return defaultStorageType;
     }
 
     public K8sApiClient getK8sClient() {

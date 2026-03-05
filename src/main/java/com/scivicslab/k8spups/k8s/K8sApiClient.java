@@ -50,14 +50,19 @@ public class K8sApiClient {
     private final String oidcSecretName;
     private final String oidcJwksUri;
 
-    // NFS workspace config
+    // NFS workspace config (home directory)
     private final String nfsServer;
     private final String nfsBasePath;
+
+    // NFS k8s-dedicated config
+    private final String nfsK8sServer;
+    private final String nfsK8sBasePath;
 
     public K8sApiClient(String userPodsNamespace, String httpRouteNamespace, List<String> gatewayNames,
                         String oidcIssuer, String oidcAuthorizationEndpoint, String oidcTokenEndpoint,
                         String oidcClientId, String oidcSecretName, String oidcJwksUri,
-                        String nfsServer, String nfsBasePath) {
+                        String nfsServer, String nfsBasePath,
+                        String nfsK8sServer, String nfsK8sBasePath) {
         this.client = CDI.current().select(KubernetesClient.class).get();
         this.userPodsNamespace = userPodsNamespace;
         this.httpRouteNamespace = httpRouteNamespace;
@@ -70,6 +75,8 @@ public class K8sApiClient {
         this.oidcJwksUri = oidcJwksUri;
         this.nfsServer = nfsServer;
         this.nfsBasePath = nfsBasePath;
+        this.nfsK8sServer = nfsK8sServer;
+        this.nfsK8sBasePath = nfsK8sBasePath;
     }
 
     // -- Pod operations --
@@ -172,6 +179,19 @@ public class K8sApiClient {
         return created;
     }
 
+    /**
+     * Ensure Service exists for the session. Creates if missing, skips if already present.
+     */
+    public void ensureService(SessionInfo info) {
+        Service existing = client.services().inNamespace(userPodsNamespace)
+            .withName(info.serviceName()).get();
+        if (existing != null) {
+            return;
+        }
+        createService(info);
+        LOG.info("Service re-created during restore: " + info.serviceName());
+    }
+
     public void deleteService(String serviceName) {
         client.services().inNamespace(userPodsNamespace).withName(serviceName).delete();
         LOG.info("Service deleted: " + serviceName);
@@ -249,6 +269,22 @@ public class K8sApiClient {
         client.resource(route).create();
         LOG.info("HTTPRoute created: pups-session-" + sessionId
             + " (gateways: " + String.join(", ", gatewayNames) + ")");
+    }
+
+    /**
+     * Ensure HTTPRoute exists for the session. Creates if missing, skips if already present.
+     */
+    public void ensureHTTPRoute(String sessionId, String serviceName, int port, boolean passthroughPath) {
+        String routeName = "pups-session-" + sessionId;
+        HTTPRoute existing = client.resources(HTTPRoute.class)
+            .inNamespace(httpRouteNamespace)
+            .withName(routeName)
+            .get();
+        if (existing != null) {
+            return;
+        }
+        createHTTPRoute(sessionId, serviceName, port, passthroughPath);
+        LOG.info("HTTPRoute re-created during restore: " + routeName);
     }
 
     /**
@@ -464,46 +500,221 @@ public class K8sApiClient {
     // -- PVC operations --
 
     /**
-     * Returns the PVC name for a given userId.
-     * Sanitizes the userId to be a valid k8s resource name.
+     * Returns the sanitized userId for use in k8s resource names.
      */
-    private String userPvcName(String userId) {
-        return "pups-data-" + userId.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+    private String sanitizeUserId(String userId) {
+        return userId.toLowerCase().replaceAll("[^a-z0-9-]", "-");
     }
 
     /**
-     * Creates a per-user PVC in the user-pods namespace if it does not already exist.
-     * The PVC persists across sessions (not deleted on session stop).
-     *
-     * If the PVC already exists with a smaller size, it will be expanded to the
-     * requested size (PVC expansion must be supported by the storage class).
+     * Returns the PVC name for a given userId and storage type.
+     * Format: pups-data-{sanitizedUserId}-{storageType}
+     */
+    public String userPvcName(String userId, String storageType) {
+        return "pups-data-" + sanitizeUserId(userId) + "-" + storageType;
+    }
+
+    /**
+     * Returns the PVC name for a shared NFS volume.
+     * Format: pups-shared-{ownerUserId}-from-{sourceUserId}
+     */
+    public String sharedPvcName(String ownerUserId, String sourceUserId) {
+        return "pups-shared-" + sanitizeUserId(ownerUserId) + "-from-" + sanitizeUserId(sourceUserId);
+    }
+
+    /**
+     * Returns the PV name for a shared NFS volume (same as PVC name).
+     */
+    private String sharedPvName(String ownerUserId, String sourceUserId) {
+        return sharedPvcName(ownerUserId, sourceUserId);
+    }
+
+    /**
+     * Creates a shared NFS PV/PVC pointing to another user's nfs-k8s directory.
+     * The PV/PVC is owned by ownerUserId but references sourceUserId's NFS path.
+     */
+    public void createSharedNfsPvPvc(String ownerUserId, String sourceUserId, boolean readOnly) {
+        String pvName = sharedPvName(ownerUserId, sourceUserId);
+        String pvcName = sharedPvcName(ownerUserId, sourceUserId);
+        String nfsPath = nfsK8sBasePath + "/" + sanitizeUserId(sourceUserId);
+
+        // Create PV if absent
+        if (client.persistentVolumes().withName(pvName).get() == null) {
+            PersistentVolume pv = new PersistentVolumeBuilder()
+                .withNewMetadata()
+                    .withName(pvName)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", ownerUserId)
+                    .addToLabels("storage-type", "nfs-k8s-shared")
+                    .addToLabels("shared-from", sanitizeUserId(sourceUserId))
+                .endMetadata()
+                .withNewSpec()
+                    .withCapacity(Map.of("storage", new Quantity("1Ti")))
+                    .withAccessModes("ReadWriteMany")
+                    .withPersistentVolumeReclaimPolicy("Retain")
+                    .withStorageClassName("")
+                    .withNewCsi()
+                        .withDriver("nfs.csi.k8s.io")
+                        .withVolumeHandle(pvName)
+                        .addToVolumeAttributes("server", nfsK8sServer)
+                        .addToVolumeAttributes("share", nfsPath)
+                    .endCsi()
+                    .withMountOptions(List.of("nfsvers=4"))
+                .endSpec()
+                .build();
+            client.persistentVolumes().resource(pv).create();
+            LOG.info("Shared NFS PV created: " + pvName + " -> " + nfsK8sServer + ":" + nfsPath);
+        }
+
+        // Create PVC if absent
+        if (client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() == null) {
+            PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+                .withNewMetadata()
+                    .withName(pvcName)
+                    .withNamespace(userPodsNamespace)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", ownerUserId)
+                    .addToLabels("storage-type", "nfs-k8s-shared")
+                    .addToLabels("shared-from", sanitizeUserId(sourceUserId))
+                .endMetadata()
+                .withNewSpec()
+                    .withAccessModes("ReadWriteMany")
+                    .withStorageClassName("")
+                    .withVolumeName(pvName)
+                    .withNewResources()
+                        .addToRequests("storage", new Quantity("1Ti"))
+                    .endResources()
+                .endSpec()
+                .build();
+            client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+            LOG.info("Shared NFS PVC created: " + pvcName);
+        }
+    }
+
+    /**
+     * Deletes a shared NFS PV/PVC.
+     */
+    public void deleteSharedNfsPvPvc(String ownerUserId, String sourceUserId) {
+        String pvName = sharedPvName(ownerUserId, sourceUserId);
+        String pvcName = sharedPvcName(ownerUserId, sourceUserId);
+        client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).delete();
+        client.persistentVolumes().withName(pvName).delete();
+        LOG.info("Shared NFS PV/PVC deleted: " + pvcName);
+    }
+
+    /**
+     * Lists shared PVCs owned by a user (PVCs with storage-type=nfs-k8s-shared and user=ownerUserId).
+     */
+    public List<Map<String, String>> listSharedPvcs(String ownerUserId) {
+        List<Map<String, String>> result = new ArrayList<>();
+        var pvcs = client.persistentVolumeClaims().inNamespace(userPodsNamespace)
+            .withLabel("managed-by", "k8s-pups")
+            .withLabel("user", ownerUserId)
+            .withLabel("storage-type", "nfs-k8s-shared")
+            .list().getItems();
+        for (var pvc : pvcs) {
+            String sharedFrom = pvc.getMetadata().getLabels().getOrDefault("shared-from", "");
+            String phase = pvc.getStatus() != null && pvc.getStatus().getPhase() != null
+                ? pvc.getStatus().getPhase() : "Unknown";
+            boolean inUse = isSharedPvcInUse(ownerUserId, sharedFrom);
+            result.add(Map.of(
+                "sharedFrom", sharedFrom,
+                "pvcName", pvc.getMetadata().getName(),
+                "phase", phase,
+                "inUse", String.valueOf(inUse)
+            ));
+        }
+        return result;
+    }
+
+    /**
+     * Checks if a shared PVC is mounted by any running/pending Pod.
+     */
+    public boolean isSharedPvcInUse(String ownerUserId, String sourceUserId) {
+        String pvcName = sharedPvcName(ownerUserId, sourceUserId);
+        var pods = client.pods().inNamespace(userPodsNamespace)
+            .withLabel("managed-by", "k8s-pups").list().getItems();
+        for (var pod : pods) {
+            if (pod.getSpec() == null || pod.getSpec().getVolumes() == null) continue;
+            String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "";
+            if (!"Running".equals(phase) && !"Pending".equals(phase)) continue;
+            for (var vol : pod.getSpec().getVolumes()) {
+                if (vol.getPersistentVolumeClaim() != null
+                        && pvcName.equals(vol.getPersistentVolumeClaim().getClaimName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Checks if sourceUser allows targetUser to mount their nfs-k8s volume.
+     */
+    public boolean isShareAllowed(String sourceUserId, String targetUserId) {
+        Map<String, String> prefs = getUserStorageInfo(sourceUserId);
+        if (!"true".equals(prefs.get("share.enabled"))) return false;
+        String allowList = prefs.getOrDefault("share.allow", "").trim();
+        if ("*".equals(allowList)) return true;
+        for (String u : allowList.split(",")) {
+            if (u.trim().equals(targetUserId)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Lists users who have sharing enabled and whose nfs-k8s PVC exists.
+     * Returns list of {userId, shareMode} maps.
+     */
+    public List<Map<String, String>> listSharableVolumes(String requestingUserId) {
+        List<Map<String, String>> result = new ArrayList<>();
+        // Find all user prefs ConfigMaps
+        var configMaps = client.configMaps().inNamespace(userPodsNamespace)
+            .withLabel("managed-by", "k8s-pups")
+            .list().getItems();
+        for (var cm : configMaps) {
+            if (cm.getData() == null) continue;
+            if (!"true".equals(cm.getData().get("share.enabled"))) continue;
+            // Extract userId from ConfigMap name (pups-prefs-{userId})
+            String cmName = cm.getMetadata().getName();
+            if (!cmName.startsWith("pups-prefs-")) continue;
+            String sourceUserId = cmName.substring("pups-prefs-".length());
+            if (sourceUserId.equals(requestingUserId)) continue; // skip self
+            // Check if requester is allowed
+            if (!isShareAllowed(sourceUserId, requestingUserId)) continue;
+            // Check if source has nfs-k8s PVC
+            Map<String, String> pvcInfo = getUserPvcInfo(sourceUserId, "nfs-k8s");
+            if (!"true".equals(pvcInfo.get("exists"))) continue;
+            String mode = cm.getData().getOrDefault("share.mode", "ro");
+            result.add(Map.of("userId", sourceUserId, "shareMode", mode));
+        }
+        return result;
+    }
+
+    /**
+     * Returns the PV name for NFS-based storage types (nfs-k8s, nfs-home).
+     * PV is cluster-scoped; name matches PVC for easy pairing.
+     */
+    private String userPvName(String userId, String storageType) {
+        return userPvcName(userId, storageType);
+    }
+
+    /**
+     * Creates a Longhorn PVC for the user.
+     * StorageClass: longhorn-single, AccessMode: ReadWriteOnce.
+     * If the PVC already exists, this is a no-op.
      *
      * @param userId      the user identifier
-     * @param storageSize the requested storage size (e.g. "100Gi", "1Ti")
+     * @param storageSize the requested size (e.g. "100Gi")
      */
-    public void createUserPvcIfAbsent(String userId, String storageSize) {
-        String pvcName = userPvcName(userId);
+    public void createLonghornPvc(String userId, String storageSize) {
+        String pvcName = userPvcName(userId, "longhorn");
         PersistentVolumeClaim existing = client.persistentVolumeClaims()
-            .inNamespace(userPodsNamespace)
-            .withName(pvcName)
-            .get();
+            .inNamespace(userPodsNamespace).withName(pvcName).get();
         if (existing != null) {
-            // Check if expansion is needed
-            Quantity currentSize = existing.getSpec().getResources().getRequests().get("storage");
-            Quantity requestedSize = new Quantity(storageSize);
-            if (currentSize != null && compareSizeGi(requestedSize, currentSize) > 0) {
-                try {
-                    LOG.info("Expanding PVC " + pvcName + " from " + currentSize + " to " + storageSize);
-                    existing.getSpec().getResources().getRequests().put("storage", requestedSize);
-                    client.persistentVolumeClaims().inNamespace(userPodsNamespace)
-                        .resource(existing).update();
-                } catch (Exception e) {
-                    LOG.warning("PVC expansion failed for " + pvcName
-                        + " (StorageClass may not support resize): " + e.getMessage());
-                }
-            } else {
-                LOG.info("User PVC already exists: " + pvcName + " (" + currentSize + ")");
-            }
+            LOG.info("Longhorn PVC already exists: " + pvcName);
             return;
         }
         PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
@@ -511,9 +722,12 @@ public class K8sApiClient {
                 .withName(pvcName)
                 .withNamespace(userPodsNamespace)
                 .addToLabels("app", "k8s-pups-user")
+                .addToLabels("managed-by", "k8s-pups")
                 .addToLabels("user", userId)
+                .addToLabels("storage-type", "longhorn")
             .endMetadata()
             .withNewSpec()
+                .withStorageClassName("longhorn-single")
                 .withAccessModes("ReadWriteOnce")
                 .withNewResources()
                     .addToRequests("storage", new Quantity(storageSize))
@@ -521,58 +735,388 @@ public class K8sApiClient {
             .endSpec()
             .build();
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
-        LOG.info("User PVC created: " + pvcName + " (" + storageSize + ")");
+        LOG.info("Longhorn PVC created: " + pvcName + " (" + storageSize + ")");
     }
 
     /**
-     * Returns information about a user's PVC.
+     * Creates a PV + PVC pair for the user's k8s-dedicated NFS storage.
+     * First ensures the user directory exists on the NFS server (owned by UID 1000),
+     * then creates the PV/PVC pointing to it.
+     * Uses nfs.csi.k8s.io driver with the nfsK8sServer/nfsK8sBasePath config.
+     * If they already exist, this is a no-op.
      *
      * @param userId the user identifier
-     * @return map with "exists", "size", "phase" keys
      */
-    public Map<String, String> getUserPvcInfo(String userId) {
-        String pvcName = userPvcName(userId);
+    public void createNfsK8sPvPvc(String userId) {
+        String pvName = userPvName(userId, "nfs-k8s");
+        String pvcName = userPvcName(userId, "nfs-k8s");
+        String sanitized = sanitizeUserId(userId);
+        String nfsPath = nfsK8sBasePath + "/" + sanitized;
+
+        // Ensure user directory exists on NFS server before creating PV
+        PersistentVolume existingPv = client.persistentVolumes().withName(pvName).get();
+        if (existingPv == null) {
+            ensureNfsK8sDirectory(sanitized);
+
+            PersistentVolume pv = new PersistentVolumeBuilder()
+                .withNewMetadata()
+                    .withName(pvName)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                    .addToLabels("storage-type", "nfs-k8s")
+                .endMetadata()
+                .withNewSpec()
+                    .withCapacity(Map.of("storage", new Quantity("1Ti")))
+                    .withAccessModes("ReadWriteMany")
+                    .withPersistentVolumeReclaimPolicy("Retain")
+                    .withStorageClassName("")
+                    .withNewCsi()
+                        .withDriver("nfs.csi.k8s.io")
+                        .withVolumeHandle(pvName)
+                        .addToVolumeAttributes("server", nfsK8sServer)
+                        .addToVolumeAttributes("share", nfsPath)
+                    .endCsi()
+                    .withMountOptions(List.of("nfsvers=4"))
+                .endSpec()
+                .build();
+            client.persistentVolumes().resource(pv).create();
+            LOG.info("NFS-k8s PV created: " + pvName + " -> " + nfsK8sServer + ":" + nfsPath);
+        }
+
+        // Create PVC if absent
+        PersistentVolumeClaim existingPvc = client.persistentVolumeClaims()
+            .inNamespace(userPodsNamespace).withName(pvcName).get();
+        if (existingPvc == null) {
+            PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+                .withNewMetadata()
+                    .withName(pvcName)
+                    .withNamespace(userPodsNamespace)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                    .addToLabels("storage-type", "nfs-k8s")
+                .endMetadata()
+                .withNewSpec()
+                    .withAccessModes("ReadWriteMany")
+                    .withStorageClassName("")
+                    .withVolumeName(pvName)
+                    .withNewResources()
+                        .addToRequests("storage", new Quantity("1Ti"))
+                    .endResources()
+                .endSpec()
+                .build();
+            client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+            LOG.info("NFS-k8s PVC created: " + pvcName);
+        }
+    }
+
+    /**
+     * Ensures the user directory exists on the NFS server for nfs-k8s storage.
+     * Runs a temporary Pod that mounts the NFS base path and creates the user subdirectory
+     * with ownership set to 1000:1000.
+     */
+    private void ensureNfsK8sDirectory(String sanitizedUserId) {
+        String podName = "nfs-k8s-init-" + sanitizedUserId + "-" + System.currentTimeMillis() % 100000;
+        String cmd = "mkdir -p /mnt/nfs-base/" + sanitizedUserId
+            + " && chown 1000:1000 /mnt/nfs-base/" + sanitizedUserId
+            + " && echo 'Directory ready'";
+
+        Pod initPod = new PodBuilder()
+            .withNewMetadata()
+                .withName(podName)
+                .withNamespace(userPodsNamespace)
+                .addToLabels("app", "k8s-pups-nfs-init")
+                .addToLabels("managed-by", "k8s-pups")
+            .endMetadata()
+            .withNewSpec()
+                .withRestartPolicy("Never")
+                .addNewVolume()
+                    .withName("nfs-base")
+                    .withNewNfs()
+                        .withServer(nfsK8sServer)
+                        .withPath(nfsK8sBasePath)
+                    .endNfs()
+                .endVolume()
+                .addNewContainer()
+                    .withName("init")
+                    .withImage("busybox:1.36")
+                    .withCommand("sh", "-c", cmd)
+                    .addNewVolumeMount()
+                        .withName("nfs-base")
+                        .withMountPath("/mnt/nfs-base")
+                    .endVolumeMount()
+                .endContainer()
+            .endSpec()
+            .build();
+
+        try {
+            client.pods().inNamespace(userPodsNamespace).resource(initPod).create();
+            LOG.info("NFS-k8s init pod created: " + podName);
+
+            // Wait for the init pod to complete (up to 60 seconds)
+            for (int i = 0; i < 60; i++) {
+                try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                Pod pod = client.pods().inNamespace(userPodsNamespace).withName(podName).get();
+                if (pod == null) break;
+                String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown";
+                if ("Succeeded".equals(phase)) {
+                    LOG.info("NFS-k8s directory created for: " + sanitizedUserId);
+                    break;
+                } else if ("Failed".equals(phase)) {
+                    LOG.warning("NFS-k8s init pod failed for: " + sanitizedUserId);
+                    break;
+                }
+            }
+        } finally {
+            // Clean up init pod
+            try {
+                client.pods().inNamespace(userPodsNamespace).withName(podName).delete();
+            } catch (Exception e) {
+                LOG.warning("Failed to delete NFS-k8s init pod " + podName + ": " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Creates a PV + PVC pair for the user's NFS home directory.
+     * Requires LDAP POSIX account info (WorkspaceInfo).
+     * If they already exist, this is a no-op.
+     *
+     * @param userId        the user identifier
+     * @param workspaceInfo POSIX account info from LDAP
+     */
+    public void createNfsHomePvPvc(String userId, WorkspaceInfo workspaceInfo) {
+        String pvName = userPvName(userId, "nfs-home");
+        String pvcName = userPvcName(userId, "nfs-home");
+        String nfsPath = nfsBasePath + "/" + workspaceInfo.username();
+
+        // Create PV if absent
+        PersistentVolume existingPv = client.persistentVolumes().withName(pvName).get();
+        if (existingPv == null) {
+            PersistentVolume pv = new PersistentVolumeBuilder()
+                .withNewMetadata()
+                    .withName(pvName)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                    .addToLabels("storage-type", "nfs-home")
+                .endMetadata()
+                .withNewSpec()
+                    .withCapacity(Map.of("storage", new Quantity("1Ti")))
+                    .withAccessModes("ReadWriteMany")
+                    .withPersistentVolumeReclaimPolicy("Retain")
+                    .withStorageClassName("")
+                    .withNewCsi()
+                        .withDriver("nfs.csi.k8s.io")
+                        .withVolumeHandle(pvName)
+                        .addToVolumeAttributes("server", nfsServer)
+                        .addToVolumeAttributes("share", nfsPath)
+                    .endCsi()
+                    .withMountOptions(List.of("nfsvers=4"))
+                .endSpec()
+                .build();
+            client.persistentVolumes().resource(pv).create();
+            LOG.info("NFS-home PV created: " + pvName + " -> " + nfsServer + ":" + nfsPath);
+        }
+
+        // Create PVC if absent
+        PersistentVolumeClaim existingPvc = client.persistentVolumeClaims()
+            .inNamespace(userPodsNamespace).withName(pvcName).get();
+        if (existingPvc == null) {
+            PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+                .withNewMetadata()
+                    .withName(pvcName)
+                    .withNamespace(userPodsNamespace)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                    .addToLabels("storage-type", "nfs-home")
+                .endMetadata()
+                .withNewSpec()
+                    .withAccessModes("ReadWriteMany")
+                    .withStorageClassName("")
+                    .withVolumeName(pvName)
+                    .withNewResources()
+                        .addToRequests("storage", new Quantity("1Ti"))
+                    .endResources()
+                .endSpec()
+                .build();
+            client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+            LOG.info("NFS-home PVC created: " + pvcName);
+        }
+    }
+
+    /**
+     * Expands a Longhorn PVC to the given size. Only Longhorn supports expansion.
+     * Fails silently if the PVC doesn't exist or the requested size is not larger.
+     */
+    public void expandLonghornPvc(String userId, String storageSize) {
+        String pvcName = userPvcName(userId, "longhorn");
+        PersistentVolumeClaim existing = client.persistentVolumeClaims()
+            .inNamespace(userPodsNamespace).withName(pvcName).get();
+        if (existing == null) {
+            LOG.warning("Cannot expand: Longhorn PVC not found: " + pvcName);
+            return;
+        }
+        Quantity currentSize = existing.getSpec().getResources().getRequests().get("storage");
+        Quantity requestedSize = new Quantity(storageSize);
+        if (currentSize != null && compareSizeGi(requestedSize, currentSize) > 0) {
+            existing.getSpec().getResources().getRequests().put("storage", requestedSize);
+            client.persistentVolumeClaims().inNamespace(userPodsNamespace)
+                .resource(existing).update();
+            LOG.info("Longhorn PVC expanded: " + pvcName + " from " + currentSize + " to " + storageSize);
+        } else {
+            LOG.info("No expansion needed for " + pvcName + " (current=" + currentSize + ", requested=" + storageSize + ")");
+        }
+    }
+
+    /**
+     * Deletes a user's PVC (and PV for NFS types).
+     * Refuses to delete if the PVC is currently mounted by a Pod.
+     *
+     * @return true if deleted, false if in-use or not found
+     */
+    public boolean deleteUserPvc(String userId, String storageType) {
+        String pvcName = userPvcName(userId, storageType);
         PersistentVolumeClaim pvc = client.persistentVolumeClaims()
-            .inNamespace(userPodsNamespace)
-            .withName(pvcName)
-            .get();
+            .inNamespace(userPodsNamespace).withName(pvcName).get();
+        if (pvc == null) {
+            LOG.info("PVC not found for deletion: " + pvcName);
+            return false;
+        }
+        if (isUserPvcInUse(userId, storageType)) {
+            LOG.warning("Cannot delete PVC " + pvcName + ": currently mounted by a Pod");
+            return false;
+        }
+
+        // Delete PVC
+        client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).delete();
+        LOG.info("PVC deleted: " + pvcName);
+
+        // For NFS types, also delete the PV
+        if ("nfs-k8s".equals(storageType) || "nfs-home".equals(storageType)) {
+            String pvName = userPvName(userId, storageType);
+            try {
+                client.persistentVolumes().withName(pvName).delete();
+                LOG.info("PV deleted: " + pvName);
+            } catch (Exception e) {
+                LOG.warning("Failed to delete PV " + pvName + ": " + e.getMessage());
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Returns the names of Pods currently mounting a user's PVC.
+     */
+    public List<String> findPodsUsingPvc(String userId, String storageType) {
+        String pvcName = userPvcName(userId, storageType);
+        List<String> podNames = new ArrayList<>();
+        var pods = client.pods().inNamespace(userPodsNamespace)
+            .withLabel("managed-by", "k8s-pups").list().getItems();
+        for (var pod : pods) {
+            if (pod.getSpec() == null || pod.getSpec().getVolumes() == null) continue;
+            // Only count Running/Pending pods (not terminated)
+            String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "";
+            if (!"Running".equals(phase) && !"Pending".equals(phase)) continue;
+            for (var vol : pod.getSpec().getVolumes()) {
+                if (vol.getPersistentVolumeClaim() != null
+                        && pvcName.equals(vol.getPersistentVolumeClaim().getClaimName())) {
+                    podNames.add(pod.getMetadata().getName());
+                }
+            }
+        }
+        return podNames;
+    }
+
+    /**
+     * Checks if a user's PVC is currently mounted by any Pod.
+     */
+    public boolean isUserPvcInUse(String userId, String storageType) {
+        return !findPodsUsingPvc(userId, storageType).isEmpty();
+    }
+
+    /**
+     * Returns PVC info for a specific storage type.
+     */
+    public Map<String, String> getUserPvcInfo(String userId, String storageType) {
+        String pvcName = userPvcName(userId, storageType);
+        PersistentVolumeClaim pvc = client.persistentVolumeClaims()
+            .inNamespace(userPodsNamespace).withName(pvcName).get();
         if (pvc == null) {
             return Map.of("exists", "false");
         }
         Quantity size = pvc.getSpec().getResources().getRequests().get("storage");
         String phase = pvc.getStatus() != null && pvc.getStatus().getPhase() != null
             ? pvc.getStatus().getPhase() : "Unknown";
-        return Map.of("exists", "true",
-            "size", size != null ? size.toString() : "0",
-            "phase", phase);
+        String sc = pvc.getSpec().getStorageClassName() != null
+            ? pvc.getSpec().getStorageClassName() : "";
+        List<String> usingPods = findPodsUsingPvc(userId, storageType);
+        boolean inUse = !usingPods.isEmpty();
+        Map<String, String> result = new HashMap<>();
+        result.put("exists", "true");
+        result.put("size", size != null ? size.toString() : "0");
+        result.put("phase", phase);
+        result.put("storageClass", sc);
+        result.put("inUse", String.valueOf(inUse));
+        result.put("usedBy", String.join(",", usingPods));
+        return result;
     }
 
     /**
-     * Reads the user's storage size preference from their ConfigMap.
-     *
-     * @param userId the user identifier
-     * @return the preferred storage size (e.g. "100Gi"), or null if not set
+     * Returns PVC info for all storage types (longhorn, nfs-k8s, nfs-home).
      */
-    public String getUserStoragePreference(String userId) {
+    public Map<String, Object> getAllUserPvcInfo(String userId) {
+        Map<String, Object> result = new HashMap<>();
+        for (String type : List.of("longhorn", "nfs-k8s", "nfs-home")) {
+            result.put(type, getUserPvcInfo(userId, type));
+        }
+        return result;
+    }
+
+    /**
+     * Reads the user's storage preferences from their ConfigMap.
+     * Returns all ConfigMap data including activeStorageType.
+     */
+    public Map<String, String> getUserStorageInfo(String userId) {
         String cmName = userPrefsConfigMapName(userId);
         ConfigMap cm = client.configMaps()
             .inNamespace(userPodsNamespace)
             .withName(cmName)
             .get();
         if (cm == null || cm.getData() == null) {
-            return null;
+            return Collections.emptyMap();
         }
-        return cm.getData().get("storageSize");
+        return new HashMap<>(cm.getData());
     }
 
     /**
-     * Saves the user's storage size preference to a ConfigMap.
-     * Creates the ConfigMap if it does not exist.
-     *
-     * @param userId      the user identifier
-     * @param storageSize the storage size (e.g. "100Gi", "500Gi")
+     * Saves the user's active storage type to the ConfigMap.
      */
-    public void saveUserStoragePreference(String userId, String storageSize) {
+    public void setActiveStorageType(String userId, String storageType) {
+        updateUserPref(userId, "activeStorageType", storageType);
+        // Legacy compat
+        updateUserPref(userId, "storageType", storageType);
+        LOG.info("Active storage type set for " + userId + ": " + storageType);
+    }
+
+    /**
+     * Saves the user's NFS share settings to their ConfigMap.
+     */
+    public void saveShareSettings(String userId, boolean enabled, String allowList, String mode) {
+        updateUserPref(userId, "share.enabled", String.valueOf(enabled));
+        updateUserPref(userId, "share.allow", allowList != null ? allowList.trim() : "");
+        updateUserPref(userId, "share.mode", mode != null ? mode : "ro");
+        LOG.info("Share settings saved for " + userId + ": enabled=" + enabled
+            + ", allow=" + allowList + ", mode=" + mode);
+    }
+
+    /**
+     * Saves the user's storage preferences to a ConfigMap.
+     * Creates the ConfigMap if it does not exist.
+     */
+    public void saveUserStoragePreference(String userId, String storageSize, String storageType) {
         String cmName = userPrefsConfigMapName(userId);
         ConfigMap existing = client.configMaps()
             .inNamespace(userPodsNamespace)
@@ -583,6 +1127,9 @@ public class K8sApiClient {
                 existing.setData(new HashMap<>());
             }
             existing.getData().put("storageSize", storageSize);
+            existing.getData().put("storageType", storageType);
+            existing.getData().put("activeStorageType", storageType);
+            existing.getData().put("longhorn.size", storageSize);
             client.configMaps().inNamespace(userPodsNamespace)
                 .resource(existing).update();
         } else {
@@ -595,10 +1142,45 @@ public class K8sApiClient {
                     .addToLabels("user", userId)
                 .endMetadata()
                 .addToData("storageSize", storageSize)
+                .addToData("storageType", storageType)
+                .addToData("activeStorageType", storageType)
+                .addToData("longhorn.size", storageSize)
                 .build();
             client.configMaps().inNamespace(userPodsNamespace).resource(cm).create();
         }
-        LOG.info("Saved storage preference for " + userId + ": " + storageSize);
+        LOG.info("Saved storage preference for " + userId + ": " + storageSize + " (" + storageType + ")");
+    }
+
+    /**
+     * Updates a single key in the user's preferences ConfigMap.
+     * Creates the ConfigMap if it does not exist.
+     */
+    private void updateUserPref(String userId, String key, String value) {
+        String cmName = userPrefsConfigMapName(userId);
+        ConfigMap existing = client.configMaps()
+            .inNamespace(userPodsNamespace)
+            .withName(cmName)
+            .get();
+        if (existing != null) {
+            if (existing.getData() == null) {
+                existing.setData(new HashMap<>());
+            }
+            existing.getData().put(key, value);
+            client.configMaps().inNamespace(userPodsNamespace)
+                .resource(existing).update();
+        } else {
+            ConfigMap cm = new ConfigMapBuilder()
+                .withNewMetadata()
+                    .withName(cmName)
+                    .withNamespace(userPodsNamespace)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                .endMetadata()
+                .addToData(key, value)
+                .build();
+            client.configMaps().inNamespace(userPodsNamespace).resource(cm).create();
+        }
     }
 
     private String userPrefsConfigMapName(String userId) {
@@ -762,47 +1344,49 @@ public class K8sApiClient {
         LOG.info("Pod " + info.podName() + " using resource profile: " + profile.name()
             + " (" + profile.displayName() + ")");
 
-        // Determine workspace state
-        boolean workspaceActive = plugin.workspaceEnabled() && info.workspaceInfo() != null;
-        String workspaceMountTarget = null;
-        if (workspaceActive) {
-            workspaceMountTarget = plugin.workspaceMountPath() != null
-                ? plugin.workspaceMountPath()
-                : plugin.userDataMountPath();
-        }
-        boolean workspaceReplacesUserData = workspaceActive
-            && workspaceMountTarget != null
-            && workspaceMountTarget.equals(plugin.userDataMountPath());
+        // Storage type determines what gets mounted at userDataMountPath:
+        //   nfs-home  -> workspace NFS PVC (LDAP home directory), run as LDAP UID
+        //   longhorn  -> Longhorn PVC (RWO block storage)
+        //   nfs-k8s   -> NFS k8s-dedicated PVC (RWX)
+        String storageType = info.userStorageType() != null && !info.userStorageType().isBlank()
+            ? info.userStorageType() : "longhorn";
+        boolean useNfsHome = "nfs-home".equals(storageType)
+            && plugin.workspaceEnabled() && info.workspaceInfo() != null;
 
         Map<String, String> labels = Map.of(
             "app", "k8s-pups-user",
             "managed-by", "k8s-pups",
             "tool", plugin.name(),
             "session", info.sessionId(),
-            "user", info.userId()
+            "user", info.userId(),
+            "storage-type", storageType
         );
 
-        // Sidecar mode: when workspace is active and the plugin defines a sidecar spec,
+        // Sidecar mode: when nfs-home is selected and the plugin defines a sidecar spec,
         // the Pod splits into two containers with different UIDs.
-        SidecarSpec sidecar = workspaceActive ? plugin.workspaceSidecar() : null;
+        SidecarSpec sidecar = useNfsHome ? plugin.workspaceSidecar() : null;
         if (sidecar != null) {
+            String workspaceMountTarget = plugin.workspaceMountPath() != null
+                ? plugin.workspaceMountPath() : plugin.userDataMountPath();
             return buildSidecarPod(info, plugin, sidecar, envVars,
                 profileRequests, profileLimits, workspaceMountTarget, labels);
         }
 
         return buildSingleContainerPod(info, plugin, envVars, profileRequests, profileLimits,
-            workspaceActive, workspaceMountTarget, workspaceReplacesUserData, labels);
+            useNfsHome, storageType, labels);
     }
 
     /**
      * Builds a single-container Pod (standard mode).
+     * Storage type controls what volume is mounted at userDataMountPath:
+     *   nfs-home (useNfsHome=true) -> workspace NFS PVC, run as LDAP UID
+     *   longhorn / nfs-k8s         -> user PVC by type name
      */
     private Pod buildSingleContainerPod(SessionInfo info, ToolPlugin plugin,
             List<EnvVar> envVars, Map<String, Quantity> requests, Map<String, Quantity> limits,
-            boolean workspaceActive, String workspaceMountTarget,
-            boolean workspaceReplacesUserData, Map<String, String> labels) {
+            boolean useNfsHome, String storageType, Map<String, String> labels) {
 
-        // Volume mounts: /tmp always + plugin-specific writable paths + optional user PVC + workspace
+        // Volume mounts: /tmp always + plugin-specific writable paths + storage volume
         List<VolumeMount> mounts = new ArrayList<>();
         mounts.add(new VolumeMountBuilder().withName("tmp").withMountPath("/tmp").build());
         for (int i = 0; i < plugin.writablePaths().size(); i++) {
@@ -811,20 +1395,23 @@ public class K8sApiClient {
                 .withMountPath(plugin.writablePaths().get(i))
                 .build());
         }
-        if (plugin.userDataMountPath() != null && !workspaceReplacesUserData) {
-            mounts.add(new VolumeMountBuilder()
-                .withName("user-data")
-                .withMountPath(plugin.userDataMountPath())
-                .build());
-        }
-        if (workspaceActive && workspaceMountTarget != null) {
-            VolumeMountBuilder vmb = new VolumeMountBuilder()
-                .withName("workspace")
-                .withMountPath(workspaceMountTarget);
-            if (plugin.workspaceSubPath() != null) {
-                vmb.withSubPath(plugin.workspaceSubPath());
+        if (plugin.userDataMountPath() != null) {
+            if (useNfsHome) {
+                // nfs-home: mount workspace NFS PVC at userDataMountPath
+                VolumeMountBuilder vmb = new VolumeMountBuilder()
+                    .withName("user-data")
+                    .withMountPath(plugin.userDataMountPath());
+                if (plugin.workspaceSubPath() != null) {
+                    vmb.withSubPath(plugin.workspaceSubPath());
+                }
+                mounts.add(vmb.build());
+            } else {
+                // longhorn / nfs-k8s: mount user PVC at userDataMountPath
+                mounts.add(new VolumeMountBuilder()
+                    .withName("user-data")
+                    .withMountPath(plugin.userDataMountPath())
+                    .build());
             }
-            mounts.add(vmb.build());
         }
 
         List<Volume> volumes = new ArrayList<>();
@@ -834,39 +1421,97 @@ public class K8sApiClient {
             volumes.add(new VolumeBuilder().withName("writable-" + i)
                 .withNewEmptyDir().withSizeLimit(new Quantity("500Mi")).endEmptyDir().build());
         }
-        if (plugin.userDataMountPath() != null && !workspaceReplacesUserData) {
-            volumes.add(new VolumeBuilder().withName("user-data")
-                .withNewPersistentVolumeClaim()
-                    .withClaimName(userPvcName(info.userId()))
-                    .withReadOnly(false)
-                .endPersistentVolumeClaim()
-                .build());
-        }
-        if (workspaceActive && workspaceMountTarget != null) {
-            volumes.add(new VolumeBuilder().withName("workspace")
-                .withNewPersistentVolumeClaim()
-                    .withClaimName(workspacePvcName(info.userId()))
-                    .withReadOnly(false)
-                .endPersistentVolumeClaim()
-                .build());
+        if (plugin.userDataMountPath() != null) {
+            if (useNfsHome) {
+                // nfs-home: use workspace PVC (NFS home directory)
+                volumes.add(new VolumeBuilder().withName("user-data")
+                    .withNewPersistentVolumeClaim()
+                        .withClaimName(workspacePvcName(info.userId()))
+                        .withReadOnly(false)
+                    .endPersistentVolumeClaim()
+                    .build());
+            } else {
+                // longhorn / nfs-k8s: use type-specific user PVC
+                volumes.add(new VolumeBuilder().withName("user-data")
+                    .withNewPersistentVolumeClaim()
+                        .withClaimName(userPvcName(info.userId(), storageType))
+                        .withReadOnly(false)
+                    .endPersistentVolumeClaim()
+                    .build());
+            }
         }
 
-        // When workspace is active (NFS home mounted) and no sidecar is used,
-        // run the container as the LDAP UID so it can read/write NFS files.
+        // Additional mounts (secondary PVCs at user-specified paths)
+        if (info.additionalMounts() != null) {
+            int idx = 0;
+            for (MountSpec extra : info.additionalMounts()) {
+                String volName = "extra-data-" + idx;
+                String pvcName = extra.sharedFrom() != null
+                    ? sharedPvcName(info.userId(), extra.sharedFrom())
+                    : userPvcName(info.userId(), extra.storageType());
+
+                mounts.add(new VolumeMountBuilder()
+                    .withName(volName)
+                    .withMountPath(extra.mountPath())
+                    .build());
+
+                volumes.add(new VolumeBuilder().withName(volName)
+                    .withNewPersistentVolumeClaim()
+                        .withClaimName(pvcName)
+                        .withReadOnly(false)
+                    .endPersistentVolumeClaim()
+                    .build());
+                idx++;
+            }
+        }
+
+        // When nfs-home is selected, run as LDAP UID so it can read/write NFS files.
         // Also disable readOnlyRootFilesystem so the entrypoint can add the UID
         // to /etc/passwd (required by Python's pwd module, dbus, etc.).
         Long runAsUid = plugin.runAsUser();
         Long runAsGid = plugin.runAsUser();
         boolean readOnlyRoot = plugin.readOnlyRootFilesystem();
-        if (workspaceActive && info.workspaceInfo() != null) {
+        if (useNfsHome && info.workspaceInfo() != null) {
             runAsUid = info.workspaceInfo().uid();
             runAsGid = info.workspaceInfo().gid();
             readOnlyRoot = false;
-            LOG.info("Pod " + info.podName() + " workspace mode: running as UID "
+            LOG.info("Pod " + info.podName() + " nfs-home mode: running as UID "
                 + runAsUid + " (LDAP) instead of " + plugin.runAsUser() + " (image default)");
         }
 
-        return new PodBuilder()
+        // Init container: seed PVC with /etc/skel if empty.
+        // Runs as the same UID as the main container (no root needed).
+        // fsGroup handles volume ownership.
+        List<io.fabric8.kubernetes.api.model.Container> initContainers = new ArrayList<>();
+        if (plugin.userDataMountPath() != null && !useNfsHome) {
+            String seedCmd =
+                "if [ -z \"$(ls -A /mnt/pvc 2>/dev/null | sed '/^lost+found$/d')\" ]; then "
+                + "echo 'PVC is empty, seeding from /etc/skel'; "
+                + "cp -a /etc/skel/. /mnt/pvc/ 2>/dev/null || true; "
+                + "echo 'Seed complete'; "
+                + "else echo 'PVC already has data, skipping seed'; fi";
+            initContainers.add(new io.fabric8.kubernetes.api.model.ContainerBuilder()
+                .withName("seed-home")
+                .withImage(plugin.containerImage())
+                .withCommand("sh", "-c", seedCmd)
+                .withVolumeMounts(new VolumeMountBuilder()
+                    .withName("user-data")
+                    .withMountPath("/mnt/pvc")
+                    .build())
+                .withNewSecurityContext()
+                    .withAllowPrivilegeEscalation(false)
+                    .withNewCapabilities().addToDrop("ALL").endCapabilities()
+                .endSecurityContext()
+                .withNewResources()
+                    .addToRequests("cpu", new Quantity("50m"))
+                    .addToRequests("memory", new Quantity("64Mi"))
+                    .addToLimits("cpu", new Quantity("200m"))
+                    .addToLimits("memory", new Quantity("128Mi"))
+                .endResources()
+                .build());
+        }
+
+        var podBuilder = new PodBuilder()
             .withNewMetadata()
                 .withName(info.podName())
                 .withNamespace(userPodsNamespace)
@@ -878,6 +1523,7 @@ public class K8sApiClient {
                     .withRunAsNonRoot(plugin.runAsNonRoot())
                     .withRunAsUser(runAsUid)
                     .withRunAsGroup(runAsGid)
+                    .withFsGroup(runAsGid)
                     .withNewSeccompProfile().withType(plugin.seccompProfileType()).endSeccompProfile()
                 .endSecurityContext()
                 .addNewContainer()
@@ -902,8 +1548,13 @@ public class K8sApiClient {
                 .endContainer()
                 .withVolumes(volumes)
                 .withRestartPolicy("Never")
-            .endSpec()
-            .build();
+            .endSpec();
+
+        if (!initContainers.isEmpty()) {
+            podBuilder.editSpec().withInitContainers(initContainers).endSpec();
+        }
+
+        return podBuilder.build();
     }
 
     /**

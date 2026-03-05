@@ -207,4 +207,13 @@ public interface ToolPlugin {
     default SidecarSpec workspaceSidecar() {
         return null;
     }
+
+    /**
+     * Whether only one instance per user is allowed.
+     * When true, creating a second session for the same user and tool is rejected.
+     * Default false (multiple instances allowed).
+     */
+    default boolean singleInstance() {
+        return false;
+    }
 }

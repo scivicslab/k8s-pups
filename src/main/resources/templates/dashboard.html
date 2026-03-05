@@ -382,29 +382,6 @@
     </div>
     {#else}
     <div class="tools-grid">
-        <!-- Storage Settings card -->
-        <div class="tool-card" style="border-left: 4px solid var(--orange);">
-            <div class="tool-icon"><img src="icons/storage.png" alt="Storage Settings"></div>
-            <div class="tool-name">Storage Settings</div>
-            <div class="tool-desc">
-                Configure the persistent disk size for your tool pods.
-                {#if pvcInfo.get('exists') == 'true'}
-                <br><br>
-                <strong>Current PVC:</strong> {pvcInfo.get('size')} ({pvcInfo.get('phase')})
-                {#else}
-                <br><br>
-                <em>No PVC yet. It will be created when you launch a tool.</em>
-                {/if}
-            </div>
-            <form method="post" action="storage/save">
-                <select name="storageSize" class="profile-select">
-                    {#for opt in storageSizeOptions}
-                    <option value="{opt}" {#if opt == currentStorageSize}selected{/if}>{opt}</option>
-                    {/for}
-                </select>
-                <button type="submit" class="btn btn-primary">Save</button>
-            </form>
-        </div>
         {#for tool in tools}
         <div class="tool-card">
             <div class="tool-icon"><img src="{tool.icon}" alt="{tool.displayName}"></div>
@@ -427,6 +404,25 @@
                        style="margin-top:6px;font-size:0.85rem;"
                        {#if param.required}required{/if}>
                 {/for}
+                {#if tool.userDataMountPath != null}
+                <select name="storageType" class="profile-select" title="Primary storage ({tool.userDataMountPath})">
+                    {#for type in storageTypeOptions}
+                    {#let info=pvcInfo.get(type)}
+                    {#if info != null && info.get('exists') == 'true'}
+                    <option value="{type}">{type}{#if info.get('size') != null} ({info.get('size')}){/if}{#if info.get('inUse') == 'true'} [in use]{/if}</option>
+                    {/if}
+                    {/let}
+                    {/for}
+                </select>
+                <div class="extra-mounts-container"></div>
+                <div class="shared-pvc-data" style="display:none;">
+                    {#for sp in sharedPvcs}
+                    <span data-shared-from="{sp.get('sharedFrom')}" data-pvc="{sp.get('pvcName')}"></span>
+                    {/for}
+                </div>
+                <button type="button" class="btn-add-mount" onclick="addExtraMount(this)"
+                        style="font-size:0.75rem;color:#6366f1;background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px;">+ Add mount</button>
+                {/if}
                 <button type="submit" class="btn btn-primary">Launch</button>
             </form>
         </div>
@@ -498,6 +494,58 @@
     });
     if (hasStarting) {
         setTimeout(pollSessionStatus, 3000);
+    }
+
+    // Add extra mount row to a tool launch form
+    var extraMountCounter = 0;
+    function addExtraMount(btn) {
+        var container = btn.parentElement.querySelector('.extra-mounts-container');
+        if (!container) return;
+        var existingRows = container.querySelectorAll('.extra-mount-row');
+        if (existingRows.length >= 3) return; // max 3 additional mounts
+        var idx = extraMountCounter++;
+        var row = document.createElement('div');
+        row.className = 'extra-mount-row';
+        row.style.cssText = 'display:flex;gap:4px;align-items:center;margin-top:4px;';
+        // Storage type select - copy options from the primary select
+        var primarySelect = btn.parentElement.querySelector('select[name="storageType"]');
+        var typeSelect = document.createElement('select');
+        typeSelect.name = 'extraType_' + existingRows.length;
+        typeSelect.className = 'profile-select';
+        typeSelect.style.cssText = 'flex:1;font-size:0.8rem;';
+        typeSelect.innerHTML = primarySelect.innerHTML;
+        // Add shared PVC options
+        var sharedData = btn.parentElement.querySelectorAll('.shared-pvc-data span');
+        sharedData.forEach(function(sp) {
+            var opt = document.createElement('option');
+            opt.value = 'nfs-k8s-shared::' + sp.dataset.sharedFrom;
+            opt.textContent = 'Shared: ' + sp.dataset.sharedFrom;
+            typeSelect.appendChild(opt);
+        });
+        // Mount path input
+        var pathInput = document.createElement('input');
+        pathInput.name = 'extraPath_' + existingRows.length;
+        pathInput.className = 'profile-select';
+        pathInput.style.cssText = 'flex:1;font-size:0.8rem;';
+        pathInput.placeholder = '/data';
+        pathInput.required = true;
+        // Remove button
+        var removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '\u00D7';
+        removeBtn.style.cssText = 'background:none;border:none;color:#DC2626;font-size:1.1rem;cursor:pointer;padding:0 4px;';
+        removeBtn.onclick = function() { row.remove(); reindexExtraMounts(container); };
+        row.appendChild(typeSelect);
+        row.appendChild(pathInput);
+        row.appendChild(removeBtn);
+        container.appendChild(row);
+    }
+    function reindexExtraMounts(container) {
+        var rows = container.querySelectorAll('.extra-mount-row');
+        rows.forEach(function(row, i) {
+            row.querySelector('select').name = 'extraType_' + i;
+            row.querySelector('input').name = 'extraPath_' + i;
+        });
     }
 
     // Memo save on blur (no page reload)

@@ -48,43 +48,7 @@ RUN apt-get update && \
 
 # ---- package-set-3: Development tools, editors, Python, build essentials ----
 # Install one by one so a single failure does not block the rest.
-COPY <<'EOF' /tmp/package-set-3.txt
-cadaver
-git
-lftp
-net-tools
-xvfb
-emacs
-vim
-imagemagick
-tree
-build-essential
-gfortran
-gcc-doc
-flex
-bison
-automake
-autoconf
-libtool
-autogen
-shtool
-libc6-dev
-libarchive-dev
-cmake
-clang
-python3
-python3-pip
-python-is-python3
-libffi-dev
-libssl-dev
-zlib1g-dev
-liblzma-dev
-libbz2-dev
-libreadline-dev
-libsqlite3-dev
-libopencv-dev
-tk-dev
-EOF
+COPY package-set-3-names.txt /tmp/package-set-3.txt
 RUN apt-get update && \
     total=$(wc -l < /tmp/package-set-3.txt) && \
     n=0 && failed=0 && \
@@ -150,6 +114,23 @@ RUN apt-get update && \
 RUN apt-get update && \
     apt-get install -y texlive-full texlive-lang-all && \
     rm -rf /var/lib/apt/lists/*
+
+# ---- package-set-4: Desktop applications (Firefox, LibreOffice, GIMP, Inkscape) ----
+# Firefox: Ubuntu 24.04 only ships snap; use Mozilla Team PPA for deb package.
+# LibreOffice, GIMP, Inkscape: available from default Ubuntu repos.
+RUN add-apt-repository -y ppa:mozillateam/ppa && \
+    echo 'Package: firefox*\nPin: release o=LP-PPA-mozillateam\nPin-Priority: 1001' \
+        > /etc/apt/preferences.d/mozilla-firefox && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        firefox \
+        libreoffice-writer \
+        libreoffice-calc \
+        libreoffice-impress \
+        libreoffice-l10n-ja \
+        gimp \
+        inkscape \
+    && rm -rf /var/lib/apt/lists/*
 
 # ---- Container runtime: Apptainer (provides singularity compat) + Docker CLI ----
 RUN apt-get update && \
