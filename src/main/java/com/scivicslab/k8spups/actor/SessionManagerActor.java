@@ -10,6 +10,7 @@ import com.scivicslab.pojoactor.core.ActorRef;
 import io.fabric8.kubernetes.api.model.Pod;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
 /**
@@ -107,19 +108,23 @@ public class SessionManagerActor {
         // Reject duplicate if plugin is single-instance
         if (plugin.singleInstance()) {
             List<String> userSessionIds = userSessions.getOrDefault(userId, List.of());
+            // Fire ask() to all user sessions in parallel
+            Map<String, CompletableFuture<String>> toolFutures = new HashMap<>();
             for (String existingId : userSessionIds) {
                 ActorRef<SessionActor> existing = sessions.get(existingId);
                 if (existing != null) {
-                    try {
-                        String existingTool = existing.ask(SessionActor::getToolName).get();
-                        if (toolName.equals(existingTool)) {
-                            LOG.info("Rejected duplicate " + toolName + " for user " + userId
-                                + " (existing session: " + existingId + ")");
-                            return null;
-                        }
-                    } catch (Exception e) {
-                        // ignore
+                    toolFutures.put(existingId, existing.ask(SessionActor::getToolName));
+                }
+            }
+            for (var entry : toolFutures.entrySet()) {
+                try {
+                    if (toolName.equals(entry.getValue().get())) {
+                        LOG.info("Rejected duplicate " + toolName + " for user " + userId
+                            + " (existing session: " + entry.getKey() + ")");
+                        return null;
                     }
+                } catch (Exception e) {
+                    // ignore
                 }
             }
         }
@@ -233,6 +238,8 @@ public class SessionManagerActor {
 
     /**
      * Stop and remove a session by sessionId.
+     * Sends stop() via tell() and waits for completion before closing the actor,
+     * ensuring the k8s resource cleanup finishes before the actor thread terminates.
      */
     public void destroySession(String sessionId) {
         ActorRef<SessionActor> ref = sessions.remove(sessionId);
@@ -246,7 +253,12 @@ public class SessionManagerActor {
                     break;
                 }
             }
-            ref.tell(SessionActor::stop);
+            try {
+                // Wait for stop() to complete before closing the actor
+                ref.tell(SessionActor::stop).get();
+            } catch (Exception e) {
+                LOG.warning("Error stopping session " + sessionId + ": " + e.getMessage());
+            }
             ref.close();
             LOG.info("Session destroyed: " + sessionId);
         }
@@ -254,21 +266,28 @@ public class SessionManagerActor {
 
     /**
      * Get the status of all sessions belonging to a user.
+     * Fires ask() to all SessionActors in parallel, then collects results.
      */
     public List<SessionStatus> getUserSessions(String userId) {
         List<String> sessionIds = userSessions.getOrDefault(userId, List.of());
-        List<SessionStatus> result = new ArrayList<>();
+        // Fire all ask() calls in parallel
+        List<CompletableFuture<SessionStatus>> futures = new ArrayList<>();
         for (String sessionId : sessionIds) {
             ActorRef<SessionActor> ref = sessions.get(sessionId);
             if (ref != null) {
-                try {
-                    SessionStatus status = ref.ask(SessionActor::getStatus).get();
-                    if (status != null) {
-                        result.add(status);
-                    }
-                } catch (Exception e) {
-                    LOG.warning("Failed to get session status for " + sessionId + ": " + e.getMessage());
+                futures.add(ref.ask(SessionActor::getStatus));
+            }
+        }
+        // Collect results
+        List<SessionStatus> result = new ArrayList<>();
+        for (var future : futures) {
+            try {
+                SessionStatus status = future.get();
+                if (status != null) {
+                    result.add(status);
                 }
+            } catch (Exception e) {
+                LOG.warning("Failed to get session status: " + e.getMessage());
             }
         }
         return result;
@@ -309,14 +328,21 @@ public class SessionManagerActor {
 
     /**
      * Check all sessions for idle timeout. Called periodically by Scheduler.
+     * Fires ask() to all SessionActors in parallel (non-blocking), then collects
+     * results. Sessions that should stop are destroyed via destroySession().
      */
     public void checkIdleSessions() {
-        List<String> toRemove = new ArrayList<>();
+        // Fire all ask() calls in parallel — each ask is queued in its SessionActor's mailbox
+        Map<String, CompletableFuture<Boolean>> futures = new HashMap<>();
         for (var entry : sessions.entrySet()) {
+            futures.put(entry.getKey(),
+                entry.getValue().ask(sa -> sa.shouldStop(idleTimeoutMinutes, maxLifetimeMinutes)));
+        }
+        // Collect results
+        List<String> toRemove = new ArrayList<>();
+        for (var entry : futures.entrySet()) {
             try {
-                Boolean idle = entry.getValue()
-                    .ask(sa -> sa.checkIdle(idleTimeoutMinutes, maxLifetimeMinutes)).get();
-                if (Boolean.TRUE.equals(idle)) {
+                if (Boolean.TRUE.equals(entry.getValue().get())) {
                     toRemove.add(entry.getKey());
                 }
             } catch (Exception e) {
@@ -344,15 +370,22 @@ public class SessionManagerActor {
 
     /**
      * Returns an aggregated summary of all sessions by state.
+     * Fires ask() to all SessionActors in parallel, then aggregates.
      */
     public SessionSummary getSessionSummary() {
         int total = sessions.size();
+        // Fire all ask() calls in parallel
+        List<CompletableFuture<SessionState>> futures = new ArrayList<>();
+        for (ActorRef<SessionActor> ref : sessions.values()) {
+            futures.add(ref.ask(SessionActor::getState));
+        }
+        // Collect results
         int ready = 0;
         int starting = 0;
         int failed = 0;
-        for (ActorRef<SessionActor> ref : sessions.values()) {
+        for (var future : futures) {
             try {
-                SessionState state = ref.ask(SessionActor::getState).get();
+                SessionState state = future.get();
                 switch (state) {
                     case READY -> ready++;
                     case CREATING, STARTING -> starting++;
@@ -508,19 +541,4 @@ public class SessionManagerActor {
         return result;
     }
 
-    /**
-     * Destroy all active sessions. Called during graceful shutdown.
-     */
-    public void destroyAllSessions() {
-        LOG.info("Destroying all sessions (" + sessions.size() + ")");
-        List<String> sessionIds = new ArrayList<>(sessions.keySet());
-        for (String sessionId : sessionIds) {
-            ActorRef<SessionActor> ref = sessions.remove(sessionId);
-            if (ref != null) {
-                ref.tell(SessionActor::stop);
-                ref.close();
-            }
-        }
-        userSessions.clear();
-    }
 }

@@ -149,6 +149,14 @@ RUN curl -fsSL "https://github.com/padreati/rapaio-jupyter-kernel/releases/downl
     java -jar /tmp/rapaio-kernel.jar -i -auto && \
     rm /tmp/rapaio-kernel.jar
 
+# ---- NCBI SRA Toolkit (prefetch, fasterq-dump, etc.) ----
+ARG SRA_TOOLKIT_VERSION=3.2.1
+RUN curl -fsSL "https://ftp-trace.ncbi.nlm.nih.gov/sra/sdk/${SRA_TOOLKIT_VERSION}/sratoolkit.${SRA_TOOLKIT_VERSION}-ubuntu64.tar.gz" \
+        -o /tmp/sratoolkit.tar.gz && \
+    tar -xzf /tmp/sratoolkit.tar.gz -C /opt && \
+    rm /tmp/sratoolkit.tar.gz
+ENV PATH=/opt/sratoolkit.${SRA_TOOLKIT_VERSION}-ubuntu64/bin:$PATH
+
 # Make conda packages world-readable (container may run as any UID)
 RUN chmod -R a+rX /opt/conda
 

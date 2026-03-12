@@ -183,14 +183,10 @@ public class K8sPupsActorSystem {
         if (scheduler != null) {
             scheduler.close();
         }
-        // Destroy all active sessions to clean up k8s resources before exit
-        if (sessionManager != null) {
-            try {
-                sessionManager.tell(SessionManagerActor::destroyAllSessions).get(30, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                LOG.warning("Error during graceful session cleanup: " + e.getMessage());
-            }
-        }
+        // Do NOT destroy user sessions (Pods, Services, HTTPRoutes) on shutdown.
+        // The new controller instance will adopt them via reconcileOrphanedResources().
+        // Destroying them here causes a race condition: the old controller deletes
+        // HTTPRoutes that the new controller has already re-created during reconciliation.
         if (actorSystem != null) {
             actorSystem.terminate();
         }

@@ -163,38 +163,36 @@ public class DashboardResource {
         String userId = getCurrentUsername();
         ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
 
+        // Fire all independent ask() calls in parallel
+        var toolsFuture = sm.ask(SessionManagerActor::listAvailableTools);
+        var sessionsFuture = sm.ask(mgr -> mgr.getUserSessions(userId));
+        var summaryFuture = sm.ask(SessionManagerActor::getSessionSummary);
+        var storageInfoFuture = sm.ask(mgr -> mgr.getUserStorageInfo(userId));
+        var allPvcInfoFuture = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId));
+        var sharedPvcsFuture = sm.ask(mgr -> mgr.listSharedPvcs(userId));
+
         List<ToolPlugin> tools;
-        try {
-            tools = sm.ask(SessionManagerActor::listAvailableTools).get();
-        } catch (Exception e) {
-            tools = Collections.emptyList();
-        }
+        try { tools = toolsFuture.get(); }
+        catch (Exception e) { tools = Collections.emptyList(); }
 
         List<SessionStatus> userSessions;
-        try {
-            userSessions = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
-        } catch (Exception e) {
-            userSessions = Collections.emptyList();
-        }
+        try { userSessions = sessionsFuture.get(); }
+        catch (Exception e) { userSessions = Collections.emptyList(); }
 
         SessionSummary summary;
-        try {
-            summary = sm.ask(SessionManagerActor::getSessionSummary).get();
-        } catch (Exception e) {
-            summary = new SessionSummary(0, 0, 0, 0);
-        }
+        try { summary = summaryFuture.get(); }
+        catch (Exception e) { summary = new SessionSummary(0, 0, 0, 0); }
 
-        // Storage settings
         Map<String, String> storageInfo = Collections.emptyMap();
         Map<String, Object> allPvcInfo = Collections.emptyMap();
         try {
-            storageInfo = sm.ask(mgr -> mgr.getUserStorageInfo(userId)).get();
-            allPvcInfo = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId)).get();
+            storageInfo = storageInfoFuture.get();
+            allPvcInfo = allPvcInfoFuture.get();
         } catch (Exception e) {
             LOG.warning("Failed to load storage info: " + e.getMessage());
         }
 
-        // Cluster resource info
+        // Cluster resource info (direct k8s call, not via actor)
         Map<String, Object> clusterResources;
         try {
             clusterResources = actorSystem.getK8sClient().getClusterResourceSummary();
@@ -203,13 +201,9 @@ public class DashboardResource {
             clusterResources = Collections.emptyMap();
         }
 
-        // Shared PVCs for extra mount options
         List<Map<String, String>> sharedPvcs = Collections.emptyList();
-        try {
-            sharedPvcs = sm.ask(mgr -> mgr.listSharedPvcs(userId)).get();
-        } catch (Exception e) {
-            LOG.warning("Failed to load shared PVCs: " + e.getMessage());
-        }
+        try { sharedPvcs = sharedPvcsFuture.get(); }
+        catch (Exception e) { LOG.warning("Failed to load shared PVCs: " + e.getMessage()); }
 
         Map<String, Object> data = new HashMap<>();
         data.put("userId", userId);
@@ -326,31 +320,37 @@ public class DashboardResource {
         String userId = getCurrentUsername();
         ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
 
+        // Fire all independent ask() calls in parallel
+        var storageInfoFut = sm.ask(mgr -> mgr.getUserStorageInfo(userId));
+        var allPvcInfoFut = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId));
+        var sharableVolumesFut = sm.ask(mgr -> mgr.listSharableVolumes(userId));
+        var mySharedPvcsFut = sm.ask(mgr -> mgr.listSharedPvcs(userId));
+        var myShareSettingsFut = sm.ask(mgr -> mgr.getShareSettings(userId));
+        var sessionsFut = sm.ask(mgr -> mgr.getUserSessions(userId));
+
         Map<String, String> storageInfo = Collections.emptyMap();
         Map<String, Object> allPvcInfo = Collections.emptyMap();
         try {
-            storageInfo = sm.ask(mgr -> mgr.getUserStorageInfo(userId)).get();
-            allPvcInfo = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId)).get();
+            storageInfo = storageInfoFut.get();
+            allPvcInfo = allPvcInfoFut.get();
         } catch (Exception e) {
             LOG.warning("Failed to load storage info: " + e.getMessage());
         }
 
-        // Share info
         List<Map<String, String>> sharableVolumes = Collections.emptyList();
         List<Map<String, String>> mySharedPvcs = Collections.emptyList();
         Map<String, String> myShareSettings = Collections.emptyMap();
         try {
-            sharableVolumes = sm.ask(mgr -> mgr.listSharableVolumes(userId)).get();
-            mySharedPvcs = sm.ask(mgr -> mgr.listSharedPvcs(userId)).get();
-            myShareSettings = sm.ask(mgr -> mgr.getShareSettings(userId)).get();
+            sharableVolumes = sharableVolumesFut.get();
+            mySharedPvcs = mySharedPvcsFut.get();
+            myShareSettings = myShareSettingsFut.get();
         } catch (Exception e) {
             LOG.warning("Failed to load share info: " + e.getMessage());
         }
 
-        // Active sessions
         List<Map<String, String>> activeSessions = Collections.emptyList();
         try {
-            var sessions = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
+            var sessions = sessionsFut.get();
             activeSessions = sessions.stream()
                 .filter(s -> s.state() == com.scivicslab.k8spups.actor.SessionState.READY
                     || s.state() == com.scivicslab.k8spups.actor.SessionState.STARTING)
@@ -558,17 +558,15 @@ public class DashboardResource {
         String userId = getCurrentUsername();
         ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
         try {
-            List<Map<String, String>> sharableVolumes =
-                sm.ask(mgr -> mgr.listSharableVolumes(userId)).get();
-            List<Map<String, String>> mySharedPvcs =
-                sm.ask(mgr -> mgr.listSharedPvcs(userId)).get();
-            Map<String, String> myShareSettings =
-                sm.ask(mgr -> mgr.getShareSettings(userId)).get();
+            // Fire all ask() calls in parallel
+            var sharableVolumesFut = sm.ask(mgr -> mgr.listSharableVolumes(userId));
+            var mySharedPvcsFut = sm.ask(mgr -> mgr.listSharedPvcs(userId));
+            var myShareSettingsFut = sm.ask(mgr -> mgr.getShareSettings(userId));
 
             Map<String, Object> result = new HashMap<>();
-            result.put("sharableVolumes", sharableVolumes);
-            result.put("mySharedPvcs", mySharedPvcs);
-            result.put("myShareSettings", myShareSettings);
+            result.put("sharableVolumes", sharableVolumesFut.get());
+            result.put("mySharedPvcs", mySharedPvcsFut.get());
+            result.put("myShareSettings", myShareSettingsFut.get());
             return Response.ok(result).build();
         } catch (Exception e) {
             LOG.severe("Failed to get share info: " + e.getMessage());

@@ -118,6 +118,11 @@ RUN apt-get update && \
 # ---- package-set-4: Desktop applications (Firefox, LibreOffice, GIMP, Inkscape) ----
 # Firefox: Ubuntu 24.04 only ships snap; use Mozilla Team PPA for deb package.
 # LibreOffice, GIMP, Inkscape: available from default Ubuntu repos.
+# software-properties-common is needed for add-apt-repository (used by both Firefox PPA and Apptainer PPA)
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN add-apt-repository -y ppa:mozillateam/ppa && \
     echo 'Package: firefox*\nPin: release o=LP-PPA-mozillateam\nPin-Priority: 1001' \
         > /etc/apt/preferences.d/mozilla-firefox && \
@@ -133,9 +138,7 @@ RUN add-apt-repository -y ppa:mozillateam/ppa && \
     && rm -rf /var/lib/apt/lists/*
 
 # ---- Container runtime: Apptainer (provides singularity compat) + Docker CLI ----
-RUN apt-get update && \
-    apt-get install -y software-properties-common && \
-    add-apt-repository -y ppa:apptainer/ppa && \
+RUN add-apt-repository -y ppa:apptainer/ppa && \
     apt-get update && \
     apt-get install -y apptainer docker.io && \
     rm -rf /var/lib/apt/lists/*
