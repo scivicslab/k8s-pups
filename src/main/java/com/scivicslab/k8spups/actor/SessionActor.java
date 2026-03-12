@@ -258,10 +258,12 @@ public class SessionActor {
     }
 
     /**
-     * Check if session has been idle longer than the given timeout,
-     * or exceeded maximum lifetime. Returns true if stopped.
+     * Check if session should be stopped due to idle timeout or max lifetime.
+     * Returns true if the session should be stopped.
+     * Does NOT call stop() — the caller (SessionManagerActor) is responsible
+     * for sending a separate tell(stop) message to maintain actor model semantics.
      */
-    public boolean checkIdle(long idleTimeoutMinutes, long maxLifetimeMinutes) {
+    public boolean shouldStop(long idleTimeoutMinutes, long maxLifetimeMinutes) {
         if (state != SessionState.READY) {
             return false;
         }
@@ -269,14 +271,12 @@ public class SessionActor {
         if (maxLifetimeMinutes > 0 && lifetimeMinutes >= maxLifetimeMinutes) {
             LOG.info("Session max lifetime reached: " + info.sessionId()
                 + " (alive " + lifetimeMinutes + " min, limit " + maxLifetimeMinutes + " min)");
-            stop();
             return true;
         }
         long idleMinutes = java.time.Duration.between(lastAccessTime, Instant.now()).toMinutes();
         if (idleTimeoutMinutes > 0 && idleMinutes >= idleTimeoutMinutes) {
             LOG.info("Session idle timeout: " + info.sessionId()
                 + " (idle " + idleMinutes + " min)");
-            stop();
             return true;
         }
         return false;

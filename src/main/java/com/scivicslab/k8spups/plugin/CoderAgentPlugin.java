@@ -23,7 +23,7 @@ public class CoderAgentPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/quarkus-coder-agent:1.0.1-2603041512";
+        return "192.168.5.23:32000/quarkus-llm-chat:1.1.0-2603130030";
     }
 
     @Override
@@ -39,10 +39,10 @@ public class CoderAgentPlugin implements ToolPlugin {
     @Override
     public Map<String, String> environmentVariables() {
         return Map.of(
-            "CODER_AGENT_MODE", "local-llm",
-            "CODER_AGENT_LLM_SERVERS", "http://192.168.5.15:8000,http://192.168.5.13:8000",
-            "HOME", "/home/user",
-            "CODER_AGENT_LLM_WORKING_DIR", "/home/user"
+            "LLM_CHAT_SINGLE_USER_MODE", "true",
+            "LLM_CHAT_SERVERS", "http://192.168.5.15:8000,http://192.168.5.13:8000",
+            "LLM_CHAT_TITLE", "Coding Agent (Local LLM)",
+            "HOME", "/home/user"
         );
     }
 

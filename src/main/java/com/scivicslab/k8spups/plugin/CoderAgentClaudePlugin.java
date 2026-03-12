@@ -22,7 +22,7 @@ public class CoderAgentClaudePlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/quarkus-coder-agent-claude:1.0.1-2603041512";
+        return "192.168.5.23:32000/quarkus-coder-agent-claude:1.1.0-2603130024";
     }
 
     @Override

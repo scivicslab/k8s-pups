@@ -72,7 +72,7 @@ spec:
                   name: minio-credentials
                   key: MINIO_ROOT_PASSWORD
             - name: MINIO_BROWSER_REDIRECT_URL
-              value: "https://192.168.5.25/minio/"
+              value: "http://192.168.5.23:30901/"
           volumeMounts:
             - name: data
               mountPath: /data
@@ -119,18 +119,20 @@ spec:
       targetPort: 9000
       protocol: TCP
 ---
-# Console Web UI (accessed via Gateway API at /minio)
+# Console Web UI (NodePort direct access)
 apiVersion: v1
 kind: Service
 metadata:
   name: minio-console
   namespace: minio
 spec:
+  type: NodePort
   selector:
     app: minio
   ports:
     - port: 9001
       targetPort: 9001
+      nodePort: 30901
       protocol: TCP
 ---
 # ReferenceGrant: allow HTTPRoutes in sc-account-bg to access minio services
