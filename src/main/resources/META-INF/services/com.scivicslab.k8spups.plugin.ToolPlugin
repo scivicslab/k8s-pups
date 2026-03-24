@@ -5,3 +5,4 @@ com.scivicslab.k8spups.plugin.CoderAgentPlugin
 com.scivicslab.k8spups.plugin.CoderAgentClaudePlugin
 com.scivicslab.k8spups.plugin.CoderAgentCodexPlugin
 com.scivicslab.k8spups.plugin.DocusaurusPlugin
+com.scivicslab.k8spups.plugin.DocusaurusBuildPlugin

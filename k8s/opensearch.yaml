@@ -1,0 +1,220 @@
+# OpenSearch + Dashboards for opensearch-dev namespace
+# Storage: Longhorn block storage (longhorn-single), pinned to stonefly521
+# Routing: Gateway API (HTTPRoute) via both set1/set2 gateways
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opensearch-data-longhorn
+  namespace: opensearch-dev
+  labels:
+    app: opensearch
+spec:
+  storageClassName: longhorn-single
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensearch
+  namespace: opensearch-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch
+  template:
+    metadata:
+      labels:
+        app: opensearch
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: stonefly521
+      initContainers:
+      - name: install-plugins
+        image: opensearchproject/opensearch:2.11.0
+        command:
+        - sh
+        - -c
+        - |
+          echo "Installing analysis-kuromoji plugin..."
+          /usr/share/opensearch/bin/opensearch-plugin install analysis-kuromoji --batch
+          echo "Plugin installation completed"
+        volumeMounts:
+        - mountPath: /usr/share/opensearch/plugins
+          name: opensearch-plugins
+      containers:
+      - name: opensearch
+        image: opensearchproject/opensearch:2.11.0
+        env:
+        - name: discovery.type
+          value: single-node
+        - name: OPENSEARCH_JAVA_OPTS
+          value: "-Xms512m -Xmx512m"
+        - name: DISABLE_SECURITY_PLUGIN
+          value: "true"
+        - name: DISABLE_INSTALL_DEMO_CONFIG
+          value: "true"
+        ports:
+        - containerPort: 9200
+          name: http
+        - containerPort: 9300
+          name: transport
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+        volumeMounts:
+        - mountPath: /usr/share/opensearch/data
+          name: opensearch-data
+        - mountPath: /usr/share/opensearch/plugins
+          name: opensearch-plugins
+      volumes:
+      - name: opensearch-data
+        persistentVolumeClaim:
+          claimName: opensearch-data-longhorn
+      - name: opensearch-plugins
+        emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensearch-dashboards
+  namespace: opensearch-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch-dashboards
+  template:
+    metadata:
+      labels:
+        app: opensearch-dashboards
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: stonefly521
+      containers:
+      - name: opensearch-dashboards
+        image: opensearchproject/opensearch-dashboards:2.11.0
+        env:
+        - name: OPENSEARCH_HOSTS
+          value: '["http://opensearch:9200"]'
+        - name: DISABLE_SECURITY_DASHBOARDS_PLUGIN
+          value: "true"
+        - name: SERVER_BASEPATH
+          value: /opensearch-dashboards
+        - name: SERVER_REWRITEBASEPATH
+          value: "true"
+        ports:
+        - containerPort: 5601
+          name: http
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+  namespace: opensearch-dev
+spec:
+  selector:
+    app: opensearch
+  ports:
+  - name: http
+    port: 9200
+    targetPort: 9200
+  - name: transport
+    port: 9300
+    targetPort: 9300
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch-dashboards
+  namespace: opensearch-dev
+spec:
+  selector:
+    app: opensearch-dashboards
+  ports:
+  - name: http
+    port: 5601
+    targetPort: 5601
+  type: ClusterIP
+---
+# Allow HTTPRoute in sc-account-bg to reference Service in opensearch-dev
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-sc-account-bg
+  namespace: opensearch-dev
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: sc-account-bg
+  to:
+  - group: ""
+    kind: Service
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: opensearch-dashboards-set1-route
+  namespace: sc-account-bg
+spec:
+  parentRefs:
+  - name: sc-account-set1-gateway
+    namespace: sc-account-bg
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /opensearch-dashboards
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-Proto
+          value: https
+    backendRefs:
+    - name: opensearch-dashboards
+      namespace: opensearch-dev
+      port: 5601
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: opensearch-dashboards-set2-route
+  namespace: sc-account-bg
+spec:
+  parentRefs:
+  - name: sc-account-set2-gateway
+    namespace: sc-account-bg
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /opensearch-dashboards
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-Proto
+          value: https
+    backendRefs:
+    - name: opensearch-dashboards
+      namespace: opensearch-dev
+      port: 5601

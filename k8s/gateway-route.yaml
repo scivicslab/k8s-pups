@@ -1,139 +1,71 @@
-# ReferenceGrant: allow HTTPRoutes in sc-account-bg to access k8s-pups services
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
+# EnvoyProxy: pin NodePort 31084 for HAProxy routing
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
 metadata:
-  name: allow-sc-account-bg
+  name: k8s-pups-proxy
   namespace: k8s-pups
 spec:
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: sc-account-bg
-  to:
-    - group: ""
-      kind: Service
+  logging:
+    level:
+      default: warn
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        externalTrafficPolicy: Cluster
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              ports:
+              - name: http-80
+                nodePort: 31084
+                port: 80
 ---
-# ReferenceGrant: allow HTTPRoutes in sc-account-bg to access user-pods services
-# (needed for per-session HTTPRoutes that route to user tool pods)
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
+# Gateway: k8s-pups own gateway in k8s-pups namespace
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
 metadata:
-  name: allow-sc-account-bg
-  namespace: user-pods
+  name: k8s-pups-gateway
+  namespace: k8s-pups
 spec:
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: sc-account-bg
-  to:
-    - group: ""
-      kind: Service
+  gatewayClassName: envoy
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: k8s-pups-proxy
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: Same
 ---
-# HTTPRoute for set1 (Blue): add /pups rule
+# HTTPRoute: /pups -> k8s-pups-controller:8080
 # RequestHeaderModifier sets X-Forwarded-Proto because Envoy Gateway
 # overwrites it based on listener protocol (HTTP), but the real client
 # connection is HTTPS terminated at HAProxy.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: k8s-pups-set1-route
-  namespace: sc-account-bg
+  name: k8s-pups-route
+  namespace: k8s-pups
 spec:
   parentRefs:
-    - name: sc-account-set1-gateway
-      namespace: sc-account-bg
+  - name: k8s-pups-gateway
   rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /pups
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: X-Forwarded-Proto
-                value: https
-      backendRefs:
-        - name: k8s-pups-controller
-          namespace: k8s-pups
-          port: 8080
----
-# HTTPRoute for set2 (Green): add /pups rule
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: k8s-pups-set2-route
-  namespace: sc-account-bg
-spec:
-  parentRefs:
-    - name: sc-account-set2-gateway
-      namespace: sc-account-bg
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /pups
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: X-Forwarded-Proto
-                value: https
-      backendRefs:
-        - name: k8s-pups-controller
-          namespace: k8s-pups
-          port: 8080
----
-# SecurityPolicy for set1 (Blue) dashboard route.
-# Establishes Keycloak browser session via Envoy Gateway OIDC on dashboard access,
-# enabling SSO for subsequent per-session SecurityPolicies (no re-login needed).
-apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: SecurityPolicy
-metadata:
-  name: pups-dashboard-sp-set1
-  namespace: sc-account-bg
-spec:
-  targetRefs:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: k8s-pups-set1-route
-  oidc:
-    provider:
-      issuer: https://192.168.5.25/sc-account-keycloak/realms/sc-account
-      authorizationEndpoint: https://192.168.5.25/sc-account-keycloak/realms/sc-account/protocol/openid-connect/auth
-      tokenEndpoint: http://keycloak-set2.sc-account-bg.svc:8080/sc-account-keycloak/realms/sc-account/protocol/openid-connect/token
-    clientID: k8s-pups
-    clientSecret:
-      name: k8s-pups-oidc-secret
-    redirectURL: https://192.168.5.25/pups/oauth2/callback
-    scopes:
-      - openid
-      - profile
-    cookieNames:
-      idToken: pups-dashboard-id
----
-# SecurityPolicy for set2 (Green) dashboard route.
-apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: SecurityPolicy
-metadata:
-  name: pups-dashboard-sp-set2
-  namespace: sc-account-bg
-spec:
-  targetRefs:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: k8s-pups-set2-route
-  oidc:
-    provider:
-      issuer: https://192.168.5.25/sc-account-keycloak/realms/sc-account
-      authorizationEndpoint: https://192.168.5.25/sc-account-keycloak/realms/sc-account/protocol/openid-connect/auth
-      tokenEndpoint: http://keycloak-set2.sc-account-bg.svc:8080/sc-account-keycloak/realms/sc-account/protocol/openid-connect/token
-    clientID: k8s-pups
-    clientSecret:
-      name: k8s-pups-oidc-secret
-    redirectURL: https://192.168.5.25/pups/oauth2/callback
-    scopes:
-      - openid
-      - profile
-    cookieNames:
-      idToken: pups-dashboard-id
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /pups
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-Proto
+          value: https
+    backendRefs:
+    - name: k8s-pups-controller
+      port: 8080

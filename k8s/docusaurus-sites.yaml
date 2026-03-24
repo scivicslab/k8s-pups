@@ -1,0 +1,176 @@
+# Docusaurus static sites served by nginx
+# Storage: NFS (stonefly520) mounted at /usr/share/nginx/html/docs
+# Routing: Gateway API (HTTPRoute) via both set1/set2 gateways
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: docusaurus-sites-nginx-config
+  namespace: docusaurus-sites
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # Apache UserDir style paths (/~devteam/doc_XXX/) - rewrite to /docs/doc_XXX/
+        location ~ ^/~devteam/(.*)$ {
+            rewrite ^/~devteam/(.*)$ /docs/$1 last;
+        }
+
+        # Kubernetes style paths (/docs/doc_XXX/) - primary access method
+        location /docs {
+            alias /usr/share/nginx/html/docs;
+            try_files $uri $uri/ $uri.html $uri/index.html =404;
+            autoindex off;
+        }
+
+        # Health check endpoint for Kubernetes probes
+        location /health {
+            access_log off;
+            return 200 "OK\n";
+            add_header Content-Type text/plain;
+        }
+
+        # Default: return 404 for other paths
+        location / {
+            return 404;
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docusaurus-sites
+  namespace: docusaurus-sites
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docusaurus-sites
+  template:
+    metadata:
+      labels:
+        app: docusaurus-sites
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+          name: http
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+        - name: docs
+          mountPath: /usr/share/nginx/html/docs
+          readOnly: true
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: docusaurus-sites-nginx-config
+      - name: docs
+        nfs:
+          server: 192.168.5.20
+          path: /Public/docusaurus-sites
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: docusaurus-sites
+  namespace: docusaurus-sites
+spec:
+  selector:
+    app: docusaurus-sites
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+---
+# Allow HTTPRoute in sc-account-bg to reference Service in docusaurus-sites
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-sc-account-bg
+  namespace: docusaurus-sites
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: sc-account-bg
+  to:
+  - group: ""
+    kind: Service
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: docusaurus-sites-set1-route
+  namespace: sc-account-bg
+spec:
+  parentRefs:
+  - name: sc-account-set1-gateway
+    namespace: sc-account-bg
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /docs
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-Proto
+          value: https
+    backendRefs:
+    - name: docusaurus-sites
+      namespace: docusaurus-sites
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: docusaurus-sites-set2-route
+  namespace: sc-account-bg
+spec:
+  parentRefs:
+  - name: sc-account-set2-gateway
+    namespace: sc-account-bg
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /docs
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-Proto
+          value: https
+    backendRefs:
+    - name: docusaurus-sites
+      namespace: docusaurus-sites
+      port: 80

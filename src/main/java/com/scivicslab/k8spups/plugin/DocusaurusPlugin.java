@@ -29,7 +29,7 @@ public class DocusaurusPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/docusaurus-runner:0.1.4-2603032048";
+        return "192.168.5.23:32000/docusaurus-runner:0.1.5-2603131006";
     }
 
     @Override
@@ -40,6 +40,15 @@ public class DocusaurusPlugin implements ToolPlugin {
     @Override
     public ConnectionType connectionType() {
         return ConnectionType.HTTP;
+    }
+
+    @Override
+    public Map<String, String> environmentVariables() {
+        // NFS does not support inotify; use polling for file watching
+        return Map.of(
+            "WATCHPACK_POLLING", "true",
+            "CHOKIDAR_USEPOLLING", "true"
+        );
     }
 
     @Override

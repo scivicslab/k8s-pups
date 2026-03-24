@@ -1,0 +1,41 @@
+name: Build and Push k8s-pups Images to NIG Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      k8s_pups_tag:
+        description: 'k8s-pups image tag (e.g. 0.1.0-2603251400)'
+        required: true
+      build_k8s_pups:
+        description: 'Build k8s-pups'
+        type: boolean
+        default: true
+
+env:
+  REGISTRY: 10.96.0.100:5000
+
+jobs:
+  k8s-pups:
+    if: ${{ inputs.build_k8s_pups }}
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build with Maven
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            maven:3.9-eclipse-temurin-21 \
+            mvn package -DskipTests -f /workspace/pom.xml
+
+      - name: Push k8s-pups with Kaniko
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            gcr.io/kaniko-project/executor:latest \
+            --context=/workspace \
+            --dockerfile=/workspace/Dockerfile \
+            --destination=${{ env.REGISTRY }}/k8s-pups:${{ inputs.k8s_pups_tag }} \
+            --insecure

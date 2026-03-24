@@ -368,6 +368,11 @@ public class SessionActor {
                 }
             }
             String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown";
+            if ("Succeeded".equals(phase) && info.toolPlugin().batchMode()) {
+                LOG.info("Batch job completed: " + info.podName() + " — auto-stopping session");
+                stop();
+                return;
+            }
             if ("Failed".equals(phase) || "Unknown".equals(phase)) {
                 LOG.warning("Pod failed: " + info.podName() + " phase=" + phase);
                 state = SessionState.FAILED;

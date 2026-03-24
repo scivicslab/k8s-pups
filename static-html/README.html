@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>k8s-pups ドキュメント</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <style>
+    /* ---- Themes (CSS variables) ---- */
+    :root {
+      --c-text:#1c1e21; --c-bg:#fff; --c-sidebar-bg:#f6f7f8; --c-border:#e3e4e5;
+      --c-hover:#e3e4e5; --c-nav-bg:#1c1e21; --c-nav-border:#333; --c-nav-accent:#2e8555;
+      --c-act-bg:#e8f4fd; --c-act-text:#1877f2; --c-cat-label:#444; --c-arrow:#888;
+      --c-pre-bg:#f6f7f8; --c-code-bg:#f0f0f0; --c-th-bg:#f6f7f8;
+      --c-bq-border:#ddd; --c-bq-text:#555; --c-h2-border:#eee;
+    }
+    [data-theme="warm"] {
+      --c-text:#2d1f00; --c-bg:#fdf6e3; --c-sidebar-bg:#f5ead0; --c-border:#d9c89a;
+      --c-hover:#ecddb8; --c-nav-bg:#4a3820; --c-nav-border:#6b5030; --c-nav-accent:#c8860a;
+      --c-act-bg:#fef3d0; --c-act-text:#b07a0a; --c-cat-label:#5c4010; --c-arrow:#a08050;
+      --c-pre-bg:#f5ead0; --c-code-bg:#ede4c8; --c-th-bg:#f0e5c8;
+      --c-bq-border:#c8a870; --c-bq-text:#6b5030; --c-h2-border:#ddd0a8;
+    }
+    [data-theme="blue"] {
+      --c-text:#1a2540; --c-bg:#f0f4ff; --c-sidebar-bg:#e8edf8; --c-border:#c5d0e8;
+      --c-hover:#d8e2f5; --c-nav-bg:#1a3a6b; --c-nav-border:#2a4a7b; --c-nav-accent:#4a9fe8;
+      --c-act-bg:#ddeeff; --c-act-text:#1a6fd4; --c-cat-label:#2a3a60; --c-arrow:#6080b0;
+      --c-pre-bg:#e8edf8; --c-code-bg:#dde4f5; --c-th-bg:#e2e8f5;
+      --c-bq-border:#90aad8; --c-bq-text:#3a5080; --c-h2-border:#c8d5ee;
+    }
+    [data-theme="green"] {
+      --c-text:#1a3020; --c-bg:#f0f8f0; --c-sidebar-bg:#e4f0e4; --c-border:#b8d8b8;
+      --c-hover:#d0e8d0; --c-nav-bg:#1a4a2a; --c-nav-border:#2a5a3a; --c-nav-accent:#40c060;
+      --c-act-bg:#d5f0d5; --c-act-text:#1a8040; --c-cat-label:#2a4a30; --c-arrow:#508050;
+      --c-pre-bg:#e4f0e4; --c-code-bg:#d8ecd8; --c-th-bg:#deeede;
+      --c-bq-border:#80c080; --c-bq-text:#3a5a3a; --c-h2-border:#c0dcc0;
+    }
+    [data-theme="red"] {
+      --c-text:#3a1010; --c-bg:#fff5f5; --c-sidebar-bg:#fce8e8; --c-border:#e8c0c0;
+      --c-hover:#f5d8d8; --c-nav-bg:#5a1a1a; --c-nav-border:#7a2a2a; --c-nav-accent:#e04040;
+      --c-act-bg:#fde0e0; --c-act-text:#c02020; --c-cat-label:#5a2020; --c-arrow:#a06060;
+      --c-pre-bg:#fce8e8; --c-code-bg:#f8dede; --c-th-bg:#faeaea;
+      --c-bq-border:#d09090; --c-bq-text:#703030; --c-h2-border:#e8c8c8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           font-size: 16px; color: var(--c-text); background: var(--c-bg);
+           display: flex; flex-direction: column; min-height: 100vh; }
+    /* ---- Top navbar ---- */
+    header { background: var(--c-nav-bg); color: #fff; display: flex; align-items: center;
+             padding: 0 1.5rem; height: 60px; position: sticky; top: 0; z-index: 100;
+             border-bottom: 1px solid var(--c-nav-border); flex-shrink: 0; }
+    header .site-title { font-weight: 700; font-size: 1.1rem; color: #fff;
+                         text-decoration: none; margin-right: 2rem; white-space: nowrap; }
+    header nav.top { display: flex; gap: 0; height: 100%; flex: 1; }
+    header nav.top a { display: flex; align-items: center; padding: 0 1rem;
+                       color: #ccc; text-decoration: none; font-size: 0.875rem;
+                       border-bottom: 3px solid transparent; white-space: nowrap; }
+    header nav.top a:hover { color: #fff; }
+    header nav.top a.active { color: #fff; border-bottom-color: var(--c-nav-accent); }
+    /* ---- Theme switcher ---- */
+    #theme-sel { margin-left: auto; background: transparent; color: #ccc;
+                 border: 1px solid #666; border-radius: 4px; padding: 3px 6px;
+                 font-size: 0.8rem; cursor: pointer; }
+    #theme-sel option { background: #2c2c2c; color: #fff; }
+    /* ---- Search ---- */
+    #search-wrap { position: relative; margin-left: 1rem; }
+    #search-input { background: rgba(255,255,255,0.12); border: 1px solid #666; border-radius: 4px;
+                    padding: 4px 10px; color: #fff; font-size: 0.875rem; width: 200px; outline: none; }
+    #search-input::placeholder { color: #aaa; }
+    #search-input:focus { background: rgba(255,255,255,0.22); border-color: #aaa; width: 260px; transition: width 0.2s; }
+    #search-results { position: absolute; top: calc(100% + 6px); right: 0; width: 400px;
+                      background: var(--c-bg); border: 1px solid var(--c-border); border-radius: 6px;
+                      box-shadow: 0 4px 20px rgba(0,0,0,0.18); z-index: 200;
+                      display: none; max-height: 500px; overflow-y: auto; }
+    #search-results.open { display: block; }
+    .sr-item { padding: 10px 14px; border-bottom: 1px solid var(--c-border);
+               text-decoration: none; display: block; color: var(--c-text); }
+    .sr-item:last-child { border-bottom: none; }
+    .sr-item:hover { background: var(--c-hover); }
+    .sr-title { font-weight: 600; font-size: 0.875rem; }
+    .sr-summary { font-size: 0.8rem; color: #888; margin-top: 2px;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sr-empty { padding: 1rem; text-align: center; color: #888; font-size: 0.875rem; }
+    /* ---- Content area ---- */
+    .content-wrap { display: flex; flex: 1; overflow: hidden; }
+    /* ---- Sidebar ---- */
+    nav.side { width: 280px; min-width: 280px; background: var(--c-sidebar-bg);
+               border-right: 1px solid var(--c-border); padding: 1rem;
+               overflow-y: auto; height: calc(100vh - 60px); position: sticky; top: 60px; }
+    nav.side ul { list-style: none; }
+    nav.side ul li { margin: 1px 0; }
+    nav.side ul li a { display: block; padding: 3px 8px; border-radius: 4px; color: var(--c-text);
+                       text-decoration: none; font-size: 0.875rem;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    nav.side ul li a:hover { background: var(--c-hover); }
+    nav.side ul li a.active { background: var(--c-act-bg); color: var(--c-act-text); font-weight: 600; }
+    .cat-header { display: flex; align-items: center; cursor: pointer; user-select: none;
+                  padding: 4px 8px; border-radius: 4px; margin-top: 4px; }
+    .cat-header:hover { background: var(--c-hover); }
+    .cat-label { font-weight: 600; font-size: 0.8rem; color: var(--c-cat-label); flex: 1; }
+    .cat-arrow { font-size: 0.65rem; color: var(--c-arrow); transition: transform 0.15s; }
+    .cat-children { overflow: hidden; padding-left: 12px; border-left: 2px solid var(--c-border);
+                    margin-left: 8px; display: none; }
+    .cat-children.open { display: block; }
+    /* ---- Main ---- */
+    main { flex: 1; padding: 2rem 3rem; max-width: 900px; overflow-y: auto; }
+    main h1 { font-size: 2rem; margin-bottom: 1rem; }
+    main h2 { font-size: 1.5rem; margin: 1.5rem 0 0.75rem; border-bottom: 1px solid var(--c-h2-border); padding-bottom: 0.25rem; }
+    main h3 { font-size: 1.2rem; margin: 1.25rem 0 0.5rem; }
+    main h4 { font-size: 1rem; margin: 1rem 0 0.5rem; }
+    main p { margin: 0.75rem 0; line-height: 1.7; }
+    main ul, main ol { margin: 0.75rem 0 0.75rem 1.5rem; line-height: 1.7; }
+    main pre { background: var(--c-pre-bg); border: 1px solid var(--c-border); border-radius: 6px;
+                padding: 1rem; overflow-x: auto; margin: 1rem 0; }
+    main code { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.875em; }
+    main p code, main li code, main td code { background: var(--c-code-bg); padding: 1px 5px; border-radius: 3px; }
+    main table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    main th, main td { border: 1px solid var(--c-border); padding: 8px 12px; text-align: left; }
+    main th { background: var(--c-th-bg); font-weight: 600; }
+    main blockquote { border-left: 4px solid var(--c-bq-border); padding-left: 1rem; color: var(--c-bq-text); margin: 1rem 0; }
+    main img { max-width: 100%; }
+    /* ---- Admonitions ---- */
+    .admonition { border-radius: 6px; padding: 0.75rem 1rem; margin: 1rem 0; }
+    .admonition-title { font-weight: 700; font-size: 0.875rem; text-transform: uppercase;
+                        letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    .admonition-body > *:last-child { margin-bottom: 0; }
+  </style>
+  <script>(function(){
+    var t=localStorage.getItem('md2html-theme');
+    if(t&&t!=='default') document.documentElement.setAttribute('data-theme',t);
+  })();</script>
+</head>
+<body>
+<header>
+  <a class="site-title" href="./intro.html">k8s-pups</a>
+  <nav class="top">
+  </nav>
+  <select id="theme-sel">
+    <option value="default">Default</option>
+    <option value="warm">Warm</option>
+    <option value="blue">Blue</option>
+    <option value="green">Green</option>
+    <option value="red">Red</option>
+  </select>
+  <div id="search-wrap">
+    <input id="search-input" type="search" placeholder="Search..." autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+</header>
+<div class="content-wrap">
+<nav class="side">
+<ul>
+<li><a href="./README.html" class="active">k8s-pups ドキュメント</a></li>
+<li><a href="./network-policy.html">user-pods NetworkPolicy 設計</a></li>
+<li><a href="./storage-settings.html">Storage Settings（ユーザーストレージ設定）</a></li>
+</ul>
+</nav>
+<main>
+<h1>k8s-pups ドキュメント</h1>
+<h2 id="概要">概要</h2>
+<p>k8s-pupsはKubernetes上でPodライフサイクルを管理するQuarkusアプリケーション。
+<code>k8s-pups</code> namespaceにデプロイされ、<code>sc-account-bg</code>のGateway APIを経由して外部に公開される。</p>
+<h2 id="アーキテクチャ上の位置づけ">アーキテクチャ上の位置づけ</h2>
+<h3 id="bluegreenとの関係">Blue/Greenとの関係</h3>
+<p>k8s-pupsはsc-accountのBlue/Greenデプロイ（set1/set2）に<strong>相乗り</strong>する形で外部公開される。</p>
+<pre><code>ブラウザ → HAProxy（VIP 192.168.5.25）
+           ↓ ソースIPでset1/set2を選択
+           → Gateway API（sc-account-bg namespace）
+             ↓ HTTPRouteで /pups パスを転送
+             → k8s-pups Service（k8s-pups namespace）
+               ↓ ClusterIP
+               → k8s-pups Pod
+</code></pre>
+<p>HAProxyはソースIPでBlue（set1: NodePort 30444）かGreen（set2: NodePort 32617）かを選択する。
+どちらのGatewayを経由しても<code>/pups</code>パスはk8s-pupsの同一Podに転送される（k8s-pups自体はBlue/Greenなし）。</p>
+<h3 id="k8s-マニフェスト">k8s マニフェスト</h3>
+<table>
+<thead>
+<tr>
+<th>ファイル</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>k8s/namespace.yaml</code></td>
+<td><code>k8s-pups</code> namespace（PSS: restricted）、<code>user-pods</code> namespace</td>
+</tr>
+<tr>
+<td><code>k8s/rbac.yaml</code></td>
+<td>ServiceAccount <code>vault-auth</code>、Role、RoleBinding</td>
+</tr>
+<tr>
+<td><code>k8s/deployment.yaml</code></td>
+<td>Deployment（Vault CSI経由でOIDCシークレット取得）</td>
+</tr>
+<tr>
+<td><code>k8s/service.yaml</code></td>
+<td>ClusterIP Service（ポート8080）</td>
+</tr>
+<tr>
+<td><code>k8s/gateway-route.yaml</code></td>
+<td>ReferenceGrant + HTTPRoute（set1/set2 両方に追加）</td>
+</tr>
+<tr>
+<td><code>k8s/secret-provider-class.yaml</code></td>
+<td>VaultからOIDCシークレットを取得するSPC</td>
+</tr>
+<tr>
+<td><code>k8s/networkpolicy.yaml</code></td>
+<td>NetworkPolicy</td>
+</tr>
+</tbody>
+</table>
+<h3 id="外部アクセスurl">外部アクセスURL</h3>
+<ul>
+<li>開発者端末（192.168.5.14）からは Green（set2）経由: <code>https://192.168.5.25/pups/</code></li>
+<li>その他からは Blue（set1）経由: <code>https://192.168.5.25/pups/</code></li>
+</ul>
+<h2 id="e2eテスト方式-test-podkubectl-exec">E2Eテスト方式: test pod（kubectl exec）</h2>
+<h3 id="port-forwardを使わない理由">Port-Forwardを使わない理由</h3>
+<p>従来のE2EテストではDB/LDAP検証のために<code>kubectl port-forward</code>を使う方法が一般的だが、以下の問題がある:</p>
+<ol>
+<li><strong>不安定</strong>: port-forwardはタイムアウトや接続切断が頻繁に発生する</li>
+<li><strong>設定複雑</strong>: テスト実行前に手動でport-forwardを立てる必要がある</li>
+<li><strong>環境依存</strong>: 開発者ごとにポート番号が衝突する可能性がある</li>
+</ol>
+<p>代わりに<strong>test pod（kubectl exec）方式</strong>を採用する。</p>
+<h3 id="test-pod方式の仕組み">test pod方式の仕組み</h3>
+<p>クラスタ内にすでに起動している<code>test-pod</code>に<code>kubectl exec</code>でコマンドを送り込み、
+cluster-internal DNSを使って各サービス（PostgreSQL、LDAP等）に直接アクセスする。</p>
+<pre><code>開発者マシン
+    │
+    │ kubectl exec -n sc-account-bg test-pod -- psql -h postgres-set2 ...
+    ↓
+test-pod（sc-account-bg namespace）
+    │
+    │ psql -h postgres-set2.sc-account-bg.svc.cluster.local ...
+    │ ldapsearch -H ldap://ldap-set2:389 ...
+    ↓
+PostgreSQL / LDAP（cluster-internal）
+</code></pre>
+<h3 id="sc-accountでの実装例">sc-accountでの実装例</h3>
+<p><code>quarkus-sc-account</code>プロジェクトの以下のクラスを参照:</p>
+<h4 id="kubectlexecjava"><code>KubectlExec.java</code></h4>
+<pre><code>src/main/java/com/github/oogasawa/quarkus/scaccount/e2e/helper/KubectlExec.java
+</code></pre>
+<p>kubectl execのラッパー。<code>ProcessBuilder</code>でローカルの<code>kubectl</code>コマンドを呼び出す。</p>
+<pre><code class="language-java">// コマンド実行
+String output = KubectlExec.exec(&quot;psql&quot;, &quot;-h&quot;, &quot;postgres-set2&quot;, &quot;-U&quot;, &quot;postgres&quot;, ...);
+
+// bash経由（パイプ等が使える）
+String output = KubectlExec.execBash(&quot;psql -t -A -c \&quot;SELECT ...\&quot; | head -1&quot;);
+
+// test pod到達確認
+boolean ok = KubectlExec.isTestPodReachable();
+</code></pre>
+<h4 id="e2econfigjava"><code>E2EConfig.java</code></h4>
+<pre><code>src/main/java/com/github/oogasawa/quarkus/scaccount/e2e/base/E2EConfig.java
+</code></pre>
+<p>環境変数で設定を切り替える。デフォルト値はGreen環境（set2）を向いている。</p>
+<table>
+<thead>
+<tr>
+<th>環境変数</th>
+<th>デフォルト</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>E2E_TEST_POD</code></td>
+<td><code>test-pod</code></td>
+<td>test podのPod名</td>
+</tr>
+<tr>
+<td><code>E2E_TEST_POD_NAMESPACE</code></td>
+<td><code>sc-account-bg</code></td>
+<td>test podのnamespace</td>
+</tr>
+<tr>
+<td><code>E2E_POSTGRES_SERVICE</code></td>
+<td><code>postgres-set2</code></td>
+<td>PostgreSQLのService名</td>
+</tr>
+<tr>
+<td><code>E2E_LDAP_SERVICE</code></td>
+<td><code>ldap-set2</code></td>
+<td>LDAPのService名</td>
+</tr>
+<tr>
+<td><code>E2E_POSTGRES_PASSWORD</code></td>
+<td>（必須）</td>
+<td>PostgreSQL adminパスワード</td>
+</tr>
+<tr>
+<td><code>E2E_LDAP_ADMIN_PASSWORD</code></td>
+<td>（必須）</td>
+<td>LDAP adminパスワード</td>
+</tr>
+</tbody>
+</table>
+<h4 id="postgreshelperjava"><code>PostgresHelper.java</code></h4>
+<pre><code>src/main/java/com/github/oogasawa/quarkus/scaccount/e2e/helper/PostgresHelper.java
+</code></pre>
+<p><code>kubectl exec</code>経由で<code>psql</code>コマンドをtest pod内で実行する。</p>
+<pre><code class="language-java">// DB疎通確認
+boolean available = PostgresHelper.isAvailable();
+
+// 暗号化パスワード取得
+String cipher = PostgresHelper.getEncryptedPassword(&quot;testadmin&quot;);
+</code></pre>
+<h4 id="ldaphelperjava--ldapentryjava"><code>LdapHelper.java</code> / <code>LdapEntry.java</code></h4>
+<pre><code>src/main/java/com/github/oogasawa/quarkus/scaccount/e2e/helper/LdapHelper.java
+src/main/java/com/github/oogasawa/quarkus/scaccount/e2e/helper/LdapEntry.java
+</code></pre>
+<p><code>kubectl exec</code>経由で<code>ldapsearch</code>コマンドをtest pod内で実行する。
+Apache LDAP APIは不要。LDIFを<code>LdapEntry</code>クラスでパースする。</p>
+<pre><code class="language-java">// ユーザー検索
+LdapEntry entry = LdapHelper.findUser(&quot;testadmin&quot;);
+String dn        = entry.getDn();
+String uid       = entry.get(&quot;uid&quot;);
+List&lt;String&gt; ocs = entry.getAll(&quot;objectClass&quot;);
+
+// objectClass確認
+boolean ok = LdapHelper.hasObjectClass(entry, &quot;posixAccount&quot;);
+
+// 属性取得
+String uidNumber = LdapHelper.getAttribute(entry, &quot;uidNumber&quot;);
+
+// 全posixAccountユーザー取得
+List&lt;LdapEntry&gt; accounts = LdapHelper.findAllPosixAccounts();
+</code></pre>
+<h3 id="test-podの準備">test podの準備</h3>
+<p>test podはクラスタ内で常時起動している<code>psql</code>と<code>ldapsearch</code>が使えるPodである。
+sc-account-bgのE2Eテストで使用するtest podが流用できる。</p>
+<pre><code class="language-bash"># test podが存在するか確認
+kubectl get pod test-pod -n sc-account-bg
+
+# test podからpostgresに疎通できるか確認
+kubectl exec -n sc-account-bg test-pod -- \
+  psql -h postgres-set2 -U postgres -d scaccountdb -c &quot;SELECT 1&quot;
+
+# test podからLDAPに疎通できるか確認
+kubectl exec -n sc-account-bg test-pod -- \
+  ldapsearch -H ldap://ldap-set2:389 -x -b &quot;dc=nig,dc=ac,dc=jp&quot; &quot;(uid=testadmin)&quot; uid
+</code></pre>
+<h3 id="テスト実行時の環境変数設定">テスト実行時の環境変数設定</h3>
+<pre><code class="language-bash">export E2E_POSTGRES_PASSWORD=&lt;postgres adminパスワード&gt;
+export E2E_LDAP_ADMIN_PASSWORD=&lt;LDAP adminパスワード&gt;
+
+# 必要に応じてtest podを指定
+export E2E_TEST_POD=test-pod
+export E2E_TEST_POD_NAMESPACE=sc-account-bg
+
+# E2Eテスト実行
+mvn exec:java -Pe2e -Dexec.args=&quot;AdminPasswordE2ETest&quot;
+</code></pre>
+<h2 id="デプロイ手順">デプロイ手順</h2>
+<h3 id="前提条件">前提条件</h3>
+<ul>
+<li><code>k8s-pups</code> namespaceとRBACが適用済み</li>
+<li>Vault CSI Driverが動作中</li>
+<li><code>k8s-pups-spc</code>（SecretProviderClass）が適用済み</li>
+<li>sc-account-bgのGateway API（set1/set2）が稼働中</li>
+</ul>
+<h3 id="ビルドとデプロイ">ビルドとデプロイ</h3>
+<pre><code class="language-bash">cd /home/devteam/works/k8s-pups
+
+# ビルド
+rm -rf target &amp;&amp; mvn install
+
+# Dockerイメージのビルド・プッシュ
+TAG=&quot;0.1.0-$(date +%y%m%d%H%M)&quot;
+sudo docker build -t k8s-pups:$TAG .
+sudo docker tag k8s-pups:$TAG 192.168.5.23:32000/k8s-pups:$TAG
+sudo docker push 192.168.5.23:32000/k8s-pups:$TAG
+
+# Deploymentのimageタグを更新して適用
+kubectl set image deployment/k8s-pups-controller -n k8s-pups k8s-pups=192.168.5.23:32000/k8s-pups:$TAG
+kubectl rollout status deployment/k8s-pups-controller -n k8s-pups --timeout=90s
+</code></pre>
+<h3 id="gateway-httprouteの適用">Gateway HTTPRouteの適用</h3>
+<p>初回のみ実施（sc-account-bgのGatewayに/pupsルートを追加）:</p>
+<pre><code class="language-bash">kubectl apply -f k8s/gateway-route.yaml
+</code></pre>
+<h3 id="動作確認">動作確認</h3>
+<pre><code class="language-bash"># Pod起動確認
+kubectl get pods -n k8s-pups
+
+# ヘルスチェック（VIP経由）
+curl -sk https://192.168.5.25/pups/q/health | jq .status
+
+# ダッシュボード（ブラウザでアクセスするとKeycloakリダイレクト）
+curl -sk https://192.168.5.25/pups/dashboard -o /dev/null -w &quot;%{http_code}\n&quot;
+# → 302（Keycloakへリダイレクト）
+</code></pre>
+<h2 id="トラブルシューティング">トラブルシューティング</h2>
+<h3 id="ファイルアップロードが失敗するパスが-homedevteamworksuploads">ファイルアップロードが失敗する（パスが <code>/home/devteam/works/uploads/...</code>）</h3>
+<p><strong>症状</strong></p>
+<pre><code>Upload failed (ファイル名): /home/devteam/works/uploads/xxxx.tmp
+</code></pre>
+<p><strong>原因</strong></p>
+<p><code>quarkus-coder-agent</code> の <code>application.properties</code> に <code>coder-agent.llm.working-dir=/home/devteam/works</code> が設定されており、コンテナ内でもそのまま適用されるため、ホストマシンのパスに書き込もうとして失敗する。</p>
+<p><strong>修正方法</strong></p>
+<p><code>CoderAgentPlugin.java</code> の <code>environmentVariables()</code> に <code>CODER_AGENT_LLM_WORKING_DIR</code> を追加し、コンテナ内のPVCマウントパスで上書きする。</p>
+<pre><code class="language-java">// CoderAgentPlugin.java
+@Override
+public Map&lt;String, String&gt; environmentVariables() {
+    return Map.of(
+        &quot;CODER_AGENT_LLM_SERVERS&quot;, &quot;...&quot;,
+        &quot;HOME&quot;, &quot;/home/user&quot;,
+        &quot;CODER_AGENT_LLM_WORKING_DIR&quot;, &quot;/home/user&quot;  // ← これを追加
+    );
+}
+</code></pre>
+<p>アップロードファイルは <code>/home/user/uploads/</code> に保存され、PVC（<code>pups-data-{userId}</code>）に永続化される。</p>
+<hr />
+<h3 id="コントローラー再起動後に古いpodが残る">コントローラー再起動後に古いPodが残る</h3>
+<p><strong>症状</strong></p>
+<p><code>kubectl get pods -n user-pods</code> で以前のセッションのPodが残っている。</p>
+<p><strong>原因</strong></p>
+<p>コントローラーはインメモリでセッション状態を管理しているため、再起動するとセッション情報を失う。
+起動時のorphan reconciliationがPodをラベル（<code>session={sessionId}</code>）で検索せず、誤った名前（<code>pups-{sessionId}</code>）で削除しようとしていたため、実際のPod（<code>pups-{tool}-{sessionId}</code>）が削除されなかった。（v0.1.0-2602260202で修正済み）</p>
+<p><strong>手動クリーンアップ</strong></p>
+<pre><code class="language-bash">kubectl delete pods --all -n user-pods
+</code></pre>
+<hr />
+<h3 id="セッション起動時に-securitypolicy-が作成されずに-404">セッション起動時に SecurityPolicy が作成されずに 404</h3>
+<p><strong>症状</strong></p>
+<p>coder-agentを起動してKeycloak認証後、<code>/session/{id}/oauth2/callback</code> で404になる。</p>
+<p><strong>原因</strong></p>
+<p><code>k8s-pups-pod-manager</code> RoleにPVC作成権限がなく、<code>SessionActor.start()</code> がPVC作成でForbiddenエラーになり、以後のSecurityPolicy/HTTPRoute作成に到達できない。</p>
+<p><strong>修正方法</strong></p>
+<pre><code class="language-bash">kubectl patch role k8s-pups-pod-manager -n user-pods --type=json \
+  -p='[{&quot;op&quot;:&quot;replace&quot;,&quot;path&quot;:&quot;/rules/0/resources&quot;,&quot;value&quot;:[&quot;pods&quot;,&quot;services&quot;,&quot;persistentvolumeclaims&quot;]}]'
+</code></pre>
+<p>（v0.1.0-2602260202以降、<code>k8s/rbac.yaml</code> に <code>persistentvolumeclaims</code> が含まれているため、マニフェストを再適用すれば解消される）</p>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad: true});</script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body, {delimiters: [
+    {left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});"></script>
+<script>
+document.querySelectorAll('.cat-header').forEach(function(header) {
+  header.addEventListener('click', function() {
+    var children = this.nextElementSibling;
+    var arrow = this.querySelector('.cat-arrow');
+    children.classList.toggle('open');
+    arrow.textContent = children.classList.contains('open') ? '▼' : '▶';
+  });
+});
+(function() {
+  var sel = document.getElementById('theme-sel');
+  var t = localStorage.getItem('md2html-theme') || 'default';
+  sel.value = t;
+  sel.addEventListener('change', function() {
+    var val = this.value;
+    localStorage.setItem('md2html-theme', val);
+    if (val === 'default') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', val);
+  });
+})();
+(function() {
+  var input = document.getElementById('search-input');
+  var results = document.getElementById('search-results');
+  var timer = null;
+  input.addEventListener('input', function() {
+    clearTimeout(timer);
+    var q = this.value.trim();
+    if (!q) { results.classList.remove('open'); return; }
+    timer = setTimeout(function() { doSearch(q); }, 300);
+  });
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { results.classList.remove('open'); input.blur(); }
+  });
+  document.addEventListener('click', function(e) {
+    if (!document.getElementById('search-wrap').contains(e.target))
+      results.classList.remove('open');
+  });
+  function doSearch(q) {
+    fetch('/search?q=' + encodeURIComponent(q))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        results.innerHTML = '';
+        if (!data.length) {
+          results.innerHTML = '<div class="sr-empty">No results.</div>';
+        } else {
+          data.forEach(function(item) {
+            var a = document.createElement('a');
+            a.className = 'sr-item'; a.href = item.path;
+            a.innerHTML = '<div class="sr-title">' + esc(item.title) + '</div>' +
+                          '<div class="sr-summary">' + esc(item.summary) + '</div>';
+            results.appendChild(a);
+          });
+        }
+        results.classList.add('open');
+      })
+      .catch(function() {
+        results.innerHTML = '<div class="sr-empty">Search requires --serve mode.</div>';
+        results.classList.add('open');
+      });
+  }
+  function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+})();
+var active = document.querySelector('nav.side a.active');
+if (active) {
+  var el = active.parentElement;
+  while (el && !el.classList.contains('content-wrap')) {
+    if (el.classList.contains('cat-children')) {
+      el.classList.add('open');
+      var arrow = el.previousElementSibling && el.previousElementSibling.querySelector('.cat-arrow');
+      if (arrow) arrow.textContent = '▼';
+    }
+    el = el.parentElement;
+  }
+}
+</script>
+</body></html>

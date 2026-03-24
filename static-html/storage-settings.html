@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Storage Settings（ユーザーストレージ設定）</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <style>
+    /* ---- Themes (CSS variables) ---- */
+    :root {
+      --c-text:#1c1e21; --c-bg:#fff; --c-sidebar-bg:#f6f7f8; --c-border:#e3e4e5;
+      --c-hover:#e3e4e5; --c-nav-bg:#1c1e21; --c-nav-border:#333; --c-nav-accent:#2e8555;
+      --c-act-bg:#e8f4fd; --c-act-text:#1877f2; --c-cat-label:#444; --c-arrow:#888;
+      --c-pre-bg:#f6f7f8; --c-code-bg:#f0f0f0; --c-th-bg:#f6f7f8;
+      --c-bq-border:#ddd; --c-bq-text:#555; --c-h2-border:#eee;
+    }
+    [data-theme="warm"] {
+      --c-text:#2d1f00; --c-bg:#fdf6e3; --c-sidebar-bg:#f5ead0; --c-border:#d9c89a;
+      --c-hover:#ecddb8; --c-nav-bg:#4a3820; --c-nav-border:#6b5030; --c-nav-accent:#c8860a;
+      --c-act-bg:#fef3d0; --c-act-text:#b07a0a; --c-cat-label:#5c4010; --c-arrow:#a08050;
+      --c-pre-bg:#f5ead0; --c-code-bg:#ede4c8; --c-th-bg:#f0e5c8;
+      --c-bq-border:#c8a870; --c-bq-text:#6b5030; --c-h2-border:#ddd0a8;
+    }
+    [data-theme="blue"] {
+      --c-text:#1a2540; --c-bg:#f0f4ff; --c-sidebar-bg:#e8edf8; --c-border:#c5d0e8;
+      --c-hover:#d8e2f5; --c-nav-bg:#1a3a6b; --c-nav-border:#2a4a7b; --c-nav-accent:#4a9fe8;
+      --c-act-bg:#ddeeff; --c-act-text:#1a6fd4; --c-cat-label:#2a3a60; --c-arrow:#6080b0;
+      --c-pre-bg:#e8edf8; --c-code-bg:#dde4f5; --c-th-bg:#e2e8f5;
+      --c-bq-border:#90aad8; --c-bq-text:#3a5080; --c-h2-border:#c8d5ee;
+    }
+    [data-theme="green"] {
+      --c-text:#1a3020; --c-bg:#f0f8f0; --c-sidebar-bg:#e4f0e4; --c-border:#b8d8b8;
+      --c-hover:#d0e8d0; --c-nav-bg:#1a4a2a; --c-nav-border:#2a5a3a; --c-nav-accent:#40c060;
+      --c-act-bg:#d5f0d5; --c-act-text:#1a8040; --c-cat-label:#2a4a30; --c-arrow:#508050;
+      --c-pre-bg:#e4f0e4; --c-code-bg:#d8ecd8; --c-th-bg:#deeede;
+      --c-bq-border:#80c080; --c-bq-text:#3a5a3a; --c-h2-border:#c0dcc0;
+    }
+    [data-theme="red"] {
+      --c-text:#3a1010; --c-bg:#fff5f5; --c-sidebar-bg:#fce8e8; --c-border:#e8c0c0;
+      --c-hover:#f5d8d8; --c-nav-bg:#5a1a1a; --c-nav-border:#7a2a2a; --c-nav-accent:#e04040;
+      --c-act-bg:#fde0e0; --c-act-text:#c02020; --c-cat-label:#5a2020; --c-arrow:#a06060;
+      --c-pre-bg:#fce8e8; --c-code-bg:#f8dede; --c-th-bg:#faeaea;
+      --c-bq-border:#d09090; --c-bq-text:#703030; --c-h2-border:#e8c8c8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           font-size: 16px; color: var(--c-text); background: var(--c-bg);
+           display: flex; flex-direction: column; min-height: 100vh; }
+    /* ---- Top navbar ---- */
+    header { background: var(--c-nav-bg); color: #fff; display: flex; align-items: center;
+             padding: 0 1.5rem; height: 60px; position: sticky; top: 0; z-index: 100;
+             border-bottom: 1px solid var(--c-nav-border); flex-shrink: 0; }
+    header .site-title { font-weight: 700; font-size: 1.1rem; color: #fff;
+                         text-decoration: none; margin-right: 2rem; white-space: nowrap; }
+    header nav.top { display: flex; gap: 0; height: 100%; flex: 1; }
+    header nav.top a { display: flex; align-items: center; padding: 0 1rem;
+                       color: #ccc; text-decoration: none; font-size: 0.875rem;
+                       border-bottom: 3px solid transparent; white-space: nowrap; }
+    header nav.top a:hover { color: #fff; }
+    header nav.top a.active { color: #fff; border-bottom-color: var(--c-nav-accent); }
+    /* ---- Theme switcher ---- */
+    #theme-sel { margin-left: auto; background: transparent; color: #ccc;
+                 border: 1px solid #666; border-radius: 4px; padding: 3px 6px;
+                 font-size: 0.8rem; cursor: pointer; }
+    #theme-sel option { background: #2c2c2c; color: #fff; }
+    /* ---- Search ---- */
+    #search-wrap { position: relative; margin-left: 1rem; }
+    #search-input { background: rgba(255,255,255,0.12); border: 1px solid #666; border-radius: 4px;
+                    padding: 4px 10px; color: #fff; font-size: 0.875rem; width: 200px; outline: none; }
+    #search-input::placeholder { color: #aaa; }
+    #search-input:focus { background: rgba(255,255,255,0.22); border-color: #aaa; width: 260px; transition: width 0.2s; }
+    #search-results { position: absolute; top: calc(100% + 6px); right: 0; width: 400px;
+                      background: var(--c-bg); border: 1px solid var(--c-border); border-radius: 6px;
+                      box-shadow: 0 4px 20px rgba(0,0,0,0.18); z-index: 200;
+                      display: none; max-height: 500px; overflow-y: auto; }
+    #search-results.open { display: block; }
+    .sr-item { padding: 10px 14px; border-bottom: 1px solid var(--c-border);
+               text-decoration: none; display: block; color: var(--c-text); }
+    .sr-item:last-child { border-bottom: none; }
+    .sr-item:hover { background: var(--c-hover); }
+    .sr-title { font-weight: 600; font-size: 0.875rem; }
+    .sr-summary { font-size: 0.8rem; color: #888; margin-top: 2px;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sr-empty { padding: 1rem; text-align: center; color: #888; font-size: 0.875rem; }
+    /* ---- Content area ---- */
+    .content-wrap { display: flex; flex: 1; overflow: hidden; }
+    /* ---- Sidebar ---- */
+    nav.side { width: 280px; min-width: 280px; background: var(--c-sidebar-bg);
+               border-right: 1px solid var(--c-border); padding: 1rem;
+               overflow-y: auto; height: calc(100vh - 60px); position: sticky; top: 60px; }
+    nav.side ul { list-style: none; }
+    nav.side ul li { margin: 1px 0; }
+    nav.side ul li a { display: block; padding: 3px 8px; border-radius: 4px; color: var(--c-text);
+                       text-decoration: none; font-size: 0.875rem;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    nav.side ul li a:hover { background: var(--c-hover); }
+    nav.side ul li a.active { background: var(--c-act-bg); color: var(--c-act-text); font-weight: 600; }
+    .cat-header { display: flex; align-items: center; cursor: pointer; user-select: none;
+                  padding: 4px 8px; border-radius: 4px; margin-top: 4px; }
+    .cat-header:hover { background: var(--c-hover); }
+    .cat-label { font-weight: 600; font-size: 0.8rem; color: var(--c-cat-label); flex: 1; }
+    .cat-arrow { font-size: 0.65rem; color: var(--c-arrow); transition: transform 0.15s; }
+    .cat-children { overflow: hidden; padding-left: 12px; border-left: 2px solid var(--c-border);
+                    margin-left: 8px; display: none; }
+    .cat-children.open { display: block; }
+    /* ---- Main ---- */
+    main { flex: 1; padding: 2rem 3rem; max-width: 900px; overflow-y: auto; }
+    main h1 { font-size: 2rem; margin-bottom: 1rem; }
+    main h2 { font-size: 1.5rem; margin: 1.5rem 0 0.75rem; border-bottom: 1px solid var(--c-h2-border); padding-bottom: 0.25rem; }
+    main h3 { font-size: 1.2rem; margin: 1.25rem 0 0.5rem; }
+    main h4 { font-size: 1rem; margin: 1rem 0 0.5rem; }
+    main p { margin: 0.75rem 0; line-height: 1.7; }
+    main ul, main ol { margin: 0.75rem 0 0.75rem 1.5rem; line-height: 1.7; }
+    main pre { background: var(--c-pre-bg); border: 1px solid var(--c-border); border-radius: 6px;
+                padding: 1rem; overflow-x: auto; margin: 1rem 0; }
+    main code { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.875em; }
+    main p code, main li code, main td code { background: var(--c-code-bg); padding: 1px 5px; border-radius: 3px; }
+    main table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    main th, main td { border: 1px solid var(--c-border); padding: 8px 12px; text-align: left; }
+    main th { background: var(--c-th-bg); font-weight: 600; }
+    main blockquote { border-left: 4px solid var(--c-bq-border); padding-left: 1rem; color: var(--c-bq-text); margin: 1rem 0; }
+    main img { max-width: 100%; }
+    /* ---- Admonitions ---- */
+    .admonition { border-radius: 6px; padding: 0.75rem 1rem; margin: 1rem 0; }
+    .admonition-title { font-weight: 700; font-size: 0.875rem; text-transform: uppercase;
+                        letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    .admonition-body > *:last-child { margin-bottom: 0; }
+  </style>
+  <script>(function(){
+    var t=localStorage.getItem('md2html-theme');
+    if(t&&t!=='default') document.documentElement.setAttribute('data-theme',t);
+  })();</script>
+</head>
+<body>
+<header>
+  <a class="site-title" href="./intro.html">k8s-pups</a>
+  <nav class="top">
+  </nav>
+  <select id="theme-sel">
+    <option value="default">Default</option>
+    <option value="warm">Warm</option>
+    <option value="blue">Blue</option>
+    <option value="green">Green</option>
+    <option value="red">Red</option>
+  </select>
+  <div id="search-wrap">
+    <input id="search-input" type="search" placeholder="Search..." autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+</header>
+<div class="content-wrap">
+<nav class="side">
+<ul>
+<li><a href="./README.html">k8s-pups ドキュメント</a></li>
+<li><a href="./network-policy.html">user-pods NetworkPolicy 設計</a></li>
+<li><a href="./storage-settings.html" class="active">Storage Settings（ユーザーストレージ設定）</a></li>
+</ul>
+</nav>
+<main>
+<h1>Storage Settings（ユーザーストレージ設定）</h1>
+<h2 id="概要">概要</h2>
+<p>k8s-pupsダッシュボードの「Storage Settings」カードにより、ユーザーが自分のPVC（PersistentVolumeClaim）のディスクサイズを選択できる。選択したサイズは次回のツール起動時にPVCに反映される。</p>
+<h2 id="仕組み">仕組み</h2>
+<h3 id="データフロー">データフロー</h3>
+<pre><code>ダッシュボード（💾 Storage Settings）
+    │ POST /storage/save  storageSize=500Gi
+    ↓
+DashboardResource
+    │ バリデーション（選択肢に含まれるか確認）
+    ↓
+SessionManagerActor → K8sApiClient
+    │ ConfigMap &quot;pups-prefs-{userId}&quot; に保存
+    ↓
+user-pods namespace の ConfigMap
+    data:
+      storageSize: &quot;500Gi&quot;
+</code></pre>
+<h3 id="ツール起動時のpvc作成">ツール起動時のPVC作成</h3>
+<pre><code>ツール Launch ボタン
+    ↓
+SessionManagerActor.createSession()
+    │ ConfigMap から storageSize を読み取り
+    │ SessionInfo.userStoragePreference にセット
+    ↓
+SessionActor.start()
+    │ resolveStorageSize():
+    │   1. userStoragePreference があればそれを使用
+    │   2. なければ ResourceProfile のデフォルト値にフォールバック
+    ↓
+K8sApiClient.createUserPvcIfAbsent(userId, storageSize)
+    │ PVC未作成 → 指定サイズで新規作成
+    │ PVC既存 &amp; 小さい → 拡張を試みる
+    │ PVC既存 &amp; 同じor大きい → 何もしない
+    ↓
+Pod に PVC マウント（/home/user 等）
+</code></pre>
+<h3 id="重要-pvcの制約">重要: PVCの制約</h3>
+<ul>
+<li><strong>PVCは拡張のみ可能</strong>。縮小はKubernetesの制約で不可。</li>
+<li>StorageClassに <code>allowVolumeExpansion: true</code> が必要。microk8s-hostpathの場合は手動で有効化が必要:
+<pre><code class="language-bash">kubectl patch sc microk8s-hostpath -p '{&quot;allowVolumeExpansion&quot;: true}'
+</code></pre>
+</li>
+<li>hostpathプロビジョナーは物理的にサイズを制限しない（ノードのディスク容量がそのまま使える）。PVCのサイズはKubernetes上の管理値として機能する。</li>
+</ul>
+<h2 id="設定">設定</h2>
+<h3 id="applicationproperties"><code>application.properties</code></h3>
+<table>
+<thead>
+<tr>
+<th>プロパティ</th>
+<th>環境変数</th>
+<th>デフォルト</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>k8spups.storage-size-options</code></td>
+<td><code>K8SPUPS_STORAGE_SIZE_OPTIONS</code></td>
+<td><code>20Gi,50Gi,100Gi,500Gi,1Ti</code></td>
+<td>ドロップダウンに表示する選択肢</td>
+</tr>
+<tr>
+<td><code>k8spups.default-storage-size</code></td>
+<td><code>K8SPUPS_DEFAULT_STORAGE_SIZE</code></td>
+<td><code>100Gi</code></td>
+<td>ユーザーが未設定時のデフォルト値</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rbac">RBAC</h3>
+<p><code>k8s-pups-pod-manager</code> Roleに <code>configmaps</code> リソースの権限が必要:</p>
+<pre><code class="language-yaml">rules:
+  - apiGroups: [&quot;&quot;]
+    resources: [&quot;pods&quot;, &quot;services&quot;, &quot;persistentvolumeclaims&quot;, &quot;configmaps&quot;]
+    verbs: [&quot;create&quot;, &quot;delete&quot;, &quot;get&quot;, &quot;list&quot;, &quot;watch&quot;, &quot;update&quot;]
+</code></pre>
+<h2 id="kubernetesリソース">Kubernetesリソース</h2>
+<h3 id="configmapユーザー設定保存先">ConfigMap（ユーザー設定保存先）</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>値</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>名前</td>
+<td><code>pups-prefs-{userId}</code></td>
+</tr>
+<tr>
+<td>Namespace</td>
+<td><code>user-pods</code></td>
+</tr>
+<tr>
+<td>ラベル</td>
+<td><code>app=k8s-pups-user</code>, <code>managed-by=k8s-pups</code>, <code>user={userId}</code></td>
+</tr>
+<tr>
+<td>データキー</td>
+<td><code>storageSize</code></td>
+</tr>
+</tbody>
+</table>
+<p>例:</p>
+<pre><code class="language-yaml">apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pups-prefs-testadmin
+  namespace: user-pods
+  labels:
+    app: k8s-pups-user
+    managed-by: k8s-pups
+    user: testadmin
+data:
+  storageSize: &quot;500Gi&quot;
+</code></pre>
+<h3 id="pvcユーザーデータ">PVC（ユーザーデータ）</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>値</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>名前</td>
+<td><code>pups-data-{userId}</code></td>
+</tr>
+<tr>
+<td>Namespace</td>
+<td><code>user-pods</code></td>
+</tr>
+<tr>
+<td>AccessMode</td>
+<td><code>ReadWriteOnce</code></td>
+</tr>
+<tr>
+<td>サイズ</td>
+<td>ユーザー設定値 or プラグインデフォルト</td>
+</tr>
+</tbody>
+</table>
+<h2 id="変更対象ファイル一覧">変更対象ファイル一覧</h2>
+<table>
+<thead>
+<tr>
+<th>ファイル</th>
+<th>変更内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>K8sApiClient.java</code></td>
+<td><code>getUserPvcInfo()</code>, <code>getUserStoragePreference()</code>, <code>saveUserStoragePreference()</code> 追加</td>
+</tr>
+<tr>
+<td><code>SessionInfo.java</code></td>
+<td><code>userStoragePreference</code> フィールド追加</td>
+</tr>
+<tr>
+<td><code>SessionManagerActor.java</code></td>
+<td>ConfigMap委譲メソッド追加、<code>createSession()</code>でストレージ設定読み取り</td>
+</tr>
+<tr>
+<td><code>SessionActor.java</code></td>
+<td><code>resolveStorageSize()</code>でユーザー設定優先</td>
+</tr>
+<tr>
+<td><code>K8sPupsActorSystem.java</code></td>
+<td><code>storageSizeOptions</code>, <code>defaultStorageSize</code> 設定プロパティ追加</td>
+</tr>
+<tr>
+<td><code>DashboardResource.java</code></td>
+<td>テンプレートデータ追加、<code>POST /storage/save</code> エンドポイント追加</td>
+</tr>
+<tr>
+<td><code>application.properties</code></td>
+<td><code>k8spups.storage-size-options</code>, <code>k8spups.default-storage-size</code> 追加、auth permissionに <code>/storage/*</code> 追加</td>
+</tr>
+<tr>
+<td><code>dashboard.html</code></td>
+<td>Storage Settingsカード追加（ツールグリッド先頭）</td>
+</tr>
+<tr>
+<td><code>rbac.yaml</code></td>
+<td><code>configmaps</code> リソース権限追加</td>
+</tr>
+</tbody>
+</table>
+<h2 id="トラブルシューティング">トラブルシューティング</h2>
+<h3 id="saveしてもダッシュボードのサイズが変わらない">Saveしてもダッシュボードのサイズが変わらない</h3>
+<p><strong>症状</strong>: Storage SettingsでサイズをSaveしたが、「Current PVC: 20Gi (Bound)」のまま。</p>
+<p><strong>原因</strong>: Saveはユーザーの**設定（ConfigMap）**を保存するだけ。実際のPVCサイズは次回ツール起動時に拡張される。既存PVCが既に存在する場合、新しい設定値が現在のPVCサイズより大きければ拡張を試みる。</p>
+<p><strong>確認方法</strong>:</p>
+<pre><code class="language-bash"># ConfigMapに設定が保存されているか確認
+kubectl get configmap pups-prefs-testadmin -n user-pods -o yaml
+
+# PVCの現在のサイズ確認
+kubectl get pvc pups-data-testadmin -n user-pods
+</code></pre>
+<h3 id="pvc拡張がエラーになる">PVC拡張がエラーになる</h3>
+<p><strong>症状</strong>: ツール起動時にログに &quot;PVC expansion failed (StorageClass may not support resize)&quot; と表示される。</p>
+<p><strong>原因</strong>: StorageClassに <code>allowVolumeExpansion: true</code> が設定されていない。</p>
+<p><strong>修正方法</strong>:</p>
+<pre><code class="language-bash">kubectl patch sc microk8s-hostpath -p '{&quot;allowVolumeExpansion&quot;: true}'
+</code></pre>
+<h3 id="configmap作成がforbiddenエラーになる">ConfigMap作成がForbiddenエラーになる</h3>
+<p><strong>症状</strong>: ストレージ設定のSave時に500エラー。ログに &quot;configmaps is forbidden&quot; と表示。</p>
+<p><strong>原因</strong>: <code>k8s-pups-pod-manager</code> Roleに <code>configmaps</code> 権限がない。</p>
+<p><strong>修正方法</strong>:</p>
+<pre><code class="language-bash">kubectl apply -f k8s/rbac.yaml
+</code></pre>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad: true});</script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body, {delimiters: [
+    {left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});"></script>
+<script>
+document.querySelectorAll('.cat-header').forEach(function(header) {
+  header.addEventListener('click', function() {
+    var children = this.nextElementSibling;
+    var arrow = this.querySelector('.cat-arrow');
+    children.classList.toggle('open');
+    arrow.textContent = children.classList.contains('open') ? '▼' : '▶';
+  });
+});
+(function() {
+  var sel = document.getElementById('theme-sel');
+  var t = localStorage.getItem('md2html-theme') || 'default';
+  sel.value = t;
+  sel.addEventListener('change', function() {
+    var val = this.value;
+    localStorage.setItem('md2html-theme', val);
+    if (val === 'default') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', val);
+  });
+})();
+(function() {
+  var input = document.getElementById('search-input');
+  var results = document.getElementById('search-results');
+  var timer = null;
+  input.addEventListener('input', function() {
+    clearTimeout(timer);
+    var q = this.value.trim();
+    if (!q) { results.classList.remove('open'); return; }
+    timer = setTimeout(function() { doSearch(q); }, 300);
+  });
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { results.classList.remove('open'); input.blur(); }
+  });
+  document.addEventListener('click', function(e) {
+    if (!document.getElementById('search-wrap').contains(e.target))
+      results.classList.remove('open');
+  });
+  function doSearch(q) {
+    fetch('/search?q=' + encodeURIComponent(q))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        results.innerHTML = '';
+        if (!data.length) {
+          results.innerHTML = '<div class="sr-empty">No results.</div>';
+        } else {
+          data.forEach(function(item) {
+            var a = document.createElement('a');
+            a.className = 'sr-item'; a.href = item.path;
+            a.innerHTML = '<div class="sr-title">' + esc(item.title) + '</div>' +
+                          '<div class="sr-summary">' + esc(item.summary) + '</div>';
+            results.appendChild(a);
+          });
+        }
+        results.classList.add('open');
+      })
+      .catch(function() {
+        results.innerHTML = '<div class="sr-empty">Search requires --serve mode.</div>';
+        results.classList.add('open');
+      });
+  }
+  function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+})();
+var active = document.querySelector('nav.side a.active');
+if (active) {
+  var el = active.parentElement;
+  while (el && !el.classList.contains('content-wrap')) {
+    if (el.classList.contains('cat-children')) {
+      el.classList.add('open');
+      var arrow = el.previousElementSibling && el.previousElementSibling.querySelector('.cat-arrow');
+      if (arrow) arrow.textContent = '▼';
+    }
+    el = el.parentElement;
+  }
+}
+</script>
+</body></html>

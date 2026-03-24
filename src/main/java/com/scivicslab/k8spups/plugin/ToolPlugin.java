@@ -216,4 +216,24 @@ public interface ToolPlugin {
     default boolean singleInstance() {
         return false;
     }
+
+    /**
+     * Additional NFS volumes to mount into the container.
+     * Each entry is a {@link NfsVolumeSpec} specifying server, path, mount point, and read-only flag.
+     * Default: empty (no additional NFS volumes).
+     */
+    default List<NfsVolumeSpec> nfsVolumes() {
+        return Collections.emptyList();
+    }
+
+    /**
+     * Whether this plugin runs as a batch job.
+     * When true, the session is automatically cleaned up after the Pod
+     * completes (exits with code 0). The Pod will not stay alive after
+     * the main process finishes.
+     * Default: false (long-running interactive session).
+     */
+    default boolean batchMode() {
+        return false;
+    }
 }
