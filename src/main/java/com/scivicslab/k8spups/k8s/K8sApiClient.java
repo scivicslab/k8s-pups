@@ -1465,6 +1465,25 @@ public class K8sApiClient {
             }
         }
 
+        // Plugin-defined NFS volumes (e.g. build output directory)
+        int nfsIdx = 0;
+        for (var nfsVol : plugin.nfsVolumes()) {
+            String volName = "nfs-plugin-" + nfsIdx;
+            mounts.add(new VolumeMountBuilder()
+                .withName(volName)
+                .withMountPath(nfsVol.mountPath())
+                .withReadOnly(nfsVol.readOnly())
+                .build());
+            volumes.add(new VolumeBuilder().withName(volName)
+                .withNewNfs()
+                    .withServer(nfsVol.server())
+                    .withPath(nfsVol.path())
+                    .withReadOnly(nfsVol.readOnly())
+                .endNfs()
+                .build());
+            nfsIdx++;
+        }
+
         // When nfs-home is selected, run as LDAP UID so it can read/write NFS files.
         // Also disable readOnlyRootFilesystem so the entrypoint can add the UID
         // to /etc/passwd (required by Python's pwd module, dbus, etc.).

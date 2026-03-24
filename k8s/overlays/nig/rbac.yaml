@@ -1,0 +1,86 @@
+---
+# Role in user-pods namespace: manage Pods and Services
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8s-pups-pod-manager
+  namespace: user-pods
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "persistentvolumeclaims", "configmaps"]
+    verbs: ["create", "delete", "get", "list", "watch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-pups-pod-manager-binding
+  namespace: user-pods
+subjects:
+  - kind: ServiceAccount
+    name: vault-auth
+    namespace: k8s-pups
+roleRef:
+  kind: Role
+  name: k8s-pups-pod-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+# Role in k8s-pups namespace: manage HTTPRoutes and SecurityPolicies
+# (Gateway is in the same namespace on NIG)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8s-pups-route-manager
+  namespace: k8s-pups
+rules:
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["create", "delete", "get", "list"]
+  - apiGroups: ["gateway.envoyproxy.io"]
+    resources: ["securitypolicies"]
+    verbs: ["create", "delete", "get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-pups-route-manager-binding
+  namespace: k8s-pups
+subjects:
+  - kind: ServiceAccount
+    name: vault-auth
+    namespace: k8s-pups
+roleRef:
+  kind: Role
+  name: k8s-pups-route-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+# ClusterRole: read node status and metrics (cluster-scoped)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-pups-node-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes", "persistentvolumeclaims", "resourcequotas"]
+    verbs: ["list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-pups-node-reader-binding
+subjects:
+  - kind: ServiceAccount
+    name: vault-auth
+    namespace: k8s-pups
+roleRef:
+  kind: ClusterRole
+  name: k8s-pups-node-reader
+  apiGroup: rbac.authorization.k8s.io

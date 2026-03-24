@@ -1,0 +1,17 @@
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: k8s-pups-spc
+  namespace: k8s-pups
+spec:
+  provider: vault
+  parameters:
+    vaultAddress: "http://vault.vault.svc.cluster.local:8200"
+    roleName: "k8s-pups-role"
+    objects: |
+      - objectName: "oidc-client-secret"
+        secretPath: "k8s-pups/data/oidc-client"
+        secretKey: "client-secret"
+      - objectName: "ldap-bind-password"
+        secretPath: "k8s-pups/data/ldap"
+        secretKey: "bind-password"

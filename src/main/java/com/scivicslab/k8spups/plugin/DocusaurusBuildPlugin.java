@@ -4,32 +4,33 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Docusaurus preview plugin.
- * Mounts the user's ~/works directory via NFS workspace and runs yarn start
- * on a specified Docusaurus project path.
+ * Docusaurus build plugin.
+ * Builds a Docusaurus project from the user's ~/works directory and copies
+ * the output to the shared NFS docusaurus-sites directory for static serving.
  *
- * UID/GID are determined dynamically from LDAP (POSIX account).
+ * After build completes, a simple status page is served so the session
+ * shows as READY on the dashboard.
  */
-public class DocusaurusPlugin implements ToolPlugin {
+public class DocusaurusBuildPlugin implements ToolPlugin {
 
     @Override
     public String name() {
-        return "docusaurus";
+        return "docusaurus-build";
     }
 
     @Override
     public String displayName() {
-        return "Docusaurus";
+        return "Docusaurus Build";
     }
 
     @Override
     public String description() {
-        return "Preview Docusaurus sites from your ~/works directory.";
+        return "Build a Docusaurus site and publish to the docs server.";
     }
 
     @Override
     public String containerImage() {
-        return "10.0.0.23:32000/docusaurus-runner:0.1.5-2603131006";
+        return "10.0.0.23:32000/docusaurus-builder:0.2.0-2603131217";
     }
 
     @Override
@@ -43,36 +44,26 @@ public class DocusaurusPlugin implements ToolPlugin {
     }
 
     @Override
-    public Map<String, String> environmentVariables() {
-        // NFS does not support inotify; use polling for file watching
-        return Map.of(
-            "WATCHPACK_POLLING", "true",
-            "CHOKIDAR_USEPOLLING", "true"
-        );
-    }
-
-    @Override
     public Map<String, String> resourceRequests() {
-        return Map.of("cpu", "100m", "memory", "256Mi");
+        return Map.of("cpu", "500m", "memory", "1Gi");
     }
 
     @Override
     public Map<String, String> resourceLimits() {
-        return Map.of("cpu", "1", "memory", "2Gi");
+        return Map.of("cpu", "2", "memory", "4Gi");
     }
 
     @Override
     public List<ResourceProfile> resourceProfiles() {
         return List.of(
-            new ResourceProfile("standard", "Standard (1 CPU / 2 GB)",
-                Map.of("cpu", "100m", "memory", "256Mi"),
-                Map.of("cpu", "1", "memory", "2Gi"))
+            new ResourceProfile("standard", "Standard (2 CPU / 4 GB)",
+                Map.of("cpu", "500m", "memory", "1Gi"),
+                Map.of("cpu", "2", "memory", "4Gi"))
         );
     }
 
     @Override
     public String userDataMountPath() {
-        // PVC fallback when no NFS workspace exists.
         return "/workspace";
     }
 
@@ -93,20 +84,28 @@ public class DocusaurusPlugin implements ToolPlugin {
 
     @Override
     public String workspaceSubPath() {
-        // Mount only ~/works from the user's NFS home directory.
         return "works";
     }
 
     @Override
     public boolean passthroughPath() {
-        return true;
+        return false;
     }
 
     @Override
     public List<UserParameter> userParameters() {
         return List.of(
             new UserParameter("DOCUSAURUS_PATH", "Project path (relative to ~/works)",
-                "doc_SCIVICS002", false, true)
+                "doc_SCIVICS003", false, true),
+            new UserParameter("INDEX_MODE", "Index mode: none / update / full",
+                "none", false, true)
+        );
+    }
+
+    @Override
+    public List<NfsVolumeSpec> nfsVolumes() {
+        return List.of(
+            new NfsVolumeSpec("10.0.0.20", "/Public/docusaurus-sites", "/output", false)
         );
     }
 
@@ -117,11 +116,21 @@ public class DocusaurusPlugin implements ToolPlugin {
 
     @Override
     public int readinessProbeInitialDelay() {
-        return 15;
+        return 30;
     }
 
     @Override
     public int readinessProbePeriod() {
-        return 5;
+        return 10;
+    }
+
+    @Override
+    public boolean singleInstance() {
+        return true;
+    }
+
+    @Override
+    public boolean batchMode() {
+        return true;
     }
 }

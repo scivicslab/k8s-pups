@@ -34,7 +34,7 @@
     <dependency>
       <groupId>com.scivicslab</groupId>
       <artifactId>pojo-actor</artifactId>
-      <version>3.0.0-SNAPSHOT</version>
+      <version>3.0.0</version>
     </dependency>
 
     <!-- Quarkus REST -->

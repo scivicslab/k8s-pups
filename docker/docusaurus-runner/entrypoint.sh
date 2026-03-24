@@ -66,6 +66,7 @@ trap "rm -f '${PROJECT_DIR}/${WRAPPER}'" EXIT
 echo "Starting Docusaurus at $PROJECT_DIR with baseUrl=$BASE_URL"
 # Enable polling for file watching (inotify does not work on NFS)
 export WATCHPACK_POLLING=true
+export CHOKIDAR_USEPOLLING=true
 
 # --- Auto-recovery for hot-reload crashes ---
 # Docusaurus dev server can crash when .docusaurus/ metadata cache gets
