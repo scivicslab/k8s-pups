@@ -402,16 +402,16 @@ curl -sk https://192.168.5.25/pups/dashboard -o /dev/null -w &quot;%{http_code}\
 <pre><code>Upload failed (ファイル名): /home/devteam/works/uploads/xxxx.tmp
 </code></pre>
 <p><strong>原因</strong></p>
-<p><code>quarkus-coder-agent</code> の <code>application.properties</code> に <code>coder-agent.llm.working-dir=/home/devteam/works</code> が設定されており、コンテナ内でもそのまま適用されるため、ホストマシンのパスに書き込もうとして失敗する。</p>
+<p><code>quarkus-chat-ui</code> の <code>application.properties</code> に <code>chat-ui.llm.working-dir=/home/devteam/works</code> が設定されており、コンテナ内でもそのまま適用されるため、ホストマシンのパスに書き込もうとして失敗する。</p>
 <p><strong>修正方法</strong></p>
-<p><code>CoderAgentPlugin.java</code> の <code>environmentVariables()</code> に <code>CODER_AGENT_LLM_WORKING_DIR</code> を追加し、コンテナ内のPVCマウントパスで上書きする。</p>
-<pre><code class="language-java">// CoderAgentPlugin.java
+<p><code>ChatUiPlugin.java</code> の <code>environmentVariables()</code> に <code>CHAT_UI_LLM_WORKING_DIR</code> を追加し、コンテナ内のPVCマウントパスで上書きする。</p>
+<pre><code class="language-java">// ChatUiPlugin.java
 @Override
 public Map&lt;String, String&gt; environmentVariables() {
     return Map.of(
-        &quot;CODER_AGENT_LLM_SERVERS&quot;, &quot;...&quot;,
+        &quot;CHAT_UI_LLM_SERVERS&quot;, &quot;...&quot;,
         &quot;HOME&quot;, &quot;/home/user&quot;,
-        &quot;CODER_AGENT_LLM_WORKING_DIR&quot;, &quot;/home/user&quot;  // ← これを追加
+        &quot;CHAT_UI_LLM_WORKING_DIR&quot;, &quot;/home/user&quot;  // ← これを追加
     );
 }
 </code></pre>
@@ -429,7 +429,7 @@ public Map&lt;String, String&gt; environmentVariables() {
 <hr />
 <h3 id="セッション起動時に-securitypolicy-が作成されずに-404">セッション起動時に SecurityPolicy が作成されずに 404</h3>
 <p><strong>症状</strong></p>
-<p>coder-agentを起動してKeycloak認証後、<code>/session/{id}/oauth2/callback</code> で404になる。</p>
+<p>chat-uiを起動してKeycloak認証後、<code>/session/{id}/oauth2/callback</code> で404になる。</p>
 <p><strong>原因</strong></p>
 <p><code>k8s-pups-pod-manager</code> RoleにPVC作成権限がなく、<code>SessionActor.start()</code> がPVC作成でForbiddenエラーになり、以後のSecurityPolicy/HTTPRoute作成に到達できない。</p>
 <p><strong>修正方法</strong></p>

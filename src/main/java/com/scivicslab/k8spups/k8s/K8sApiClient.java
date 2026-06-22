@@ -49,6 +49,7 @@ public class K8sApiClient {
     private final String oidcClientId;
     private final String oidcSecretName;
     private final String oidcJwksUri;
+    private final String oidcRedirectBaseUrl;
 
     // NFS workspace config (home directory)
     private final String nfsServer;
@@ -58,11 +59,21 @@ public class K8sApiClient {
     private final String nfsK8sServer;
     private final String nfsK8sBasePath;
 
+    // Node allowlist for user pods (empty = no restriction)
+    private final List<String> allowedNodes;
+
+    private final String basePath;
+    private final String controllerUrl;
+
     public K8sApiClient(String userPodsNamespace, String httpRouteNamespace, List<String> gatewayNames,
                         String oidcIssuer, String oidcAuthorizationEndpoint, String oidcTokenEndpoint,
                         String oidcClientId, String oidcSecretName, String oidcJwksUri,
+                        String oidcRedirectBaseUrl,
                         String nfsServer, String nfsBasePath,
-                        String nfsK8sServer, String nfsK8sBasePath) {
+                        String nfsK8sServer, String nfsK8sBasePath,
+                        List<String> allowedNodes,
+                        String basePath,
+                        String controllerUrl) {
         this.client = CDI.current().select(KubernetesClient.class).get();
         this.userPodsNamespace = userPodsNamespace;
         this.httpRouteNamespace = httpRouteNamespace;
@@ -73,10 +84,14 @@ public class K8sApiClient {
         this.oidcClientId = oidcClientId;
         this.oidcSecretName = oidcSecretName;
         this.oidcJwksUri = oidcJwksUri;
+        this.oidcRedirectBaseUrl = oidcRedirectBaseUrl;
         this.nfsServer = nfsServer;
         this.nfsBasePath = nfsBasePath;
         this.nfsK8sServer = nfsK8sServer;
         this.nfsK8sBasePath = nfsK8sBasePath;
+        this.allowedNodes = allowedNodes;
+        this.basePath = basePath;
+        this.controllerUrl = controllerUrl;
     }
 
     // -- Pod operations --
@@ -197,6 +212,18 @@ public class K8sApiClient {
         LOG.info("Service deleted: " + serviceName);
     }
 
+    public String getPodLogs(String podName, int tailLines) {
+        try {
+            return client.pods().inNamespace(userPodsNamespace)
+                .withName(podName)
+                .tailingLines(tailLines)
+                .getLog();
+        } catch (Exception e) {
+            LOG.warning("Failed to get logs for pod " + podName + ": " + e.getMessage());
+            return "";
+        }
+    }
+
     // -- HTTPRoute operations (Gateway API) --
 
     /**
@@ -299,6 +326,120 @@ public class K8sApiClient {
         LOG.info("HTTPRoute deleted: " + routeName);
     }
 
+    // -- Sub-tool operations (dynamic routing for child processes inside a session Pod) --
+
+    private static String subToolResourceName(String sessionId, String toolName, int port) {
+        return "pups-subtool-" + sessionId + "-" + toolName + "-" + port;
+    }
+
+    public void createSubToolService(String sessionId, String toolName, int port) {
+        String name = subToolResourceName(sessionId, toolName, port);
+        Service svc = new ServiceBuilder()
+            .withNewMetadata()
+                .withName(name)
+                .withNamespace(userPodsNamespace)
+                .withLabels(Map.of(
+                    "managed-by", "k8s-pups",
+                    "parent-session", sessionId,
+                    "sub-tool", toolName
+                ))
+            .endMetadata()
+            .withNewSpec()
+                .withSelector(Map.of("session", sessionId))
+                .addNewPort()
+                    .withPort(port)
+                    .withTargetPort(new IntOrString(port))
+                    .withProtocol("TCP")
+                .endPort()
+            .endSpec()
+            .build();
+        client.services().inNamespace(userPodsNamespace).resource(svc).create();
+        LOG.info("SubTool Service created: " + name);
+    }
+
+    public void createSubToolHTTPRoute(String sessionId, String toolName, int port) {
+        String name = subToolResourceName(sessionId, toolName, port);
+        String pathPrefix = "/session/" + sessionId + "-" + toolName + "-" + port;
+
+        List<ParentReference> parentRefs = gatewayNames.stream()
+            .map(gw -> new ParentReferenceBuilder()
+                .withGroup("gateway.networking.k8s.io")
+                .withKind("Gateway")
+                .withName(gw)
+                .build())
+            .toList();
+
+        HTTPRoute route = new HTTPRouteBuilder()
+            .withNewMetadata()
+                .withName(name)
+                .withNamespace(httpRouteNamespace)
+                .withLabels(Map.of(
+                    "managed-by", "k8s-pups",
+                    "parent-session", sessionId,
+                    "sub-tool", toolName
+                ))
+            .endMetadata()
+            .withNewSpec()
+                .withParentRefs(parentRefs)
+                .addNewRule()
+                    .addNewMatch()
+                        .withNewPath()
+                            .withType("PathPrefix")
+                            .withValue(pathPrefix)
+                        .endPath()
+                    .endMatch()
+                    .addAllToFilters(List.of(
+                        new HTTPRouteFilterBuilder()
+                            .withType("URLRewrite")
+                            .withNewUrlRewrite()
+                                .withNewPath()
+                                    .withType("ReplacePrefixMatch")
+                                    .withReplacePrefixMatch("/")
+                                .endPath()
+                            .endUrlRewrite()
+                            .build(),
+                        new HTTPRouteFilterBuilder()
+                            .withType("RequestHeaderModifier")
+                            .withNewRequestHeaderModifier()
+                                .addNewSet()
+                                    .withName("X-Forwarded-Proto")
+                                    .withValue("https")
+                                .endSet()
+                            .endRequestHeaderModifier()
+                            .build()
+                    ))
+                    .addNewBackendRef()
+                        .withName(name)
+                        .withNamespace(userPodsNamespace)
+                        .withPort(port)
+                    .endBackendRef()
+                    .withNewTimeouts()
+                        .withRequest("3600s")
+                    .endTimeouts()
+                .endRule()
+            .endSpec()
+            .build();
+
+        client.resource(route).create();
+        LOG.info("SubTool HTTPRoute created: " + name + " → " + pathPrefix);
+    }
+
+    public void deleteSubToolResources(String sessionId, String toolName, int port) {
+        String name = subToolResourceName(sessionId, toolName, port);
+        try {
+            client.services().inNamespace(userPodsNamespace).withName(name).delete();
+            LOG.info("SubTool Service deleted: " + name);
+        } catch (Exception e) {
+            LOG.warning("Failed to delete SubTool Service " + name + ": " + e.getMessage());
+        }
+        try {
+            client.resources(HTTPRoute.class).inNamespace(httpRouteNamespace).withName(name).delete();
+            LOG.info("SubTool HTTPRoute deleted: " + name);
+        } catch (Exception e) {
+            LOG.warning("Failed to delete SubTool HTTPRoute " + name + ": " + e.getMessage());
+        }
+    }
+
     // -- SecurityPolicy operations (Envoy Gateway OIDC) --
 
     private static final ResourceDefinitionContext SECURITY_POLICY_CONTEXT =
@@ -318,7 +459,7 @@ public class K8sApiClient {
     public void createSecurityPolicy(String sessionId, String userId) {
         String policyName = "pups-session-sp-" + sessionId;
         String targetRouteName = "pups-session-" + sessionId;
-        String redirectURL = "https://192.168.5.25/session/" + sessionId + "/oauth2/callback";
+        String redirectURL = oidcRedirectBaseUrl + "/session/" + sessionId + "/oauth2/callback";
         // Fixed cookie name (per-session to avoid cross-session conflicts).
         // Must be specified explicitly because the default is a randomly generated suffix,
         // which would make it impossible to reference from the jwt section below.
@@ -359,7 +500,11 @@ public class K8sApiClient {
         extractFrom.put("cookies", List.of(idTokenCookieName));
 
         Map<String, Object> jwtProvider = new LinkedHashMap<>();
-        jwtProvider.put("name", "keycloak");
+        // Provider name must be unique per SecurityPolicy so that Envoy Gateway does not
+        // confuse requirement_name mappings when multiple SecurityPolicies coexist under
+        // the same Gateway (all policies share one merged JWT filter config internally).
+        String jwtProviderName = "keycloak-" + sessionId;
+        jwtProvider.put("name", jwtProviderName);
         jwtProvider.put("issuer", oidcIssuer);
         jwtProvider.put("remoteJWKS", remoteJWKS);
         jwtProvider.put("extractFrom", extractFrom);
@@ -373,7 +518,7 @@ public class K8sApiClient {
         claim.put("values", List.of(userId));
 
         Map<String, Object> jwtPrincipal = new LinkedHashMap<>();
-        jwtPrincipal.put("provider", "keycloak");
+        jwtPrincipal.put("provider", jwtProviderName);
         jwtPrincipal.put("claims", List.of(claim));
 
         Map<String, Object> rule = new LinkedHashMap<>();
@@ -744,10 +889,12 @@ public class K8sApiClient {
      * then creates the PV/PVC pointing to it.
      * Uses nfs.csi.k8s.io driver with the nfsK8sServer/nfsK8sBasePath config.
      * If they already exist, this is a no-op.
+     * Note: NFS does not enforce the declared capacity; it is used only for display.
      *
-     * @param userId the user identifier
+     * @param userId      the user identifier
+     * @param storageSize nominal size for display (e.g. "50Gi")
      */
-    public void createNfsK8sPvPvc(String userId) {
+    public void createNfsK8sPvPvc(String userId, String storageSize) {
         String pvName = userPvName(userId, "nfs-k8s");
         String pvcName = userPvcName(userId, "nfs-k8s");
         String sanitized = sanitizeUserId(userId);
@@ -767,7 +914,7 @@ public class K8sApiClient {
                     .addToLabels("storage-type", "nfs-k8s")
                 .endMetadata()
                 .withNewSpec()
-                    .withCapacity(Map.of("storage", new Quantity("1Ti")))
+                    .withCapacity(Map.of("storage", new Quantity(storageSize)))
                     .withAccessModes("ReadWriteMany")
                     .withPersistentVolumeReclaimPolicy("Retain")
                     .withStorageClassName("")
@@ -802,24 +949,30 @@ public class K8sApiClient {
                     .withStorageClassName("")
                     .withVolumeName(pvName)
                     .withNewResources()
-                        .addToRequests("storage", new Quantity("1Ti"))
+                        .addToRequests("storage", new Quantity(storageSize))
                     .endResources()
                 .endSpec()
                 .build();
             client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
-            LOG.info("NFS-k8s PVC created: " + pvcName);
+            LOG.info("NFS-k8s PVC created: " + pvcName + " (" + storageSize + ")");
         }
     }
 
     /**
      * Ensures the user directory exists on the NFS server for nfs-k8s storage.
      * Runs a temporary Pod that mounts the NFS base path and creates the user subdirectory
-     * with ownership set to 1000:1000.
+     * with ownership set recursively to 1000:1000.
+     *
+     * The chown is recursive (-R) so that a pre-existing, stale, or legacy root-owned
+     * directory (and any root-owned skeleton files left inside it by an earlier
+     * root-based seeding) is corrected to the non-root pod UID. Without -R the top
+     * directory or its contents could remain root-owned, leaving the non-root tool
+     * container (UID 1000) unable to write and uploads failing with permission denied.
      */
     private void ensureNfsK8sDirectory(String sanitizedUserId) {
         String podName = "nfs-k8s-init-" + sanitizedUserId + "-" + System.currentTimeMillis() % 100000;
         String cmd = "mkdir -p /mnt/nfs-base/" + sanitizedUserId
-            + " && chown 1000:1000 /mnt/nfs-base/" + sanitizedUserId
+            + " && chown -R 1000:1000 /mnt/nfs-base/" + sanitizedUserId
             + " && echo 'Directory ready'";
 
         Pod initPod = new PodBuilder()
@@ -1310,30 +1463,14 @@ public class K8sApiClient {
             .build();
     }
 
+    /** Delegates to SessionEnvBuilder. Kept for call sites inside this class. */
+    List<EnvVar> buildEnvVars(SessionInfo info) {
+        return new SessionEnvBuilder(basePath, controllerUrl).build(info);
+    }
+
     private Pod buildPodSpec(SessionInfo info) {
         ToolPlugin plugin = info.toolPlugin();
-
-        // Build env vars: plugin-defined + PUPS_SESSION_PATH always injected.
-        // PUPS_SESSION_PATH lets tools (e.g. JupyterLab) know their own base URL.
-        List<EnvVar> envVars = new ArrayList<>(plugin.environmentVariables().entrySet().stream()
-            .map(e -> new EnvVarBuilder().withName(e.getKey()).withValue(e.getValue()).build())
-            .toList());
-        envVars.add(new EnvVarBuilder()
-            .withName("PUPS_SESSION_PATH")
-            .withValue("/session/" + info.sessionId() + "/")
-            .build());
-
-        // Inject user-provided parameters as env vars (e.g. API keys)
-        if (info.userParams() != null) {
-            for (var entry : info.userParams().entrySet()) {
-                if (entry.getValue() != null && !entry.getValue().isBlank()) {
-                    envVars.add(new EnvVarBuilder()
-                        .withName(entry.getKey())
-                        .withValue(entry.getValue())
-                        .build());
-                }
-            }
-        }
+        List<EnvVar> envVars = buildEnvVars(info);
 
         // Build resource requirements from selected profile
         ResourceProfile profile = resolveProfile(plugin, info.resourceProfile());
@@ -1499,8 +1636,9 @@ public class K8sApiClient {
         }
 
         // Init container: seed PVC with /etc/skel if empty.
-        // Runs as the same UID as the main container (no root needed).
-        // fsGroup handles volume ownership.
+        // Runs as the pod-level UID (same as the main container).
+        // NFS directory ownership is set to 1000:1000 at PVC creation time by
+        // ensureNfsK8sDirectory(), so the pod-level UID can write here without root.
         List<io.fabric8.kubernetes.api.model.Container> initContainers = new ArrayList<>();
         if (plugin.userDataMountPath() != null && !useNfsHome) {
             String seedCmd =
@@ -1545,9 +1683,11 @@ public class K8sApiClient {
                     .withFsGroup(runAsGid)
                     .withNewSeccompProfile().withType(plugin.seccompProfileType()).endSeccompProfile()
                 .endSecurityContext()
+                .withAffinity(buildNodeAffinity())
                 .addNewContainer()
                     .withName("tool")
                     .withImage(plugin.containerImage())
+                    .withCommand(plugin.containerCommand().isEmpty() ? null : plugin.containerCommand())
                     .addNewPort()
                         .withContainerPort(plugin.containerPort())
                         .withProtocol("TCP")
@@ -1651,6 +1791,7 @@ public class K8sApiClient {
             .endMetadata()
             .withNewSpec()
                 .withAutomountServiceAccountToken(false)
+                .withAffinity(buildNodeAffinity())
                 .withNewSecurityContext()
                     .withRunAsNonRoot(true)
                     .withNewSeccompProfile().withType(plugin.seccompProfileType()).endSeccompProfile()
@@ -1701,6 +1842,25 @@ public class K8sApiClient {
                 .withVolumes(volumes)
                 .withRestartPolicy("Never")
             .endSpec()
+            .build();
+    }
+
+    private Affinity buildNodeAffinity() {
+        if (allowedNodes == null || allowedNodes.isEmpty()) {
+            return null;
+        }
+        return new AffinityBuilder()
+            .withNewNodeAffinity()
+                .withNewRequiredDuringSchedulingIgnoredDuringExecution()
+                    .addNewNodeSelectorTerm()
+                        .addNewMatchExpression()
+                            .withKey("kubernetes.io/hostname")
+                            .withOperator("In")
+                            .withValues(allowedNodes)
+                        .endMatchExpression()
+                    .endNodeSelectorTerm()
+                .endRequiredDuringSchedulingIgnoredDuringExecution()
+            .endNodeAffinity()
             .build();
     }
 
@@ -1845,6 +2005,167 @@ public class K8sApiClient {
             return Long.parseLong(mem.substring(0, mem.length() - 2)) * 1024L * 1024 * 1024 * 1024;
         } else {
             return Long.parseLong(mem);
+        }
+    }
+
+    // === Tool Registry Management ===
+
+    public com.scivicslab.k8spups.tool.ToolRegistry getToolRegistry(String namespace) {
+        try {
+            var cm = client.configMaps().inNamespace(namespace).withName("tool-registry").get();
+            if (cm == null || cm.getData() == null) {
+                return new com.scivicslab.k8spups.tool.ToolRegistry(List.of());
+            }
+            String yaml = cm.getData().getOrDefault("tools.yaml", "");
+            if (yaml.isEmpty()) {
+                return new com.scivicslab.k8spups.tool.ToolRegistry(List.of());
+            }
+            com.fasterxml.jackson.databind.ObjectMapper yamlMapper =
+                new com.fasterxml.jackson.dataformat.yaml.YAMLMapper();
+            return yamlMapper.readValue(yaml, com.scivicslab.k8spups.tool.ToolRegistry.class);
+        } catch (Exception e) {
+            LOG.warning("Failed to read tool registry: " + e.getMessage());
+            return new com.scivicslab.k8spups.tool.ToolRegistry(List.of());
+        }
+    }
+
+    public com.scivicslab.k8spups.tool.ToolDescriptor getToolDescriptor(String namespace, String toolName) {
+        try {
+            var cm = client.configMaps().inNamespace(namespace).withName("tool-catalog").get();
+            if (cm == null || cm.getData() == null) {
+                return null;
+            }
+            String yaml = cm.getData().get(toolName + ".yaml");
+            if (yaml == null || yaml.isEmpty()) {
+                return null;
+            }
+            com.fasterxml.jackson.databind.ObjectMapper yamlMapper =
+                new com.fasterxml.jackson.dataformat.yaml.YAMLMapper();
+            return yamlMapper.readValue(yaml, com.scivicslab.k8spups.tool.ToolDescriptor.class);
+        } catch (Exception e) {
+            LOG.warning("Failed to read tool descriptor for " + toolName + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    public boolean isToolEnabled(String namespace, String toolName) {
+        try {
+            var cm = client.configMaps().inNamespace(namespace).withName("tool-config").get();
+            if (cm == null || cm.getData() == null) {
+                return false;
+            }
+            return "true".equals(cm.getData().get(
+                com.scivicslab.k8spups.tool.ToolConfigStore.enableKey(toolName)));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public void saveToolCatalog(String namespace, String toolName, com.scivicslab.k8spups.tool.ToolDescriptor descriptor) {
+        try {
+            // Serialize descriptor to YAML
+            String yamlContent = com.fasterxml.jackson.dataformat.yaml.YAMLMapper.builder().build()
+                .writerWithDefaultPrettyPrinter()
+                .writeValueAsString(descriptor);
+
+            Map<String, String> data = new HashMap<>();
+            data.put(toolName + ".yaml", yamlContent);
+
+            var existingCm = client.configMaps().inNamespace(namespace).withName("tool-catalog").get();
+            if (existingCm != null && existingCm.getData() != null) {
+                existingCm.getData().putAll(data);
+                client.configMaps().inNamespace(namespace).resource(existingCm).update();
+            } else {
+                var newCm = new io.fabric8.kubernetes.api.model.ConfigMapBuilder()
+                    .withNewMetadata()
+                    .withName("tool-catalog")
+                    .withNamespace(namespace)
+                    .addToLabels("app", "k8s-pups-tool-catalog")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .endMetadata()
+                    .withData(data)
+                    .build();
+                client.configMaps().inNamespace(namespace).resource(newCm).create();
+            }
+        } catch (Exception e) {
+            LOG.severe("Failed to save tool catalog: " + e.getMessage());
+        }
+    }
+
+    public void saveToolConfig(String namespace, String toolName, Map<String, String> config) {
+        try {
+            Map<String, String> cmData = new HashMap<>();
+            Map<String, String> secretData = new HashMap<>();
+            com.scivicslab.k8spups.tool.ToolDescriptor descriptor = getToolDescriptor(namespace, toolName);
+            com.scivicslab.k8spups.tool.ToolConfigStore.partition(
+                toolName, config, descriptor, cmData, secretData);
+
+            if (!cmData.isEmpty()) {
+                upsertConfigMap(namespace, "tool-config", cmData);
+            }
+            if (!secretData.isEmpty()) {
+                upsertSecret(namespace, "tool-config", secretData);
+            }
+        } catch (Exception e) {
+            LOG.severe("Failed to save tool config: " + e.getMessage());
+        }
+    }
+
+    public void saveToolEnable(String namespace, String toolName, boolean enabled) {
+        try {
+            Map<String, String> data = new HashMap<>();
+            data.put(com.scivicslab.k8spups.tool.ToolConfigStore.enableKey(toolName),
+                String.valueOf(enabled));
+            upsertConfigMap(namespace, "tool-config", data);
+        } catch (Exception e) {
+            LOG.severe("Failed to save tool enable flag: " + e.getMessage());
+        }
+    }
+
+    public Map<String, String> getToolConfig(String namespace, String toolName) {
+        Map<String, String> result = new HashMap<>();
+        try {
+            var cm = client.configMaps().inNamespace(namespace).withName("tool-config").get();
+            if (cm != null && cm.getData() != null) {
+                result.putAll(com.scivicslab.k8spups.tool.ToolConfigStore
+                    .extractFromConfigMap(toolName, cm.getData()));
+            }
+            var secret = client.secrets().inNamespace(namespace).withName("tool-config").get();
+            if (secret != null && secret.getData() != null) {
+                result.putAll(com.scivicslab.k8spups.tool.ToolConfigStore
+                    .extractFromSecret(toolName, secret.getData()));
+            }
+        } catch (Exception e) {
+            LOG.warning("Failed to get tool config: " + e.getMessage());
+        }
+        return result;
+    }
+
+    private void upsertConfigMap(String namespace, String name, Map<String, String> data) {
+        var existing = client.configMaps().inNamespace(namespace).withName(name).get();
+        if (existing != null && existing.getData() != null) {
+            existing.getData().putAll(data);
+            client.configMaps().inNamespace(namespace).resource(existing).update();
+        } else {
+            var newCm = new ConfigMapBuilder()
+                .withNewMetadata().withName(name).withNamespace(namespace)
+                .addToLabels("managed-by", "k8s-pups").endMetadata()
+                .withData(data).build();
+            client.configMaps().inNamespace(namespace).resource(newCm).create();
+        }
+    }
+
+    private void upsertSecret(String namespace, String name, Map<String, String> data) {
+        var existing = client.secrets().inNamespace(namespace).withName(name).get();
+        if (existing != null && existing.getData() != null) {
+            existing.getData().putAll(data);
+            client.secrets().inNamespace(namespace).resource(existing).update();
+        } else {
+            var newSecret = new SecretBuilder()
+                .withNewMetadata().withName(name).withNamespace(namespace)
+                .addToLabels("managed-by", "k8s-pups").endMetadata()
+                .withType("Opaque").withData(data).build();
+            client.secrets().inNamespace(namespace).resource(newSecret).create();
         }
     }
 }

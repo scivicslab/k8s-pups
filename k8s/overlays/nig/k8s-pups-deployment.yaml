@@ -44,9 +44,17 @@ spec:
           readOnly: true
         env:
         - name: QUARKUS_OIDC_AUTH_SERVER_URL
-          value: "http://keycloak-unit1.sc-account.svc:8080/sc-auth/realms/sc-account"
+          value: "http://keycloak-unit2.sc-account.svc:8080/sc-auth/realms/sc-account"
         - name: K8SPUPS_UNLIMITED_USERS
           value: "testadmin,devteam"
+        - name: K8SPUPS_HTTPROUTE_NAMESPACE
+          value: "sc-account"
+        - name: K8SPUPS_GATEWAY_NAMES
+          value: "sc-account-gateway"
+        - name: K8SPUPS_WORKSPACE_LDAP_URL
+          value: "ldap://ldap-unit2.sc-account.svc:389"
+        - name: K8SPUPS_WORKSPACE_LDAP_BASE_DN
+          value: "dc=nig,dc=ac,dc=jp"
         ports:
         - containerPort: 8080
           name: http

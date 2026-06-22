@@ -1,0 +1,14 @@
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: keycloak-postgres-spc
+  namespace: keycloak-local-llm
+spec:
+  provider: vault
+  parameters:
+    vaultAddress: "http://vault.infra-vault.svc.cluster.local:8200"
+    roleName: "keycloak-local-llm-role"
+    objects: |
+      - objectName: "password"
+        secretPath: "keycloak-local-llm/data/keycloak-postgres"
+        secretKey: "password"

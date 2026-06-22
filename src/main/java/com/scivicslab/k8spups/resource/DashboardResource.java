@@ -7,6 +7,8 @@ import com.scivicslab.k8spups.actor.SessionSummary;
 import com.scivicslab.k8spups.k8s.MountSpec;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
 import com.scivicslab.k8spups.plugin.UserParameter;
+import com.scivicslab.k8spups.tool.JwtRoleExtractor;
+import com.scivicslab.k8spups.tool.ToolMetadata;
 import com.scivicslab.pojoactor.core.ActorRef;
 
 import io.quarkus.oidc.IdToken;
@@ -63,6 +65,7 @@ public class DashboardResource {
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>k8s-pups - K8s Per-User Pod Service</title>
+            <link rel="icon" type="image/svg+xml" href="{{BASE}}/favicon.svg">
             <style>
                 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
                 body {
@@ -161,10 +164,12 @@ public class DashboardResource {
     @Produces(MediaType.TEXT_HTML)
     public String showDashboard() {
         String userId = getCurrentUsername();
+        List<String> userRoles = getCurrentUserRoles();
         ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
 
         // Fire all independent ask() calls in parallel
         var toolsFuture = sm.ask(SessionManagerActor::listAvailableTools);
+        var dynamicToolsFuture = sm.ask(mgr -> mgr.listDynamicToolsForRoles(userRoles));
         var sessionsFuture = sm.ask(mgr -> mgr.getUserSessions(userId));
         var summaryFuture = sm.ask(SessionManagerActor::getSessionSummary);
         var storageInfoFuture = sm.ask(mgr -> mgr.getUserStorageInfo(userId));
@@ -174,6 +179,10 @@ public class DashboardResource {
         List<ToolPlugin> tools;
         try { tools = toolsFuture.get(); }
         catch (Exception e) { tools = Collections.emptyList(); }
+
+        List<ToolMetadata> dynamicTools;
+        try { dynamicTools = dynamicToolsFuture.get(); }
+        catch (Exception e) { dynamicTools = Collections.emptyList(); }
 
         List<SessionStatus> userSessions;
         try { userSessions = sessionsFuture.get(); }
@@ -207,7 +216,9 @@ public class DashboardResource {
 
         Map<String, Object> data = new HashMap<>();
         data.put("userId", userId);
+        data.put("userRoles", userRoles);
         data.put("tools", tools);
+        data.put("dynamicTools", dynamicTools);
         data.put("sessions", userSessions);
         data.put("summary", summary);
         data.put("clusterResources", clusterResources);
@@ -217,6 +228,7 @@ public class DashboardResource {
             storageInfo.getOrDefault("storageSize", actorSystem.getDefaultStorageSize())));
         data.put("pvcInfo", allPvcInfo);
         data.put("sharedPvcs", sharedPvcs);
+        data.put("basePath", basePath);
 
         return dashboard.data(data).render();
     }
@@ -313,6 +325,27 @@ public class DashboardResource {
     }
 
     @GET
+    @Path("/session/{sessionId}/logs")
+    @Authenticated
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getSessionLogs(
+            @PathParam("sessionId") String sessionId,
+            @QueryParam("lines") @DefaultValue("200") int lines) {
+        String userId = getCurrentUsername();
+        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        try {
+            List<SessionStatus> statuses = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
+            boolean owned = statuses != null && statuses.stream()
+                .anyMatch(s -> s.sessionId().equals(sessionId));
+            if (!owned) return Response.status(Response.Status.FORBIDDEN).build();
+            String logs = sm.ask(mgr -> mgr.getSessionLogs(sessionId, lines)).get();
+            return Response.ok(Map.of("logs", logs == null ? "" : logs)).build();
+        } catch (Exception e) {
+            return Response.ok(Map.of("logs", "")).build();
+        }
+    }
+
+    @GET
     @Path("/storage/info")
     @Authenticated
     @Produces(MediaType.APPLICATION_JSON)
@@ -335,6 +368,24 @@ public class DashboardResource {
             allPvcInfo = allPvcInfoFut.get();
         } catch (Exception e) {
             LOG.warning("Failed to load storage info: " + e.getMessage());
+        }
+
+        // Auto-create the default storage PVC if not yet created.
+        // Triggered on Storage Settings page load so users never need to manually create it.
+        String defaultStorageType = actorSystem.getDefaultStorageType();
+        if (defaultStorageType != null && !defaultStorageType.isBlank()) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> defaultPvcInfo = (Map<String, String>) allPvcInfo.get(defaultStorageType);
+            if (defaultPvcInfo != null && !"true".equals(defaultPvcInfo.get("exists"))) {
+                String defaultSize = actorSystem.getDefaultStorageSize();
+                try {
+                    LOG.info("Auto-creating " + defaultStorageType + " PVC for user=" + userId);
+                    sm.ask(mgr -> mgr.createUserPvc(userId, defaultStorageType, defaultSize)).get();
+                    allPvcInfo = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId)).get();
+                } catch (Exception e) {
+                    LOG.warning("Auto-create " + defaultStorageType + " PVC failed for " + userId + ": " + e.getMessage());
+                }
+            }
         }
 
         List<Map<String, String>> sharableVolumes = Collections.emptyList();
@@ -706,5 +757,20 @@ public class DashboardResource {
             return identity.getPrincipal().getName();
         }
         return null;
+    }
+
+    /** Extract user roles from Keycloak realm_access and resource_access claims. */
+    private List<String> getCurrentUserRoles() {
+        try {
+            if (idToken == null) {
+                return List.of();
+            }
+            Map<String, Object> realmAccess = idToken.getClaim("realm_access");
+            Map<String, Object> resourceAccess = idToken.getClaim("resource_access");
+            return JwtRoleExtractor.extractRoles(realmAccess, resourceAccess);
+        } catch (Exception e) {
+            LOG.warning("Failed to extract roles from token: " + e.getMessage());
+            return List.of();
+        }
     }
 }

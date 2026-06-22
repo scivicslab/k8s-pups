@@ -248,20 +248,20 @@ Upload failed (ファイル名): /home/devteam/works/uploads/xxxx.tmp
 
 **原因**
 
-`quarkus-coder-agent` の `application.properties` に `coder-agent.llm.working-dir=/home/devteam/works` が設定されており、コンテナ内でもそのまま適用されるため、ホストマシンのパスに書き込もうとして失敗する。
+`quarkus-chat-ui` の `application.properties` に `chat-ui.llm.working-dir=/home/devteam/works` が設定されており、コンテナ内でもそのまま適用されるため、ホストマシンのパスに書き込もうとして失敗する。
 
 **修正方法**
 
-`CoderAgentPlugin.java` の `environmentVariables()` に `CODER_AGENT_LLM_WORKING_DIR` を追加し、コンテナ内のPVCマウントパスで上書きする。
+`ChatUiPlugin.java` の `environmentVariables()` に `CHAT_UI_LLM_WORKING_DIR` を追加し、コンテナ内のPVCマウントパスで上書きする。
 
 ```java
-// CoderAgentPlugin.java
+// ChatUiPlugin.java
 @Override
 public Map<String, String> environmentVariables() {
     return Map.of(
-        "CODER_AGENT_LLM_SERVERS", "...",
+        "CHAT_UI_LLM_SERVERS", "...",
         "HOME", "/home/user",
-        "CODER_AGENT_LLM_WORKING_DIR", "/home/user"  // ← これを追加
+        "CHAT_UI_LLM_WORKING_DIR", "/home/user"  // ← これを追加
     );
 }
 ```
@@ -293,7 +293,7 @@ kubectl delete pods --all -n user-pods
 
 **症状**
 
-coder-agentを起動してKeycloak認証後、`/session/{id}/oauth2/callback` で404になる。
+chat-uiを起動してKeycloak認証後、`/session/{id}/oauth2/callback` で404になる。
 
 **原因**
 

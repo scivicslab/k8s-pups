@@ -55,7 +55,7 @@ MinIO（S3 互換ストレージ）へのアクセス。
 
 | 項目 | 値 |
 |------|-----|
-| 対象Pod | `tool=coder-agent` |
+| 対象Pod | `tool=chat-ui` |
 | 宛先 | `192.168.5.15/32`, `192.168.5.13/32` |
 | ポート | 8000/TCP |
 
@@ -65,7 +65,7 @@ Coder Agent から DGX/GPU サーバ上の LLM 推論エンドポイントへの
 
 | 項目 | 値 |
 |------|-----|
-| 対象Pod | `tool in (coder-agent-claude, coder-agent-codex)` |
+| 対象Pod | `tool in (chat-ui-claude, chat-ui-codex)` |
 | 宛先 | 全外部（ポート制限あり） |
 | ポート | 443/TCP |
 
@@ -117,7 +117,7 @@ Envoy Gateway（HTTPRoute 経由）からツール Pod への HTTP 転送。
 
 ### 外部アクセスを許可しないツール
 
-- `coder-agent`: DGX と外部 LLM API のみ許可（専用ポリシーで制限）
+- `chat-ui`: DGX と外部 LLM API のみ許可（専用ポリシーで制限）
 - `sra-submission`: 外部通信不要（submission-portal 経由でデータを受け渡し）
 - `file-browser`: 外部通信不要（ローカルストレージのブラウズのみ）
 - `docusaurus`: 外部通信不要（ビルド済みイメージで静的サイトを配信）

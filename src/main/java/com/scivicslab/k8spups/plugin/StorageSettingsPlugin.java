@@ -27,7 +27,7 @@ public class StorageSettingsPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/quarkus-storage-settings:1.0.0-2603050846";
+        return "192.168.5.23:32000/quarkus-storage-settings:1.0.0-2604210045";
     }
 
     @Override

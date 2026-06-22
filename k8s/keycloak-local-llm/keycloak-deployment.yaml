@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: keycloak-local-llm
+  labels:
+    app: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      serviceAccountName: vault-auth
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - amd64
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - stonefly522
+                - stonefly523
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.36
+        command: ['sh', '-c', 'until nc -z keycloak-postgres 5432; do echo waiting for postgres; sleep 2; done']
+      containers:
+      - name: keycloak
+        image: 192.168.5.23:32000/keycloak-custom:26.0.7-2603230200
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for vault secrets..."
+          while [ ! -f /vault/secrets/admin-password ]; do sleep 1; done
+          while [ ! -f /vault/secrets/db-password ]; do sleep 1; done
+          echo "Vault secrets available"
+          export KEYCLOAK_ADMIN_PASSWORD=$(cat /vault/secrets/admin-password)
+          export KC_DB_PASSWORD=$(cat /vault/secrets/db-password)
+          exec /opt/keycloak/bin/kc.sh start
+        env:
+        - name: KC_DB
+          value: "postgres"
+        - name: KC_DB_URL
+          value: "jdbc:postgresql://keycloak-postgres:5432/keycloak"
+        - name: KC_DB_USERNAME
+          value: "keycloak"
+        - name: KEYCLOAK_ADMIN
+          value: "admin"
+        - name: KC_PROXY_HEADERS
+          value: "xforwarded"
+        - name: KC_HOSTNAME
+          value: "https://133.39.114.45/local-llm-auth"
+        - name: KC_HOSTNAME_STRICT
+          value: "false"
+        - name: KC_HTTP_ENABLED
+          value: "true"
+        - name: KC_HTTP_RELATIVE_PATH
+          value: "/local-llm-auth"
+        - name: KC_HEALTH_ENABLED
+          value: "true"
+        - name: KC_HTTP_MANAGEMENT_RELATIVE_PATH
+          value: "/"
+        ports:
+        - name: http
+          containerPort: 8080
+        - name: management
+          containerPort: 9000
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 9000
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 9000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: vault-secrets
+          mountPath: /vault/secrets
+          readOnly: true
+      volumes:
+      - name: vault-secrets
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: keycloak-spc

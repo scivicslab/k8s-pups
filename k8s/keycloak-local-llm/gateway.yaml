@@ -1,0 +1,66 @@
+# EnvoyProxy: pin NodePort 31089 for Apache routing on stonefly501
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: keycloak-local-llm-proxy
+  namespace: keycloak-local-llm
+spec:
+  logging:
+    level:
+      default: warn
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        externalTrafficPolicy: Cluster
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              ports:
+              - name: http-80
+                nodePort: 31089
+                port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: keycloak-local-llm-gateway
+  namespace: keycloak-local-llm
+spec:
+  gatewayClassName: envoy
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: keycloak-local-llm-proxy
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak-local-llm-route
+  namespace: keycloak-local-llm
+spec:
+  parentRefs:
+  - name: keycloak-local-llm-gateway
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /local-llm-auth
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-Proto
+          value: https
+    backendRefs:
+    - name: keycloak
+      port: 8080

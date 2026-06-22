@@ -71,9 +71,9 @@ Users without a POSIX account silently fall back to a per-user PVC — no error 
 
 | Plugin | Display Name | Port | Description |
 |--------|-------------|------|-------------|
-| `coder-agent` | Coder Agent | 8090 | LLM-powered coding agent with local LLM backend (VS Code Server + AI) |
-| `coder-agent-claude` | Coder Agent (Claude) | 8090 | Coding agent powered by Anthropic Claude API |
-| `coder-agent-codex` | Coder Agent (Codex) | 8090 | Coding agent powered by OpenAI Codex API |
+| `chat-ui` | Coder Agent | 8090 | LLM-powered coding agent with local LLM backend (VS Code Server + AI) |
+| `chat-ui-claude` | Coder Agent (Claude) | 8090 | Coding agent powered by Anthropic Claude API |
+| `chat-ui-codex` | Coder Agent (Codex) | 8090 | Coding agent powered by OpenAI Codex API |
 | `guacamole` | Remote Desktop | 8080 | Browser-based Linux desktop via Apache Guacamole (Xfce + VNC) |
 | `jupyter-lab` | Jupyter Lab | 8888 | Interactive notebooks with Python scientific stack (NumPy, Pandas, Matplotlib, SciPy) |
 | `docusaurus` | Docusaurus | 3000 | Live preview of Docusaurus documentation sites from the user's workspace |
@@ -157,9 +157,9 @@ k8s-pups/
 │   │   ├── ConnectionType.java        # HTTP / VNC enum
 │   │   ├── ResourceProfile.java       # Named resource tier
 │   │   ├── UserParameter.java         # Dashboard form field
-│   │   ├── CoderAgentPlugin.java
-│   │   ├── CoderAgentClaudePlugin.java
-│   │   ├── CoderAgentCodexPlugin.java
+│   │   ├── ChatUiPlugin.java
+│   │   ├── ChatUiClaudePlugin.java
+│   │   ├── ChatUiCodexPlugin.java
 │   │   ├── GuacamolePlugin.java
 │   │   ├── JupyterLabPlugin.java
 │   │   └── DocusaurusPlugin.java

@@ -16,6 +16,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import io.fabric8.kubernetes.api.model.Pod;
 
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -91,6 +92,9 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.session-oidc.jwks-uri")
     String sessionOidcJwksUri;
 
+    @ConfigProperty(name = "k8spups.session-oidc.redirect-base-url", defaultValue = "https://192.168.5.25")
+    String sessionOidcRedirectBaseUrl;
+
     // Workspace (LDAP + NFS) config
     @ConfigProperty(name = "k8spups.workspace.ldap.url", defaultValue = "")
     String workspaceLdapUrl;
@@ -117,6 +121,18 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.nfs-k8s.base-path", defaultValue = "/Public/k8s-pups-data")
     String nfsK8sBasePath;
 
+    @ConfigProperty(name = "k8spups.user-pods.allowed-nodes", defaultValue = "")
+    String allowedNodesStr;
+
+    @ConfigProperty(name = "base.path", defaultValue = "/pups")
+    String basePath;
+
+    @ConfigProperty(name = "k8spups.controller-namespace", defaultValue = "k8s-pups")
+    String controllerNamespace;
+
+    @ConfigProperty(name = "k8spups.enabled-plugins", defaultValue = "")
+    String enabledPluginsConfig;
+
     private ActorSystem actorSystem;
     private ActorRef<SessionManagerActor> sessionManager;
     private Scheduler scheduler;
@@ -127,21 +143,49 @@ public class K8sPupsActorSystem {
         LOG.info("Initializing k8s-pups ActorSystem");
 
         // Discover tool plugins via ServiceLoader
-        Map<String, ToolPlugin> plugins = new LinkedHashMap<>();
+        Map<String, ToolPlugin> discovered = new LinkedHashMap<>();
         for (ToolPlugin plugin : ServiceLoader.load(ToolPlugin.class)) {
-            plugins.put(plugin.name(), plugin);
-            LOG.info("Registered tool plugin: " + plugin.name() + " (" + plugin.displayName() + ")");
+            discovered.put(plugin.name(), plugin);
         }
+
+        // Apply K8SPUPS_ENABLED_PLUGINS: filter and order plugins per deployment.
+        // When unset, all discovered plugins are registered in META-INF/services order.
+        // When set (comma-separated IDs), only those plugins are registered in that order.
+        Map<String, ToolPlugin> plugins = new LinkedHashMap<>();
+        if (enabledPluginsConfig.isBlank()) {
+            plugins.putAll(discovered);
+        } else {
+            for (String id : enabledPluginsConfig.split(",")) {
+                String trimmed = id.trim();
+                if (discovered.containsKey(trimmed)) {
+                    plugins.put(trimmed, discovered.get(trimmed));
+                } else {
+                    LOG.warning("K8SPUPS_ENABLED_PLUGINS: unknown plugin id ignored: " + trimmed);
+                }
+            }
+        }
+        plugins.forEach((id, p) ->
+            LOG.info("Registered tool plugin: " + id + " (" + p.displayName() + ")"));
 
         // Create ActorSystem
         actorSystem = new ActorSystem("k8s-pups");
 
         // Create K8sApiClient
+        List<String> allowedNodes = allowedNodesStr.isBlank() ? List.of()
+            : Arrays.stream(allowedNodesStr.split(",")).map(String::trim)
+                .filter(s -> !s.isEmpty()).toList();
+
+        String controllerUrl = "http://k8s-pups-controller." + controllerNamespace + ".svc:8080" + basePath;
+
         k8sClient = new K8sApiClient(userPodsNamespace, httpRouteNamespace, gatewayNames,
             sessionOidcIssuer, sessionOidcAuthorizationEndpoint, sessionOidcTokenEndpoint,
             sessionOidcClientId, sessionOidcSecretName, sessionOidcJwksUri,
+            sessionOidcRedirectBaseUrl,
             workspaceNfsServer, workspaceNfsBasePath,
-            nfsK8sServer, nfsK8sBasePath);
+            nfsK8sServer, nfsK8sBasePath,
+            allowedNodes,
+            basePath,
+            controllerUrl);
 
         // Create LdapUserInfoClient for workspace mounting (null if not configured)
         LdapUserInfoClient ldapClient = null;
@@ -162,7 +206,7 @@ public class K8sPupsActorSystem {
 
         // Create SessionManagerActor
         SessionManagerActor manager = new SessionManagerActor(
-            k8sClient, plugins, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
+            k8sClient, plugins, controllerNamespace, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
             maxLifetimeMinutes, unlimitedUsers, ldapClient);
         sessionManager = actorSystem.actorOf("session-manager", manager);
 
@@ -198,11 +242,13 @@ public class K8sPupsActorSystem {
             // Fetch all managed Pods (with full Pod objects for label extraction and status check)
             List<Pod> managedPods = k8sClient.listManagedPods();
 
-            // Collect orphaned session IDs from Services and HTTPRoutes (no Pod counterpart)
+            // Collect orphaned session IDs from Services, HTTPRoutes, and SecurityPolicies
             CompletableFuture<List<String>> servicesFuture = CompletableFuture.supplyAsync(
                 k8sClient::listManagedServiceSessionIds);
             CompletableFuture<List<String>> routesFuture = CompletableFuture.supplyAsync(
                 k8sClient::listManagedHTTPRouteSessionIds);
+            CompletableFuture<List<String>> securityPoliciesFuture = CompletableFuture.supplyAsync(
+                k8sClient::listManagedSecurityPolicySessionIds);
 
             // Build set of session IDs that have a Pod
             Set<String> podSessionIds = new HashSet<>();
@@ -239,6 +285,9 @@ public class K8sPupsActorSystem {
                     try { k8sClient.deleteHTTPRoute(sessionId); } catch (Exception e) {
                         LOG.warning("Failed to delete orphaned HTTPRoute for " + sessionId + ": " + e.getMessage());
                     }
+                    try { k8sClient.deleteSecurityPolicy(sessionId); } catch (Exception e) {
+                        LOG.warning("Failed to delete orphaned SecurityPolicy for " + sessionId + ": " + e.getMessage());
+                    }
                     try { k8sClient.deleteService("pups-svc-" + sessionId); } catch (Exception e) {
                         LOG.warning("Failed to delete orphaned Service for " + sessionId + ": " + e.getMessage());
                     }
@@ -249,15 +298,19 @@ public class K8sPupsActorSystem {
                 }
             }
 
-            // Clean up orphaned Services/HTTPRoutes that have no corresponding Pod
+            // Clean up orphaned Services/HTTPRoutes/SecurityPolicies that have no corresponding Pod
             Set<String> orphanedNonPodSessions = new HashSet<>();
             orphanedNonPodSessions.addAll(servicesFuture.get(10, TimeUnit.SECONDS));
             orphanedNonPodSessions.addAll(routesFuture.get(10, TimeUnit.SECONDS));
+            orphanedNonPodSessions.addAll(securityPoliciesFuture.get(10, TimeUnit.SECONDS));
             orphanedNonPodSessions.removeAll(podSessionIds);
             for (String sessionId : orphanedNonPodSessions) {
                 LOG.info("Deleting orphaned non-pod resources for session: " + sessionId);
                 try { k8sClient.deleteHTTPRoute(sessionId); } catch (Exception e) {
                     LOG.warning("Failed to delete orphaned HTTPRoute for " + sessionId + ": " + e.getMessage());
+                }
+                try { k8sClient.deleteSecurityPolicy(sessionId); } catch (Exception e) {
+                    LOG.warning("Failed to delete orphaned SecurityPolicy for " + sessionId + ": " + e.getMessage());
                 }
                 try { k8sClient.deleteService("pups-svc-" + sessionId); } catch (Exception e) {
                     LOG.warning("Failed to delete orphaned Service for " + sessionId + ": " + e.getMessage());
@@ -293,5 +346,9 @@ public class K8sPupsActorSystem {
 
     public K8sApiClient getK8sClient() {
         return k8sClient;
+    }
+
+    public String getControllerNamespace() {
+        return controllerNamespace;
     }
 }

@@ -14,8 +14,8 @@ RBAC は ServiceAccount 単位で最小権限を付与する。
 | `default-deny-all` | 全遮断 | 全 Pod | — | — | ベースライン |
 | `allow-ingress-http` | Ingress | `tool != desktop` | envoy-gateway-system | 8090,8888,8080,3000 | Envoy → ツール |
 | `allow-egress-dns` | Egress | 全 Pod | kube-system | 53 | DNS 解決 |
-| `allow-egress-dgx` | Egress | `tool=coder-agent` | 192.168.5.13,15 | 8000 | DGX サーバ |
-| `allow-egress-llm-api` | Egress | `tool=coder-agent-claude,codex` | any | 443 | 外部 LLM API |
+| `allow-egress-dgx` | Egress | `tool=chat-ui` | 192.168.5.13,15 | 8000 | DGX サーバ |
+| `allow-egress-llm-api` | Egress | `tool=chat-ui-claude,codex` | any | 443 | 外部 LLM API |
 | `allow-egress-minio` | Egress | 全 Pod | minio namespace | 9000 | S3 (MinIO) |
 | `allow-egress-nfs` | Egress | 全 Pod | 192.168.5.20 | 2049,111 | NFS ワークスペース |
 
@@ -44,9 +44,9 @@ RBAC は ServiceAccount 単位で最小権限を付与する。
 
 **現状で動作する。追加設定不要。**
 
-- `tool=coder-agent-claude` / `tool=coder-agent-codex` ラベルの Pod
+- `tool=chat-ui-claude` / `tool=chat-ui-codex` ラベルの Pod
 - Egress: port 443 全開放（LLM API 向け）
-- DGX: `tool=coder-agent` ラベルで port 8000
+- DGX: `tool=chat-ui` ラベルで port 8000
 
 ### 3. actor-IaC ワークフロー実行（SSH 経由）
 
@@ -98,7 +98,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      tool: coder-agent          # kubectl が必要なツールだけに限定
+      tool: chat-ui          # kubectl が必要なツールだけに限定
   policyTypes:
     - Egress
   egress:
@@ -167,9 +167,9 @@ Pod のツール種別は `tool` ラベルで識別する。NetworkPolicy の `p
 |---------|--------|-------------|
 | `docusaurus` | Docusaurus dev server | なし |
 | `jupyter-lab` | Jupyter Lab | （SSH 追加予定） |
-| `coder-agent` | Coder Agent | DGX port 8000 |
-| `coder-agent-claude` | Claude Code | HTTPS port 443 |
-| `coder-agent-codex` | Codex Agent | HTTPS port 443 |
+| `chat-ui` | Coder Agent | DGX port 8000 |
+| `chat-ui-claude` | Claude Code | HTTPS port 443 |
+| `chat-ui-codex` | Codex Agent | HTTPS port 443 |
 | `desktop` | Guacamole Desktop | なし |
 
 ## 変更手順
