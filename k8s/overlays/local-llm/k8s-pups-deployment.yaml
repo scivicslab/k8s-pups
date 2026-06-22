@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-pups-controller
+  namespace: k8s-pups-local-llm
+  labels:
+    app: k8s-pups-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-pups-controller
+  template:
+    metadata:
+      labels:
+        app: k8s-pups-controller
+    spec:
+      serviceAccountName: vault-auth
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - stonefly522
+                - stonefly523
+      volumes:
+      - name: vault-secrets
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: k8s-pups-spc
+      containers:
+      - name: k8s-pups
+        image: k8s-pups
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for vault secrets..."
+          while [ ! -f /vault/secrets/oidc-client-secret ]; do sleep 1; done
+          while [ ! -f /vault/secrets/ldap-bind-password ]; do sleep 1; done
+          echo "Vault secrets available"
+          export K8S_PUPS_OIDC_SECRET=$(cat /vault/secrets/oidc-client-secret)
+          export K8SPUPS_WORKSPACE_LDAP_BIND_PASSWORD=$(cat /vault/secrets/ldap-bind-password)
+          exec java -Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -jar /deployments/quarkus-run.jar
+        volumeMounts:
+        - name: vault-secrets
+          mountPath: /vault/secrets
+          readOnly: true
+        env:
+        # Internal URL for backend token validation.
+        # Keycloak frontendUrl must be set to https://133.39.114.45/local-llm-auth
+        # so that browser redirects use the external URL.
+        - name: QUARKUS_OIDC_AUTH_SERVER_URL
+          value: "http://keycloak.keycloak-local-llm.svc:8080/local-llm-auth/realms/local-llm"
+        - name: K8SPUPS_SESSION_OIDC_ISSUER
+          value: "https://133.39.114.45/local-llm-auth/realms/local-llm"
+        - name: K8SPUPS_SESSION_OIDC_AUTHORIZATION_ENDPOINT
+          value: "https://133.39.114.45/local-llm-auth/realms/local-llm/protocol/openid-connect/auth"
+        - name: K8SPUPS_SESSION_OIDC_TOKEN_ENDPOINT
+          value: "http://keycloak.keycloak-local-llm.svc:8080/local-llm-auth/realms/local-llm/protocol/openid-connect/token"
+        - name: K8SPUPS_SESSION_OIDC_JWKS_URI
+          value: "http://keycloak.keycloak-local-llm.svc:8080/local-llm-auth/realms/local-llm/protocol/openid-connect/certs"
+        - name: K8SPUPS_SESSION_OIDC_REDIRECT_BASE_URL
+          value: "https://133.39.114.45"
+        - name: K8SPUPS_MAX_SESSIONS_PER_USER
+          value: "4"
+        - name: K8SPUPS_UNLIMITED_USERS
+          value: "testadmin,devteam"
+        - name: K8SPUPS_HTTPROUTE_NAMESPACE
+          value: "k8s-pups-local-llm"
+        - name: K8SPUPS_GATEWAY_NAMES
+          value: "k8s-pups-local-llm-gateway"
+        - name: K8SPUPS_WORKSPACE_LDAP_URL
+          value: "ldap://ldap-unit2.sc-account.svc:389"
+        - name: K8SPUPS_WORKSPACE_LDAP_BASE_DN
+          value: "dc=nig,dc=ac,dc=jp"
+        - name: K8SPUPS_USER_PODS_NAMESPACE
+          value: "user-pods-local-llm"
+        - name: K8SPUPS_CONTROLLER_NAMESPACE
+          value: "k8s-pups-local-llm"
+        - name: BASE_PATH
+          value: "/local-llm"
+        - name: K8SPUPS_USER_PODS_ALLOWED_NODES
+          value: "stonefly522,stonefly523"
+        - name: K8SPUPS_ENABLED_PLUGINS
+          value: "service-portal,guacamole,jupyter-lab,file-browser,storage-settings,pdf-ocr"
+        - name: K8SPUPS_STORAGE_TYPE_OPTIONS
+          value: "nfs-k8s,longhorn"
+        - name: K8SPUPS_DEFAULT_STORAGE_TYPE
+          value: "nfs-k8s"
+        - name: K8SPUPS_DEFAULT_STORAGE_SIZE
+          value: "50Gi"
+        - name: K8SPUPS_SERVICE_PORTAL_DEFAULT_PROVIDER
+          value: "openai-compat"
+        - name: K8SPUPS_SERVICE_PORTAL_VLLM_ENDPOINT
+          value: "http://192.168.5.17:8000"
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /local-llm/q/health/live
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /local-llm/q/health/ready
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10

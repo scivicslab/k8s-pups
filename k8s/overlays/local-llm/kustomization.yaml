@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Local LLM overlay: external access via stonefly501 Apache
+# NodePort 31088, path /local-llm, Keycloak via /local-llm-auth
+# Usage: kubectl apply -k overlays/local-llm
+
+namespace: k8s-pups-local-llm
+
+resources:
+- serviceaccount.yaml
+- gateway.yaml
+- spc-k8s-pups.yaml
+- k8s-pups-deployment.yaml
+- k8s-pups-service.yaml
+- rbac.yaml
+- networkpolicy.yaml
+
+labels:
+- pairs:
+    env: local-llm
+    project: k8s-pups
+  includeSelectors: false
+
+images:
+- name: k8s-pups
+  newName: 192.168.5.23:32000/k8s-pups
+  newTag: 0.1.0-2606221002
