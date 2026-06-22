@@ -55,6 +55,12 @@ public class DashboardResource {
     @ConfigProperty(name = "k8spups.session-oidc.issuer")
     String oidcIssuer;
 
+    // External base URL this instance is reached at (e.g. https://203.0.113.10 for
+    // local-llm, https://10.0.0.25 for the HAProxy-fronted instance). Used to build
+    // the post-logout redirect so it matches the Keycloak client's allowed redirect URIs.
+    @ConfigProperty(name = "k8spups.session-oidc.redirect-base-url")
+    String oidcRedirectBaseUrl;
+
     @GET
     @Produces(MediaType.TEXT_HTML)
     public String index() {
@@ -141,7 +147,7 @@ public class DashboardResource {
     public Response logout() {
         String endSessionUrl = oidcIssuer + "/protocol/openid-connect/logout";
         String postLogoutUri = URLEncoder.encode(
-            "https://10.0.0.25" + basePath + "/",
+            oidcRedirectBaseUrl + basePath + "/",
             StandardCharsets.UTF_8);
         String rawToken = idToken != null ? idToken.getRawToken() : "";
         String redirectUrl = endSessionUrl
