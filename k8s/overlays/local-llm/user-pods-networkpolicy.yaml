@@ -1,0 +1,82 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: user-pods-local-llm
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Allow Envoy Gateway to reach tool pods (browser → pod traffic).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-envoy
+  namespace: user-pods-local-llm
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+---
+# Allow DNS resolution.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-dns
+  namespace: user-pods-local-llm
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Allow tool pods to register subtools with the k8s-pups controller.
+# (POST /api/sub-tool/{sessionId} — creates Service + HTTPRoute per subtool)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-k8s-pups
+  namespace: user-pods-local-llm
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: k8s-pups-local-llm
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Allow egress to external services (internet LLM APIs, on-premises GPU servers, NFS).
+# Excludes the pod CIDR (10.1.0.0/16) to prevent direct pod-to-pod communication.
+# Service CIDR (10.152.183.0/24) and external IPs remain reachable.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-external
+  namespace: user-pods-local-llm
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.1.0.0/16

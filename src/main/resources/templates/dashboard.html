@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>k8s-pups - K8s Per-User Pod Service</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='44' rx='14' ry='12' fill='%23F97316'/%3E%3Ccircle cx='18' cy='22' r='7' fill='%23F97316'/%3E%3Ccircle cx='46' cy='22' r='7' fill='%23F97316'/%3E%3Ccircle cx='10' cy='34' r='6' fill='%23F97316'/%3E%3Ccircle cx='54' cy='34' r='6' fill='%23F97316'/%3E%3C/svg%3E">
+    <link rel="icon" type="image/svg+xml" href="{basePath}/favicon.svg">
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -111,6 +111,13 @@
         .badge-STOPPED, .badge-STOPPING { background: #F1F5F9; color: #475569; }
         .badge-STOPPED::before, .badge-STOPPING::before { background: #94A3B8; }
         @keyframes blink { 0%,100%{ opacity:1; } 50%{ opacity:.5; } }
+
+        .btn-logs { background:#F1F5F9; color:#475569; border:1px solid #CBD5E1; }
+        .btn-logs:hover { background:#E2E8F0; }
+        .log-panel { margin-top:8px; background:#0F172A; border-radius:8px; padding:12px; }
+        .log-content { color:#94A3B8; font-size:11px; font-family:monospace;
+                       max-height:300px; overflow-y:auto; white-space:pre-wrap;
+                       word-break:break-all; margin:0; }
 
         .session-meta {
             display: grid; grid-template-columns: max-content 1fr;
@@ -364,10 +371,14 @@
                 {#if s.accessUrl}
                 <a class="btn btn-open" href="{s.accessUrl}" target="_blank">Open Tool</a>
                 {/if}
+                <button class="btn btn-logs" onclick="toggleLogs('{s.sessionId}')">Logs</button>
                 <form method="post" action="session/stop">
                     <input type="hidden" name="sessionId" value="{s.sessionId}">
                     <button type="submit" class="btn btn-stop">Stop</button>
                 </form>
+            </div>
+            <div id="log-panel-{s.sessionId}" class="log-panel" style="display:none">
+                <pre id="log-content-{s.sessionId}" class="log-content"></pre>
             </div>
         </div>
         {/for}
@@ -375,7 +386,7 @@
     {/if}
 
     <p class="section-label">Launch a Tool</p>
-    {#if tools.isEmpty()}
+    {#if tools.isEmpty() && dynamicTools.isEmpty()}
     <div class="empty">
         <div class="icon">🔌</div>
         <p>No tools available. Please contact an administrator.</p>
@@ -427,6 +438,17 @@
             </form>
         </div>
         {/for}
+        {#for dt in dynamicTools}
+        <div class="tool-card">
+            <div class="tool-icon"><img src="icons/default-tool.png" alt="{dt.name}" onerror="this.style.display='none'"></div>
+            <div class="tool-name">{dt.name}</div>
+            <div class="tool-desc">{#if dt.descriptor != null}{dt.descriptor.description}{/if}</div>
+            <form method="post" action="session/start">
+                <input type="hidden" name="tool" value="{dt.name}">
+                <button type="submit" class="btn btn-primary">Launch</button>
+            </form>
+        </div>
+        {/for}
     </div>
     {/if}
 
@@ -438,11 +460,46 @@
     }
 
     // Poll session status via fetch() and update DOM without full page reload
+    var logPollers = {};
+
+    function toggleLogs(sessionId) {
+        var panel = document.getElementById('log-panel-' + sessionId);
+        if (!panel) return;
+        if (panel.style.display === 'none') {
+            panel.style.display = 'block';
+            fetchLogs(sessionId);
+            logPollers[sessionId] = setInterval(function() { fetchLogs(sessionId); }, 3000);
+        } else {
+            panel.style.display = 'none';
+            stopLogPolling(sessionId);
+        }
+    }
+
+    function stopLogPolling(sessionId) {
+        if (logPollers[sessionId]) {
+            clearInterval(logPollers[sessionId]);
+            delete logPollers[sessionId];
+        }
+    }
+
+    function fetchLogs(sessionId) {
+        fetch('session/' + sessionId + '/logs', { credentials: 'same-origin' })
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(data) {
+                if (!data) return;
+                var el = document.getElementById('log-content-' + sessionId);
+                if (!el) return;
+                var atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 20;
+                el.textContent = data.logs || '(no output yet)';
+                if (atBottom) el.scrollTop = el.scrollHeight;
+            })
+            .catch(function() {});
+    }
+
     function pollSessionStatus() {
         fetch('session/status', { credentials: 'same-origin' })
             .then(function(r) { return r.ok ? r.json() : []; })
             .then(function(sessions) {
-                var stillPolling = false;
                 sessions.forEach(function(s) {
                     var card = document.querySelector('[data-session-id="' + s.sessionId + '"]');
                     if (!card) return;
@@ -472,27 +529,34 @@
                         a.textContent = 'Open Tool';
                         actions.insertBefore(a, actions.firstChild);
                     }
-
-                    if (s.state === 'STARTING' || s.state === 'CREATING') {
-                        stillPolling = true;
-                    }
                 });
-                if (stillPolling) {
+
+                // セッション API から消えたカードを fade-out で自動削除
+                var knownIds = new Set(sessions.map(function(s) { return s.sessionId; }));
+                document.querySelectorAll('[data-session-id]').forEach(function(el) {
+                    var sid = el.getAttribute('data-session-id');
+                    if (knownIds.has(sid)) return;
+                    var card = el.closest('.session-card');
+                    if (!card || card.dataset.removing) return;
+                    card.dataset.removing = '1';
+                    stopLogPolling(sid);
+                    card.style.transition = 'opacity 0.5s';
+                    card.style.opacity = '0';
+                    setTimeout(function() { card.remove(); }, 500);
+                });
+
+                // カードが存在する限りポーリングを継続
+                if (document.querySelectorAll('[data-session-id]').length > 0) {
                     setTimeout(pollSessionStatus, 3000);
                 }
             })
             .catch(function() {
-                // Retry on error
                 setTimeout(pollSessionStatus, 5000);
             });
     }
 
-    var hasStarting = false;
-    document.querySelectorAll('.badge').forEach(function(el) {
-        var text = el.textContent.trim();
-        if (text === 'STARTING' || text === 'CREATING') hasStarting = true;
-    });
-    if (hasStarting) {
+    // セッションカードが存在する場合にポーリング開始
+    if (document.querySelectorAll('[data-session-id]').length > 0) {
         setTimeout(pollSessionStatus, 3000);
     }
 

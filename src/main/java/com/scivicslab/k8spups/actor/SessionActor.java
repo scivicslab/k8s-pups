@@ -70,17 +70,26 @@ public class SessionActor {
                 k8sClient.createWorkspacePvPvcIfAbsent(info.userId(), info.workspaceInfo());
             }
 
-            // Verify that the selected storage PVC exists (no auto-creation)
+            // Ensure storage PVC exists. Longhorn PVC is auto-created if absent.
             if (plugin.userDataMountPath() != null && !useNfsHome) {
                 String pvcName = k8sClient.userPvcName(info.userId(), storageType);
                 Map<String, String> pvcInfo = k8sClient.getUserPvcInfo(info.userId(), storageType);
                 if (!"true".equals(pvcInfo.get("exists"))) {
-                    LOG.warning("Session start rejected: PVC not found: " + pvcName
-                        + " (user=" + info.userId() + ", type=" + storageType + ")."
-                        + " Create the PVC in Storage Settings first.");
-                    state = SessionState.FAILED;
-                    memo = "Storage PVC not found. Create it in Storage Settings first.";
-                    return;
+                    String size = System.getenv().getOrDefault("K8SPUPS_DEFAULT_STORAGE_SIZE", "50Gi");
+                    if ("longhorn".equals(storageType)) {
+                        LOG.info("Auto-creating Longhorn PVC for user=" + info.userId() + " size=" + size);
+                        k8sClient.createLonghornPvc(info.userId(), size);
+                    } else if ("nfs-k8s".equals(storageType)) {
+                        LOG.info("Auto-creating nfs-k8s PVC for user=" + info.userId() + " size=" + size);
+                        k8sClient.createNfsK8sPvPvc(info.userId(), size);
+                    } else {
+                        LOG.warning("Session start rejected: PVC not found: " + pvcName
+                            + " (user=" + info.userId() + ", type=" + storageType + ")."
+                            + " Create the PVC in Storage Settings first.");
+                        state = SessionState.FAILED;
+                        memo = "Storage PVC not found. Create it in Storage Settings first.";
+                        return;
+                    }
                 }
                 // RWO conflict check for Longhorn
                 if ("longhorn".equals(storageType) && k8sClient.isUserPvcInUse(info.userId(), storageType)) {
@@ -138,8 +147,7 @@ public class SessionActor {
                     info.toolPlugin().containerPort(),
                     info.toolPlugin().passthroughPath()
                 );
-                // TODO: Re-enable after SSO issue is resolved
-                // k8sClient.createSecurityPolicy(info.sessionId(), info.userId());
+                k8sClient.createSecurityPolicy(info.sessionId(), info.userId());
             }
 
             // Wait for Pod object to exist before setting up the watch.
@@ -241,6 +249,11 @@ public class SessionActor {
             } catch (Exception e) {
                 LOG.warning("Failed to delete HTTPRoute for " + info.sessionId() + ": " + e.getMessage());
             }
+            try {
+                k8sClient.deleteSecurityPolicy(info.sessionId());
+            } catch (Exception e) {
+                LOG.warning("Failed to delete SecurityPolicy for " + info.sessionId() + ": " + e.getMessage());
+            }
         }
         try {
             k8sClient.deleteService(info.serviceName());
@@ -311,6 +324,10 @@ public class SessionActor {
 
     public String getSessionId() {
         return info.sessionId();
+    }
+
+    public String getPodLogs(int tailLines) {
+        return k8sClient.getPodLogs(info.podName(), tailLines);
     }
 
     public String getToolName() {

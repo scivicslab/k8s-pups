@@ -6,6 +6,10 @@ import com.scivicslab.k8spups.k8s.MountSpec;
 import com.scivicslab.k8spups.k8s.SessionInfo;
 import com.scivicslab.k8spups.k8s.WorkspaceInfo;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
+import com.scivicslab.k8spups.tool.DynamicToolPlugin;
+import com.scivicslab.k8spups.tool.ToolMetadata;
+import com.scivicslab.k8spups.tool.ToolRegistryEntry;
+import com.scivicslab.k8spups.tool.ToolRoleFilter;
 import com.scivicslab.pojoactor.core.ActorRef;
 import io.fabric8.kubernetes.api.model.Pod;
 
@@ -24,6 +28,7 @@ public class SessionManagerActor {
 
     private final K8sApiClient k8sClient;
     private final Map<String, ToolPlugin> plugins;
+    private final String controllerNamespace;
     private final int maxSessions;
     private final int maxSessionsPerUser;
     private final long idleTimeoutMinutes;
@@ -38,11 +43,13 @@ public class SessionManagerActor {
     private final Map<String, List<String>> userSessions = new HashMap<>();
 
     public SessionManagerActor(K8sApiClient k8sClient, Map<String, ToolPlugin> plugins,
+                               String controllerNamespace,
                                int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
                                long maxLifetimeMinutes,
                                Set<String> unlimitedUsers, LdapUserInfoClient ldapClient) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
+        this.controllerNamespace = controllerNamespace;
         this.maxSessions = maxSessions;
         this.maxSessionsPerUser = maxSessionsPerUser;
         this.idleTimeoutMinutes = idleTimeoutMinutes;
@@ -100,9 +107,20 @@ public class SessionManagerActor {
         }
 
         ToolPlugin plugin = plugins.get(toolName);
+        Map<String, String> toolConfigEnv = Collections.emptyMap();
         if (plugin == null) {
-            LOG.warning("Unknown tool: " + toolName);
-            return null;
+            // Try dynamic tool from tool-registry
+            ToolRegistryEntry registryEntry = k8sClient.getToolRegistry(controllerNamespace).getTool(toolName);
+            if (registryEntry == null) {
+                LOG.warning("Unknown tool: " + toolName);
+                return null;
+            }
+            if (!k8sClient.isToolEnabled(controllerNamespace, toolName)) {
+                LOG.warning("Tool not enabled: " + toolName);
+                return null;
+            }
+            plugin = DynamicToolPlugin.from(registryEntry);
+            toolConfigEnv = k8sClient.getToolConfig(controllerNamespace, toolName);
         }
 
         // Reject duplicate if plugin is single-instance
@@ -146,7 +164,8 @@ public class SessionManagerActor {
 
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType, workspaceInfo,
-            additionalMounts != null ? additionalMounts : Collections.emptyList());
+            additionalMounts != null ? additionalMounts : Collections.emptyList(),
+            toolConfigEnv);
         SessionActor actor = new SessionActor(info, k8sClient);
 
         // Create as child actor
@@ -303,6 +322,12 @@ public class SessionManagerActor {
         }
     }
 
+    public String getSessionLogs(String sessionId, int tailLines) {
+        ActorRef<SessionActor> ref = sessions.get(sessionId);
+        if (ref == null) return "";
+        return ref.ask(sa -> sa.getPodLogs(tailLines)).join();
+    }
+
     /**
      * Touch a session to reset idle timer.
      */
@@ -359,6 +384,32 @@ public class SessionManagerActor {
      */
     public List<ToolPlugin> listAvailableTools() {
         return List.copyOf(plugins.values());
+    }
+
+    /**
+     * Return dynamic tools from tool-registry visible to the given user roles.
+     * Only returns enabled tools that match at least one of the provided roles.
+     */
+    public List<ToolMetadata> listDynamicToolsForRoles(List<String> roles) {
+        List<ToolRegistryEntry> entries = ToolRoleFilter.filterForRoles(
+            k8sClient.getToolRegistry(controllerNamespace),
+            roles,
+            name -> k8sClient.isToolEnabled(controllerNamespace, name));
+
+        List<ToolMetadata> result = new ArrayList<>();
+        for (ToolRegistryEntry entry : entries) {
+            com.scivicslab.k8spups.tool.ToolDescriptor descriptor =
+                k8sClient.getToolDescriptor(controllerNamespace, entry.name());
+            List<String> configuredParams = new ArrayList<>(
+                k8sClient.getToolConfig(controllerNamespace, entry.name()).keySet());
+            if (descriptor != null) {
+                result.add(ToolMetadata.configured(entry.name(), entry.image(), descriptor, configuredParams));
+            } else {
+                result.add(ToolMetadata.pulled(entry.name(), entry.image(),
+                    new com.scivicslab.k8spups.tool.ToolDescriptor(entry.name(), "", "", List.of())));
+            }
+        }
+        return result;
     }
 
     /**
@@ -440,7 +491,7 @@ public class SessionManagerActor {
         try {
             switch (storageType) {
                 case "longhorn" -> k8sClient.createLonghornPvc(userId, storageSize);
-                case "nfs-k8s" -> k8sClient.createNfsK8sPvPvc(userId);
+                case "nfs-k8s" -> k8sClient.createNfsK8sPvPvc(userId, storageSize);
                 case "nfs-home" -> {
                     if (ldapClient == null) {
                         return "LDAP client not configured";

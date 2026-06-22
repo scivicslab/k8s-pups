@@ -11,7 +11,7 @@ import java.util.Map;
  */
 public interface ToolPlugin {
 
-    /** Internal name used as identifier (e.g. "coder-agent"). */
+    /** Internal name used as identifier (e.g. "chat-ui"). */
     String name();
 
     /** Human-readable name (e.g. "LLM Coding Agent"). */
@@ -39,6 +39,16 @@ public interface ToolPlugin {
     /** Environment variables to inject into the container. */
     default Map<String, String> environmentVariables() {
         return Collections.emptyMap();
+    }
+
+    /**
+     * Override the container entrypoint (Kubernetes command:).
+     * When non-empty, replaces the image's default ENTRYPOINT.
+     * Use a shell invocation (e.g. ["/bin/sh", "-c", "..."]) to expand env vars like $PUPS_SESSION_PATH.
+     * Default: empty (use image ENTRYPOINT as-is).
+     */
+    default List<String> containerCommand() {
+        return Collections.emptyList();
     }
 
     /** CPU/memory requests (e.g. "cpu" -> "500m", "memory" -> "1Gi"). */
@@ -107,7 +117,7 @@ public interface ToolPlugin {
      * Whether to pass the session path through to the container without URL rewriting.
      *
      * false (default): HTTPRoute rewrites /session/{id}/* -> /* before forwarding.
-     *   Use this for tools that serve content relative to their own root (e.g. coder-agent).
+     *   Use this for tools that serve content relative to their own root (e.g. chat-ui).
      *
      * true: HTTPRoute forwards /session/{id}/* as-is without rewriting.
      *   Use this for tools that need to know their own base URL (e.g. JupyterLab).

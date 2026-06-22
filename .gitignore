@@ -8,3 +8,6 @@ target/
 .vscode/
 *.class
 node_modules/
+
+# Stray build artifact copied to repo root (the real build output is under target/)
+/k8s-pups.jar

@@ -60,7 +60,7 @@ spec:
         - protocol: TCP
           port: 53
 ---
-# Allow coder-agent to reach DGX servers
+# Allow chat-ui to reach DGX servers
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -69,7 +69,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      tool: coder-agent
+      tool: chat-ui
   policyTypes:
     - Egress
   egress:
@@ -98,8 +98,8 @@ spec:
       - key: tool
         operator: In
         values:
-          - coder-agent-claude
-          - coder-agent-codex
+          - chat-ui-claude
+          - chat-ui-codex
   policyTypes:
     - Egress
   egress:
