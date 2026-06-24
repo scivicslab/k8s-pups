@@ -19,7 +19,7 @@ package com.scivicslab.k8spups.e2e;
  *   mvn test-compile exec:java \
  *     -Dexec.mainClass=com.scivicslab.k8spups.e2e.K8sPupsE2ERunner \
  *     -Dexec.classpathScope=test \
- *     -De2e.base.url=https://133.39.114.45/local-llm \
+ *     -De2e.base.url=https://133.39.114.45:7443/local-llm \
  *     -De2e.username=testadmin \
  *     -De2e.password=&lt;password&gt;
  * </pre>
@@ -28,6 +28,7 @@ public class K8sPupsE2ERunner {
 
     public static void main(String[] args) throws Exception {
         System.out.println("=== k8s-pups E2E Tests ===");
+        new K8sPupsLoginLogoutE2E().run();
         new K8sPupsLandingPageE2E().run();
         new K8sPupsStorageE2E().run();
         new K8sPupsFileBrowserE2E().run();

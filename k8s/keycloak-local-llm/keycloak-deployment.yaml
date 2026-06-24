@@ -60,7 +60,7 @@ spec:
         - name: KC_PROXY_HEADERS
           value: "xforwarded"
         - name: KC_HOSTNAME
-          value: "https://133.39.114.45/local-llm-auth"
+          value: "https://133.39.114.45:7443/local-llm-auth"
         - name: KC_HOSTNAME_STRICT
           value: "false"
         - name: KC_HTTP_ENABLED

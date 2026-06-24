@@ -18,6 +18,8 @@ import io.quarkus.security.identity.SecurityIdentity;
 
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
@@ -27,6 +29,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.net.URI;
 import java.net.URLEncoder;
+import java.net.URLDecoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.logging.Logger;
@@ -60,6 +66,9 @@ public class DashboardResource {
     // the post-logout redirect so it matches the Keycloak client's allowed redirect URIs.
     @ConfigProperty(name = "k8spups.session-oidc.redirect-base-url")
     String oidcRedirectBaseUrl;
+
+    @Context
+    HttpHeaders httpHeaders;
 
     @GET
     @Produces(MediaType.TEXT_HTML)
@@ -145,6 +154,7 @@ public class DashboardResource {
     @Path("/logout")
     @Authenticated
     public Response logout() {
+        String userId = getCurrentUsername();
         String endSessionUrl = oidcIssuer + "/protocol/openid-connect/logout";
         String postLogoutUri = URLEncoder.encode(
             oidcRedirectBaseUrl + basePath + "/",
@@ -154,14 +164,81 @@ public class DashboardResource {
             + "?client_id=k8s-pups"
             + "&id_token_hint=" + URLEncoder.encode(rawToken, StandardCharsets.UTF_8)
             + "&post_logout_redirect_uri=" + postLogoutUri;
-        return Response.seeOther(URI.create(redirectUrl))
-            .cookie(new jakarta.ws.rs.core.NewCookie.Builder("q_session")
-                .path(basePath).maxAge(0).build())
-            .cookie(new jakarta.ws.rs.core.NewCookie.Builder("pups-dashboard-id")
-                .path("/pups").maxAge(0).build())
-            .cookie(new jakarta.ws.rs.core.NewCookie.Builder("pups-dashboard-id")
-                .path("/").maxAge(0).build())
-            .build();
+
+        LOG.info("Logout initiated: user=" + userId);
+        LOG.info("Keycloak logout URL: " + endSessionUrl);
+        LOG.info("Post logout redirect URI: " + URLDecoder.decode(postLogoutUri, StandardCharsets.UTF_8));
+        LOG.info("Final redirect URL: " + redirectUrl);
+
+        // Clear all Quarkus OIDC session cookies found in the request.
+        // In Quarkus 3.x the session may be stored as q_session_chunk_1, q_session_chunk_2, etc.
+        // (not as a single q_session cookie), all set at path "/".
+        Response.ResponseBuilder rb = Response.seeOther(URI.create(redirectUrl));
+        httpHeaders.getCookies().keySet().stream()
+            .filter(name -> name.startsWith("q_session"))
+            .forEach(name -> rb.cookie(
+                new jakarta.ws.rs.core.NewCookie.Builder(name).path("/").maxAge(0).build()));
+        rb.cookie(new jakarta.ws.rs.core.NewCookie.Builder("pups-dashboard-id")
+            .path("/").maxAge(0).build());
+        return rb.build();
+    }
+
+    @GET
+    @Path("/session/{sessionId}/")
+    public Response getSessionPath(@PathParam("sessionId") String sessionId) {
+        String userId = getCurrentUsername();
+        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+
+        try {
+            List<SessionStatus> userSessions = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
+            boolean isOwner = userSessions.stream()
+                .anyMatch(s -> s.sessionId().equals(sessionId));
+
+            if (!isOwner) {
+                LOG.warning("Unauthorized session access: user=" + userId + " sessionId=" + sessionId);
+                return Response.status(Response.Status.FORBIDDEN)
+                    .entity("You do not own this session").build();
+            }
+
+            LOG.info("Session authorized: user=" + userId + " sessionId=" + sessionId);
+            String targetUrl = "http://pups-svc-" + sessionId + ":8080/";
+
+            HttpClient httpClient = HttpClient.newBuilder()
+                .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+                .build();
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(new URI(targetUrl))
+                .GET()
+                .build();
+
+            HttpResponse<String> podResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            Response.ResponseBuilder respBuilder = Response.status(podResponse.statusCode());
+
+            // Copy headers from pod response, fixing Location header if present
+            podResponse.headers().map().forEach((name, values) -> {
+                String lowerName = name.toLowerCase();
+                if ("location".equals(lowerName) && !values.isEmpty()) {
+                    String location = values.get(0);
+                    // Convert HTTP to HTTPS for redirects from pod
+                    if (location.startsWith("http://")) {
+                        location = "https://" + location.substring(7);
+                    }
+                    respBuilder.header(name, location);
+                    LOG.info("Fixed redirect Location: " + location);
+                } else if (!values.isEmpty()) {
+                    respBuilder.header(name, values.get(0));
+                }
+            });
+
+            respBuilder.entity(podResponse.body());
+            return respBuilder.build();
+        } catch (Exception e) {
+            LOG.severe("Failed to proxy session request: " + e.getMessage());
+            return Response.serverError()
+                .entity("Failed to access session: " + e.getMessage())
+                .build();
+        }
     }
 
     @GET

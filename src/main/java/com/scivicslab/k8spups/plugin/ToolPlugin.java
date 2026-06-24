@@ -246,4 +246,16 @@ public interface ToolPlugin {
     default boolean batchMode() {
         return false;
     }
+
+    /**
+     * Linux capabilities to add to the container security context.
+     * Applied alongside the "drop ALL" baseline (capabilities are first dropped,
+     * then only those listed here are added back).
+     * Use for tools that require raw socket access or network control
+     * (e.g. nmap needs NET_RAW; network bridge tools need NET_ADMIN).
+     * Default: empty (no capabilities restored after dropping ALL).
+     */
+    default List<String> capabilities() {
+        return Collections.emptyList();
+    }
 }

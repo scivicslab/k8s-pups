@@ -54,20 +54,20 @@ spec:
           readOnly: true
         env:
         # Internal URL for backend token validation.
-        # Keycloak frontendUrl must be set to https://133.39.114.45/local-llm-auth
+        # Keycloak frontendUrl must be set to https://133.39.114.45:7443/local-llm-auth
         # so that browser redirects use the external URL.
         - name: QUARKUS_OIDC_AUTH_SERVER_URL
           value: "http://keycloak.keycloak-local-llm.svc:8080/local-llm-auth/realms/local-llm"
         - name: K8SPUPS_SESSION_OIDC_ISSUER
-          value: "https://133.39.114.45/local-llm-auth/realms/local-llm"
+          value: "https://133.39.114.45:7443/local-llm-auth/realms/local-llm"
         - name: K8SPUPS_SESSION_OIDC_AUTHORIZATION_ENDPOINT
-          value: "https://133.39.114.45/local-llm-auth/realms/local-llm/protocol/openid-connect/auth"
+          value: "https://133.39.114.45:7443/local-llm-auth/realms/local-llm/protocol/openid-connect/auth"
         - name: K8SPUPS_SESSION_OIDC_TOKEN_ENDPOINT
           value: "http://keycloak.keycloak-local-llm.svc:8080/local-llm-auth/realms/local-llm/protocol/openid-connect/token"
         - name: K8SPUPS_SESSION_OIDC_JWKS_URI
           value: "http://keycloak.keycloak-local-llm.svc:8080/local-llm-auth/realms/local-llm/protocol/openid-connect/certs"
         - name: K8SPUPS_SESSION_OIDC_REDIRECT_BASE_URL
-          value: "https://133.39.114.45"
+          value: "https://133.39.114.45:7443"
         - name: K8SPUPS_MAX_SESSIONS_PER_USER
           value: "4"
         - name: K8SPUPS_UNLIMITED_USERS
@@ -89,7 +89,7 @@ spec:
         - name: K8SPUPS_USER_PODS_ALLOWED_NODES
           value: "stonefly522,stonefly523"
         - name: K8SPUPS_ENABLED_PLUGINS
-          value: "service-portal,guacamole,jupyter-lab,file-browser,storage-settings,pdf-ocr"
+          value: "service-portal,guacamole,kali,jupyter-lab,file-browser,storage-settings,pdf-ocr"
         - name: K8SPUPS_STORAGE_TYPE_OPTIONS
           value: "nfs-k8s,longhorn"
         - name: K8SPUPS_DEFAULT_STORAGE_TYPE

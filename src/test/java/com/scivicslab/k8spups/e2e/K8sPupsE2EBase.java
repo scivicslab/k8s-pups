@@ -21,7 +21,7 @@ abstract class K8sPupsE2EBase {
 
     protected static final Logger LOG = Logger.getLogger(K8sPupsE2EBase.class.getName());
 
-    protected static final String BASE_URL  = System.getProperty("e2e.base.url", "https://133.39.114.45/local-llm");
+    protected static final String BASE_URL  = System.getProperty("e2e.base.url", "https://133.39.114.45:7443/local-llm");
     protected static final String USERNAME  = System.getProperty("e2e.username", "testadmin");
     protected static final String PASSWORD  = System.getProperty("e2e.password", "");
     protected static final String CHROME    = "/usr/bin/google-chrome";
@@ -138,11 +138,6 @@ abstract class K8sPupsE2EBase {
             if (openBtn.count() > 0) {
                 String href = openBtn.first().getAttribute("href");
                 LOG.info("Session READY: " + toolName + " → " + href);
-                // Extract session ID from href (e.g. /session/abc-123/) and wait for
-                // the SecurityPolicy to be propagated to Envoy before navigating.
-                // Without this wait, Envoy may still apply the old JWT requirements and
-                // return 403 "Wrong requirement name" for the new session's URL.
-                waitForJwtPropagated(href);
                 return href;
             }
             if (System.currentTimeMillis() >= deadline) {
@@ -151,87 +146,6 @@ abstract class K8sPupsE2EBase {
             }
             LOG.info("Waiting for session READY: " + toolName + " (retrying in 5s)");
             page.waitForTimeout(5_000);
-        }
-    }
-
-    private void waitForJwtPropagated(String sessionHref) {
-        // Two-phase probe to verify Envoy's xDS config is fully updated for this session.
-        //
-        // Phase 1: no-cookie probe — wait until Envoy's OIDC for this session is active.
-        //   HTTP 403 immediately → old JWT requirement still in place (JWT check fires first).
-        //   HTTP 302 → JWT check passed (allowMissing) and OIDC redirects → OIDC is active.
-        //
-        // Phase 2: fake-JWT probe — send a minimal dummy JWT cookie to trigger JWT validation.
-        //   HTTP 403 "Wrong requirement_name" → JwtAuthn filter still references an old session's
-        //   requirement; xDS update is partial. Keep waiting.
-        //   Any other response (401 signature failure, 302, 200) → JWT requirement is correctly
-        //   named for this session. Done.
-        String sessionUrl = sessionOrigin() + sessionHref;
-        // Extract session ID from href (e.g. /session/abc-123/) for the cookie name.
-        String sessionId = sessionHref.replaceAll("^/session/([^/]+)/.*$", "$1")
-                                      .replaceAll("^/session/([^/]+)$", "$1");
-        String cookieName = "pups-id-" + sessionId;
-        // Minimal valid-structure JWT that will fail signature validation (not "Wrong requirement_name").
-        String fakeJwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9"
-                       + ".eyJzdWIiOiJ0ZXN0IiwiaXNzIjoidGVzdCJ9"
-                       + ".invalidsignature";
-
-        long deadline = System.currentTimeMillis() + PAGE_TIMEOUT_MS;
-
-        // Phase 1: wait for OIDC to be active (no-cookie probe → 302).
-        while (true) {
-            try {
-                ProcessBuilder pb = new ProcessBuilder(
-                        "curl", "-k", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                        "--max-time", "5", sessionUrl);
-                pb.redirectErrorStream(false);
-                Process proc = pb.start();
-                String code = new String(proc.getInputStream().readAllBytes()).trim();
-                proc.waitFor();
-                if ("302".equals(code) || "200".equals(code)) {
-                    LOG.info("JWT/OIDC active for session (HTTP " + code + "): " + sessionUrl);
-                    break;
-                }
-                LOG.info("Waiting for JWT propagation (HTTP " + code + "): " + sessionUrl);
-            } catch (Exception e) {
-                LOG.warning("Could not check JWT propagation: " + e.getMessage());
-                return;
-            }
-            if (System.currentTimeMillis() >= deadline) {
-                LOG.warning("JWT not propagated within timeout: " + sessionUrl);
-                return;
-            }
-            try { Thread.sleep(1_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        }
-
-        // Phase 2: verify JWT requirement naming is correct (fake-JWT probe).
-        // "Wrong requirement_name" means the JwtAuthn filter xDS update is still partial.
-        while (true) {
-            try {
-                ProcessBuilder pb = new ProcessBuilder(
-                        "curl", "-k", "-s", "-w", "\n%{http_code}",
-                        "--max-time", "5",
-                        "-H", "Cookie: " + cookieName + "=" + fakeJwt,
-                        sessionUrl);
-                pb.redirectErrorStream(false);
-                Process proc = pb.start();
-                String out = new String(proc.getInputStream().readAllBytes()).trim();
-                proc.waitFor();
-                if (out.contains("Wrong requirement_name")) {
-                    LOG.info("JWT requirement not yet consistent, waiting: " + sessionUrl);
-                } else {
-                    LOG.info("JWT requirement consistent for session: " + sessionUrl);
-                    return;
-                }
-            } catch (Exception e) {
-                LOG.warning("Could not verify JWT requirement: " + e.getMessage());
-                return;
-            }
-            if (System.currentTimeMillis() >= deadline) {
-                LOG.warning("JWT requirement did not become consistent within timeout: " + sessionUrl);
-                return;
-            }
-            try { Thread.sleep(1_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         }
     }
 

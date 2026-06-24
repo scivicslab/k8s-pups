@@ -1,5 +1,6 @@
 com.scivicslab.k8spups.plugin.ServicePortalPlugin
 com.scivicslab.k8spups.plugin.GuacamolePlugin
+com.scivicslab.k8spups.plugin.KaliPlugin
 com.scivicslab.k8spups.plugin.JupyterLabPlugin
 com.scivicslab.k8spups.plugin.FileBrowserPlugin
 com.scivicslab.k8spups.plugin.StorageSettingsPlugin
