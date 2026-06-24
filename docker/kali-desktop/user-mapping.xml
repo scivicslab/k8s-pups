@@ -1,0 +1,10 @@
+<user-mapping>
+    <authorize username="user" password="">
+        <connection name="desktop">
+            <protocol>vnc</protocol>
+            <param name="hostname">localhost</param>
+            <param name="port">5901</param>
+            <param name="color-depth">24</param>
+        </connection>
+    </authorize>
+</user-mapping>

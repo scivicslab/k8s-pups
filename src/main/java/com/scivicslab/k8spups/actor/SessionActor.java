@@ -147,7 +147,8 @@ public class SessionActor {
                     info.toolPlugin().containerPort(),
                     info.toolPlugin().passthroughPath()
                 );
-                k8sClient.createSecurityPolicy(info.sessionId(), info.userId());
+                // SecurityPolicy disabled: OIDC moved to Quarkus controller
+                // k8sClient.createSecurityPolicy(info.sessionId(), info.userId());
             }
 
             // Wait for Pod object to exist before setting up the watch.
@@ -249,11 +250,12 @@ public class SessionActor {
             } catch (Exception e) {
                 LOG.warning("Failed to delete HTTPRoute for " + info.sessionId() + ": " + e.getMessage());
             }
-            try {
-                k8sClient.deleteSecurityPolicy(info.sessionId());
-            } catch (Exception e) {
-                LOG.warning("Failed to delete SecurityPolicy for " + info.sessionId() + ": " + e.getMessage());
-            }
+            // SecurityPolicy deletion disabled: SecurityPolicy no longer created
+            // try {
+            //     k8sClient.deleteSecurityPolicy(info.sessionId());
+            // } catch (Exception e) {
+            //     LOG.warning("Failed to delete SecurityPolicy for " + info.sessionId() + ": " + e.getMessage());
+            // }
         }
         try {
             k8sClient.deleteService(info.serviceName());

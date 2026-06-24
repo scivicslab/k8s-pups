@@ -64,3 +64,16 @@ spec:
     backendRefs:
     - name: k8s-pups-controller
       port: 8080
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /session
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-Proto
+          value: https
+    backendRefs:
+    - name: k8s-pups-controller
+      port: 8080

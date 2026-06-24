@@ -483,9 +483,13 @@ public class K8sApiClient {
         oidc.put("clientID", oidcClientId);
         oidc.put("clientSecret", Map.of("name", oidcSecretName));
         oidc.put("redirectURL", redirectURL);
+        // Trust X-Forwarded-Proto header from Apache so OIDC uses correct HTTPS scheme
+        oidc.put("trustProxy", true);
         oidc.put("scopes", List.of("openid", "profile"));
         // Fix the idToken cookie name so the jwt section below can extract it by name.
         oidc.put("cookieNames", Map.of("idToken", idTokenCookieName));
+        // Limit cookie scope to this session's path to avoid cross-session cookie conflicts.
+        oidc.put("cookiePath", "/session/" + sessionId + "/");
 
         spec.put("oidc", oidc);
 
@@ -1448,6 +1452,18 @@ public class K8sApiClient {
         return profiles.get(0);
     }
 
+    private SecurityContext buildContainerSecurityContext(ToolPlugin plugin, boolean readOnlyRoot) {
+        CapabilitiesBuilder caps = new CapabilitiesBuilder().addToDrop("ALL");
+        for (String cap : plugin.capabilities()) {
+            caps.addToAdd(cap);
+        }
+        return new SecurityContextBuilder()
+            .withAllowPrivilegeEscalation(false)
+            .withReadOnlyRootFilesystem(readOnlyRoot)
+            .withCapabilities(caps.build())
+            .build();
+    }
+
     private Probe buildReadinessProbe(ToolPlugin plugin) {
         if (plugin.readinessProbePath() == null) {
             return null;
@@ -1698,11 +1714,7 @@ public class K8sApiClient {
                         .withLimits(limits)
                     .endResources()
                     .withVolumeMounts(mounts)
-                    .withNewSecurityContext()
-                        .withAllowPrivilegeEscalation(false)
-                        .withReadOnlyRootFilesystem(readOnlyRoot)
-                        .withNewCapabilities().addToDrop("ALL").endCapabilities()
-                    .endSecurityContext()
+                    .withSecurityContext(buildContainerSecurityContext(plugin, readOnlyRoot))
                     .withReadinessProbe(buildReadinessProbe(plugin))
                 .endContainer()
                 .withVolumes(volumes)
