@@ -25,4 +25,4 @@ labels:
 images:
 - name: k8s-pups
   newName: 10.0.0.23:32000/k8s-pups
-  newTag: 0.1.0-2606251307
+  newTag: 0.1.0-2606251452
