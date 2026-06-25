@@ -1,73 +1,44 @@
-FROM kalilinux/kali-rolling
+FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# ---- Desktop + VNC + Java + guacamole build deps ----
+# ---- Desktop + Guacamole core ----
+# Ubuntu 24.04 ships guacd 1.5.4 as a native package — no source build needed.
+# Ubuntu's MATE packages fail gracefully when UDisks2 is absent in k8s containers
+# (prints a warning, continues). Kali rolling packages crash instead, causing
+# caja to respawn at ~17 instances/second until PID exhaustion → disconnect.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        mate-desktop-environment \
+        mate-desktop-environment-core \
         mate-terminal \
+        caja \
+        ubuntu-mate-themes \
+        ubuntu-mate-wallpapers \
         tigervnc-standalone-server \
-        default-jre-headless \
+        guacd \
+        libguac-client-vnc0 \
+        openjdk-17-jre-headless \
         unzip \
         wget \
         curl \
         procps \
         dbus-x11 \
         x11-xserver-utils \
+        xdg-user-dirs \
         adwaita-icon-theme \
-        kali-themes \
         hicolor-icon-theme \
         libgdk-pixbuf2.0-bin \
         shared-mime-info \
-        desktop-base \
-        build-essential \
-        libcairo2-dev \
-        libjpeg62-turbo-dev \
-        libpng-dev \
-        uuid-dev \
-        libvncserver-dev \
-        libssl-dev \
-        libwebsockets-dev \
-        libpango1.0-dev \
-        libssh2-1-dev \
-        libtelnet-dev \
-    && update-mime-database /usr/share/mime \
+        fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- Replace bwrap with a pass-through wrapper ----
-# glycin sandboxes image parsing via "bwrap --unshare-all", which requires CLONE_NEWUSER.
-# k8s pods block user namespace creation, so the real bwrap fails and crashes marco,
-# mate-panel, and mate-settings-daemon before the desktop renders.
-# The pod is already isolated by k8s namespaces, so the glycin sandbox is redundant.
-# Solution: replace /usr/bin/bwrap with a script that strips all namespace arguments
-# and runs the target binary directly. glycin's loader (glycin-image-rs) still runs
-# and loads images normally — just without the extra process isolation layer.
-# See: 030_operations/020_k8s-pups-local-llm/040_KaliDesktopContainer_260625_oo01
-COPY bwrap-wrapper.sh /usr/bin/bwrap
-RUN chmod +x /usr/bin/bwrap
-
-# ---- Build guacamole-server (guacd) from source ----
-ARG GUAC_VERSION=1.5.4
-RUN wget -q \
-        "https://downloads.apache.org/guacamole/${GUAC_VERSION}/source/guacamole-server-${GUAC_VERSION}.tar.gz" \
-        -O /tmp/guac-server.tar.gz && \
-    tar -xzf /tmp/guac-server.tar.gz -C /tmp && \
-    cd /tmp/guacamole-server-${GUAC_VERSION} && \
-    ./configure --disable-guacenc && \
-    make -j$(nproc) && \
-    make install && \
-    ldconfig && \
-    rm -rf /tmp/guacamole-server-${GUAC_VERSION} /tmp/guac-server.tar.gz
-
-# ---- Kali security tools ----
-# --fix-missing: skip packages that fail to download from a mirror and continue
+# ---- Security tools (Ubuntu 24.04 universe) ----
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends --fix-missing \
+    apt-get install -y --no-install-recommends \
         nmap \
         wireshark \
         tcpdump \
-        netcat-traditional \
+        netcat-openbsd \
         net-tools \
         iputils-ping \
         traceroute \
@@ -78,17 +49,32 @@ RUN apt-get update && \
         dirb \
         nikto \
         gobuster \
-        burpsuite \
-        metasploit-framework \
         hashcat \
-        wordlists \
-    && rm -rf /var/lib/apt/lists/*
+    && mkdir -p /usr/share/wordlists && \
+    ln -sf /usr/share/john/password.lst /usr/share/wordlists/password.lst && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---- Metasploit Framework (Rapid7 official installer — standalone Ruby, no apt conflicts) ----
+# Installs to /opt/metasploit-framework with its own Ruby runtime.
+# Using || true so a transient network failure does not abort the image build.
+RUN curl -fsSL \
+        https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb \
+        -o /tmp/msfinstall && \
+    chmod 755 /tmp/msfinstall && \
+    /tmp/msfinstall && \
+    rm -f /tmp/msfinstall || \
+    echo "WARNING: Metasploit install failed; continuing without it"
+
+# ---- bwrap pass-through wrapper (safety: prevents glycin sandboxing in case Ubuntu MATE uses it) ----
+# See: 030_operations/020_k8s-pups-local-llm/040_KaliDesktopContainer_260625_oo01
+COPY bwrap-wrapper.sh /usr/bin/bwrap
+RUN chmod +x /usr/bin/bwrap
 
 # ---- Timezone (JST) ----
 RUN ln -sf /usr/share/zoneinfo/Asia/Tokyo /etc/localtime && \
     echo "Asia/Tokyo" > /etc/timezone
 
-# ---- Tomcat 9 (tarball; Guacamole 1.5.x requires javax.servlet = Tomcat 9) ----
+# ---- Tomcat 9 (Guacamole 1.5.x requires javax.servlet = Tomcat 9, not 10+) ----
 ARG TOMCAT_VERSION=9.0.102
 RUN wget -q \
         "https://archive.apache.org/dist/tomcat/tomcat-9/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz" \
@@ -99,11 +85,13 @@ RUN wget -q \
     rm -rf /opt/tomcat/webapps/*
 
 ENV CATALINA_HOME=/opt/tomcat
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 
 RUN sed -i 's|Connector port="8080" protocol="HTTP/1.1"|Connector port="8080" protocol="HTTP/1.1" maxHttpHeaderSize="65536"|' \
     /opt/tomcat/conf/server.xml
 
-# ---- Guacamole web app ----
+# ---- Guacamole web app (must match Ubuntu 24.04's guacd version = 1.5.4) ----
+ARG GUAC_VERSION=1.5.4
 RUN mkdir -p /opt/tomcat/webapps/ROOT && \
     wget -q \
         "https://downloads.apache.org/guacamole/${GUAC_VERSION}/binary/guacamole-${GUAC_VERSION}.war" \
@@ -125,5 +113,4 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 8080
-
 CMD ["/usr/local/bin/entrypoint.sh"]
