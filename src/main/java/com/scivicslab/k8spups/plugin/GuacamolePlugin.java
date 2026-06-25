@@ -37,7 +37,7 @@ public class GuacamolePlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/guacamole-desktop:0.1.1-2603061330";
+        return "192.168.5.23:32000/guacamole-desktop:0.1.2-2606251104";
     }
 
     @Override

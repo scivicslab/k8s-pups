@@ -11,7 +11,7 @@ import java.util.Map;
  * raw sockets. NET_RAW and NET_ADMIN capabilities are added to the container.
  *
  * Access: Apache Guacamole + TigerVNC on port 8080, same infrastructure as the
- * Ubuntu MATE desktop (GuacamolePlugin). Desktop environment: XFCE4 (Kali default).
+ * Ubuntu MATE desktop (GuacamolePlugin). Desktop environment: MATE.
  */
 public class KaliPlugin implements ToolPlugin {
 
@@ -32,7 +32,7 @@ public class KaliPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/kali-desktop:0.1.0-2606240030";
+        return "192.168.5.23:32000/kali-desktop:0.1.5-2606251032";
     }
 
     @Override

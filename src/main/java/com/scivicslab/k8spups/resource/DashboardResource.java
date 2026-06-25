@@ -22,19 +22,24 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
 
 import org.eclipse.microprofile.jwt.JsonWebToken;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import io.smallrye.common.annotation.Blocking;
+
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.Locale;
 import java.util.logging.Logger;
 
 @Path("/")
@@ -66,6 +71,9 @@ public class DashboardResource {
     // the post-logout redirect so it matches the Keycloak client's allowed redirect URIs.
     @ConfigProperty(name = "k8spups.session-oidc.redirect-base-url")
     String oidcRedirectBaseUrl;
+
+    @ConfigProperty(name = "k8spups.user-pods-namespace", defaultValue = "user-pods")
+    String userPodsNamespace;
 
     @Context
     HttpHeaders httpHeaders;
@@ -166,9 +174,6 @@ public class DashboardResource {
             + "&post_logout_redirect_uri=" + postLogoutUri;
 
         LOG.info("Logout initiated: user=" + userId);
-        LOG.info("Keycloak logout URL: " + endSessionUrl);
-        LOG.info("Post logout redirect URI: " + URLDecoder.decode(postLogoutUri, StandardCharsets.UTF_8));
-        LOG.info("Final redirect URL: " + redirectUrl);
 
         // Clear all Quarkus OIDC session cookies found in the request.
         // In Quarkus 3.x the session may be stored as q_session_chunk_1, q_session_chunk_2, etc.
@@ -181,64 +186,6 @@ public class DashboardResource {
         rb.cookie(new jakarta.ws.rs.core.NewCookie.Builder("pups-dashboard-id")
             .path("/").maxAge(0).build());
         return rb.build();
-    }
-
-    @GET
-    @Path("/session/{sessionId}/")
-    public Response getSessionPath(@PathParam("sessionId") String sessionId) {
-        String userId = getCurrentUsername();
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
-
-        try {
-            List<SessionStatus> userSessions = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
-            boolean isOwner = userSessions.stream()
-                .anyMatch(s -> s.sessionId().equals(sessionId));
-
-            if (!isOwner) {
-                LOG.warning("Unauthorized session access: user=" + userId + " sessionId=" + sessionId);
-                return Response.status(Response.Status.FORBIDDEN)
-                    .entity("You do not own this session").build();
-            }
-
-            LOG.info("Session authorized: user=" + userId + " sessionId=" + sessionId);
-            String targetUrl = "http://pups-svc-" + sessionId + ":8080/";
-
-            HttpClient httpClient = HttpClient.newBuilder()
-                .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-                .build();
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(new URI(targetUrl))
-                .GET()
-                .build();
-
-            HttpResponse<String> podResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-            Response.ResponseBuilder respBuilder = Response.status(podResponse.statusCode());
-
-            // Copy headers from pod response, fixing Location header if present
-            podResponse.headers().map().forEach((name, values) -> {
-                String lowerName = name.toLowerCase();
-                if ("location".equals(lowerName) && !values.isEmpty()) {
-                    String location = values.get(0);
-                    // Convert HTTP to HTTPS for redirects from pod
-                    if (location.startsWith("http://")) {
-                        location = "https://" + location.substring(7);
-                    }
-                    respBuilder.header(name, location);
-                    LOG.info("Fixed redirect Location: " + location);
-                } else if (!values.isEmpty()) {
-                    respBuilder.header(name, values.get(0));
-                }
-            });
-
-            respBuilder.entity(podResponse.body());
-            return respBuilder.build();
-        } catch (Exception e) {
-            LOG.severe("Failed to proxy session request: " + e.getMessage());
-            return Response.serverError()
-                .entity("Failed to access session: " + e.getMessage())
-                .build();
-        }
     }
 
     @GET
@@ -427,6 +374,195 @@ public class DashboardResource {
             return Response.ok(Map.of("logs", "")).build();
         }
     }
+
+    // ── Session proxy ──────────────────────────────────────────────────────────
+    // All traffic to /session/{id}/... reaches the controller via the catch-all
+    // HTTPRoute in gateway.yaml. The controller verifies ownership, then proxies
+    // the request to the pod Service (http://pups-svc-{id}:8080/...).
+    //
+    // passthroughPath=true  (FileBrowser, JupyterLab): pod expects full path
+    //   /session/{id}/sub/path → pups-svc-{id}:8080/session/{id}/sub/path
+    // passthroughPath=false (Guacamole, etc.): pod expects stripped path
+    //   /session/{id}/sub/path → pups-svc-{id}:8080/sub/path
+
+    private static final java.util.Set<String> HOP_BY_HOP = java.util.Set.of(
+        "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+        "te", "trailer", "transfer-encoding", "upgrade", "host",
+        // content-length is omitted so the framework can use chunked encoding for streaming
+        "content-length"
+    );
+
+    private static final HttpClient SESSION_HTTP_CLIENT = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
+        .build();
+
+    @GET
+    @Path("/session/{sessionId}/{subPath: .*}")
+    @Authenticated
+    @Blocking
+    public Response proxySessionGet(
+            @PathParam("sessionId") String sessionId,
+            @PathParam("subPath") String subPath,
+            @Context HttpHeaders inHeaders,
+            @Context jakarta.ws.rs.core.UriInfo uriInfo) {
+        return proxySession(sessionId, subPath, "GET", null, inHeaders, uriInfo);
+    }
+
+    @POST
+    @Path("/session/{sessionId}/{subPath: .*}")
+    @Authenticated
+    @Blocking
+    public Response proxySessionPost(
+            @PathParam("sessionId") String sessionId,
+            @PathParam("subPath") String subPath,
+            @Context HttpHeaders inHeaders,
+            @Context jakarta.ws.rs.core.UriInfo uriInfo,
+            byte[] body) {
+        return proxySession(sessionId, subPath, "POST", body, inHeaders, uriInfo);
+    }
+
+    @PUT
+    @Path("/session/{sessionId}/{subPath: .*}")
+    @Authenticated
+    @Blocking
+    public Response proxySessionPut(
+            @PathParam("sessionId") String sessionId,
+            @PathParam("subPath") String subPath,
+            @Context HttpHeaders inHeaders,
+            @Context jakarta.ws.rs.core.UriInfo uriInfo,
+            byte[] body) {
+        return proxySession(sessionId, subPath, "PUT", body, inHeaders, uriInfo);
+    }
+
+    @DELETE
+    @Path("/session/{sessionId}/{subPath: .*}")
+    @Authenticated
+    @Blocking
+    public Response proxySessionDelete(
+            @PathParam("sessionId") String sessionId,
+            @PathParam("subPath") String subPath,
+            @Context HttpHeaders inHeaders,
+            @Context jakarta.ws.rs.core.UriInfo uriInfo) {
+        return proxySession(sessionId, subPath, "DELETE", null, inHeaders, uriInfo);
+    }
+
+    @PATCH
+    @Path("/session/{sessionId}/{subPath: .*}")
+    @Authenticated
+    @Blocking
+    public Response proxySessionPatch(
+            @PathParam("sessionId") String sessionId,
+            @PathParam("subPath") String subPath,
+            @Context HttpHeaders inHeaders,
+            @Context jakarta.ws.rs.core.UriInfo uriInfo,
+            byte[] body) {
+        return proxySession(sessionId, subPath, "PATCH", body, inHeaders, uriInfo);
+    }
+
+    private Response proxySession(String sessionId, String subPath, String method,
+                                   byte[] body, HttpHeaders inHeaders,
+                                   jakarta.ws.rs.core.UriInfo uriInfo) {
+        String userId = getCurrentUsername();
+        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+
+        // Ownership check
+        List<SessionStatus> userSessions;
+        try {
+            userSessions = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
+        } catch (Exception e) {
+            LOG.severe("Failed to look up sessions for proxy: " + e.getMessage());
+            return Response.serverError().build();
+        }
+        SessionStatus session = userSessions.stream()
+            .filter(s -> s.sessionId().equals(sessionId))
+            .findFirst()
+            .orElse(null);
+        if (session == null) {
+            LOG.warning("Unauthorized session access: user=" + userId + " sessionId=" + sessionId);
+            return Response.status(Response.Status.FORBIDDEN)
+                .entity("You do not own this session").build();
+        }
+
+        // Update idle timer
+        sm.tell(mgr -> mgr.touchSession(sessionId));
+
+        // Determine target path and port from the tool plugin's settings
+        boolean passthrough = false;
+        int containerPort = 8080;
+        try {
+            List<com.scivicslab.k8spups.plugin.ToolPlugin> tools =
+                sm.ask(SessionManagerActor::listAvailableTools).get();
+            java.util.Optional<com.scivicslab.k8spups.plugin.ToolPlugin> toolPlugin = tools.stream()
+                .filter(t -> t.displayName().equals(session.toolName()))
+                .findFirst();
+            passthrough    = toolPlugin.map(com.scivicslab.k8spups.plugin.ToolPlugin::passthroughPath).orElse(false);
+            containerPort  = toolPlugin.map(com.scivicslab.k8spups.plugin.ToolPlugin::containerPort).orElse(8080);
+        } catch (Exception e) {
+            LOG.warning("Could not determine tool settings for " + sessionId + ": " + e.getMessage());
+        }
+
+        String targetPath = passthrough
+            ? "/session/" + sessionId + "/" + subPath
+            : "/" + subPath;
+        String rawQuery = uriInfo.getRequestUri().getRawQuery();
+        String targetUrl = "http://pups-svc-" + sessionId + "." + userPodsNamespace + ".svc.cluster.local:" + containerPort
+            + targetPath
+            + (rawQuery != null && !rawQuery.isEmpty() ? "?" + rawQuery : "");
+
+        try {
+            HttpRequest.Builder rb = HttpRequest.newBuilder().uri(URI.create(targetUrl));
+            HttpRequest.BodyPublisher publisher = (body != null && body.length > 0)
+                ? HttpRequest.BodyPublishers.ofByteArray(body)
+                : HttpRequest.BodyPublishers.noBody();
+            rb.method(method, publisher);
+
+            inHeaders.getRequestHeaders().forEach((name, values) -> {
+                if (!HOP_BY_HOP.contains(name.toLowerCase(Locale.ROOT))) {
+                    try {
+                        rb.header(name, String.join(", ", values));
+                    } catch (IllegalArgumentException ignored) {}
+                }
+            });
+
+            // Stream the response body via StreamingOutput with explicit flush() on each chunk.
+            // Returning InputStream directly risks Vert.x write-buffer batching, which delays
+            // Guacamole's nop keepalives (every ~3s) until the buffer fills — Apache/the browser
+            // then sees no data for 60s and closes the connection ("Guacamole internal error").
+            // StreamingOutput + flush() pushes each chunk through the network immediately.
+            HttpResponse<InputStream> resp = SESSION_HTTP_CLIENT.send(
+                rb.build(), HttpResponse.BodyHandlers.ofInputStream());
+
+            Response.ResponseBuilder responseBuilder = Response.status(resp.statusCode());
+            resp.headers().map().forEach((name, vals) -> {
+                if (!HOP_BY_HOP.contains(name.toLowerCase(Locale.ROOT)) && !":status".equals(name)) {
+                    vals.forEach(v -> responseBuilder.header(name, v));
+                }
+            });
+
+            InputStream bodyStream = resp.body();
+            StreamingOutput so = (OutputStream output) -> {
+                byte[] buf = new byte[8192];
+                int n;
+                try {
+                    while ((n = bodyStream.read(buf)) != -1) {
+                        output.write(buf, 0, n);
+                        output.flush();
+                    }
+                } finally {
+                    bodyStream.close();
+                }
+            };
+            responseBuilder.entity(so);
+            return responseBuilder.build();
+
+        } catch (Exception e) {
+            LOG.severe("Proxy error for session " + sessionId + " path=" + targetUrl
+                + ": [" + e.getClass().getSimpleName() + "] " + e);
+            return Response.serverError().entity("Proxy error: " + e).build();
+        }
+    }
+
+    // ── Storage endpoints ─────────────────────────────────────────────────────
 
     @GET
     @Path("/storage/info")

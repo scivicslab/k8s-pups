@@ -29,6 +29,8 @@ public class K8sPupsE2ERunner {
     public static void main(String[] args) throws Exception {
         System.out.println("=== k8s-pups E2E Tests ===");
         new K8sPupsLoginLogoutE2E().run();
+        new K8sPupsAllToolsE2E().run();
+        new K8sPupsSessionIsolationE2E().run();
         new K8sPupsLandingPageE2E().run();
         new K8sPupsStorageE2E().run();
         new K8sPupsFileBrowserE2E().run();

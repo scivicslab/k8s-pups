@@ -37,15 +37,46 @@ sleep 3
 # Set Japanese keyboard layout via xkb
 DISPLAY=:${DISPLAY_NUM} setxkbmap -layout jp -option
 
-# Apply Ubuntu MATE theme and wallpaper before session starts
+# Disable X11-level screensaver and DPMS immediately after Xvnc starts.
+# xset s off: disables the X11 built-in screensaver (separate from mate-screensaver).
+# xset -dpms: disables Display Power Management Signaling on the virtual display.
+# Without these, the X11 idle timer triggers at the OS level independently of MATE settings,
+# blanking the VNC framebuffer and causing guacd to report a "Guacamole internal error".
+DISPLAY=:${DISPLAY_NUM} xset s off
+DISPLAY=:${DISPLAY_NUM} xset -dpms
+
+# Start a persistent dbus session. Without --exit-with-session, dbus outlives
+# mate-session: if MATE crashes and restarts, it reconnects to the same bus
+# instead of orphaning guacd/Xvnc.
+eval $(dbus-launch --sh-syntax)
+export DBUS_SESSION_BUS_ADDRESS
+echo "dbus started: $DBUS_SESSION_BUS_ADDRESS"
+
+# Pre-configure MATE settings via dconf before the session starts.
+# gsettings requires DBUS_SESSION_BUS_ADDRESS, which is now set.
 export DISPLAY=:${DISPLAY_NUM}
-gsettings set org.mate.background picture-filename /usr/share/backgrounds/ubuntu-mate-noble/numbat_wallpaper_dimmed_3480x2160.jpg
+
+# Theme and wallpaper
+gsettings set org.mate.background picture-filename \
+    /usr/share/backgrounds/ubuntu-mate-noble/numbat_wallpaper_dimmed_3480x2160.jpg
 gsettings set org.mate.interface gtk-theme Yaru-MATE-dark
 gsettings set org.mate.Marco.general theme Yaru-MATE-dark
 gsettings set org.mate.interface icon-theme Yaru-MATE-dark
 
-# Start MATE desktop session with Japanese locale and fcitx5-mozc IME
-# cd $HOME so terminal windows open in the user's home directory (PVC mount)
+# Disable screensaver entirely: in a VNC session, screensaver activation
+# causes the VNC framebuffer to go black and confuses guacd, leading to
+# "internal error" disconnects.
+gsettings set org.mate.screensaver idle-activation-enabled false
+gsettings set org.mate.screensaver lock-enabled false
+
+# Disable power management sleep: mate-power-manager cannot communicate with
+# UPower in a container (no hardware), causing periodic crashes that kill the
+# MATE session and disconnect Guacamole.
+gsettings set org.mate.power-manager sleep-display-ac 0 2>/dev/null || true
+gsettings set org.mate.power-manager sleep-computer-ac 0 2>/dev/null || true
+
+# Start MATE desktop session with Japanese locale and fcitx5-mozc IME.
+# cd $HOME so terminal windows open in the user's home directory (PVC mount).
 cd "$HOME"
 DISPLAY=:${DISPLAY_NUM} \
 LANG=ja_JP.UTF-8 \
@@ -53,10 +84,17 @@ LC_ALL=ja_JP.UTF-8 \
 GTK_IM_MODULE=fcitx \
 QT_IM_MODULE=fcitx \
 XMODIFIERS=@im=fcitx \
-    dbus-launch --exit-with-session mate-session &
+    mate-session &
 echo "MATE session started"
 
-sleep 2
+sleep 5
+
+# Kill components that crash in a container environment.
+# mate-screensaver: would activate after idle and disrupt the VNC display.
+# mate-power-manager: depends on UPower which is absent in containers.
+DISPLAY=:${DISPLAY_NUM} pkill -f mate-screensaver 2>/dev/null || true
+DISPLAY=:${DISPLAY_NUM} pkill -f mate-power-manager 2>/dev/null || true
+echo "Disabled screensaver and power manager"
 
 # Start fcitx5 input method daemon (Mozc)
 DISPLAY=:${DISPLAY_NUM} fcitx5 -d --replace 2>/dev/null &
