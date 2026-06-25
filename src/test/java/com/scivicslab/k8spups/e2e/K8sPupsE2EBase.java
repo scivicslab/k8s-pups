@@ -9,6 +9,10 @@ import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.options.WaitForSelectorState;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.logging.Logger;
@@ -132,13 +136,22 @@ abstract class K8sPupsE2EBase {
             page.navigate(BASE_URL + "/dashboard");
             page.waitForSelector("span.brand-name",
                     new Page.WaitForSelectorOptions().setTimeout(PAGE_TIMEOUT_MS));
-            Locator openBtn = page.locator(".session-card")
-                    .filter(new Locator.FilterOptions().setHasText(toolName))
-                    .locator("a.btn-open");
+            Locator card = page.locator(".session-card")
+                    .filter(new Locator.FilterOptions().setHasText(toolName));
+            Locator openBtn = card.locator("a.btn-open");
             if (openBtn.count() > 0) {
                 String href = openBtn.first().getAttribute("href");
                 LOG.info("Session READY: " + toolName + " → " + href);
                 return href;
+            }
+            // Fail fast if the session card shows FAILED state
+            // (e.g. Longhorn RWO conflict: another pod still holds the PVC).
+            if (card.count() > 0) {
+                String cardText = card.first().textContent();
+                if (cardText != null && cardText.contains("FAILED")) {
+                    throw new AssertionError("Session entered FAILED state: " + toolName
+                            + " — card text: " + cardText.substring(0, Math.min(200, cardText.length())));
+                }
             }
             if (System.currentTimeMillis() >= deadline) {
                 throw new AssertionError("Session did not become READY within "
@@ -206,25 +219,28 @@ abstract class K8sPupsE2EBase {
     }
 
     /**
-     * Wait until all user pods in user-pods-local-llm are gone AND the user's Longhorn PVC
+     * Wait until the test user's pods in user-pods-local-llm are gone AND the user's Longhorn PVC
      * has detached. Both conditions must hold before the next session can safely mount the PVC.
+     * Only waits for pods owned by USERNAME (label selector user=USERNAME), so other users'
+     * pods running in parallel do not block the test.
      */
     protected void waitForUserPodsGone() {
         long deadline = System.currentTimeMillis() + SESSION_TIMEOUT_MS;
-        // Phase 1: wait for all user pods to be gone.
+        // Phase 1: wait for the test user's pods to be gone.
         while (true) {
             try {
                 ProcessBuilder pb = new ProcessBuilder(
-                        "kubectl", "get", "pods", "-n", "user-pods-local-llm", "--no-headers");
+                        "kubectl", "get", "pods", "-n", "user-pods-local-llm",
+                        "-l", "user=" + USERNAME, "--no-headers");
                 pb.redirectErrorStream(true);
                 Process proc = pb.start();
                 String out = new String(proc.getInputStream().readAllBytes()).trim();
                 proc.waitFor();
                 if (out.isEmpty() || out.contains("No resources found")) {
-                    LOG.info("All user pods gone.");
+                    LOG.info("All user pods gone for user=" + USERNAME + ".");
                     break;
                 }
-                LOG.info("Waiting for user pods to terminate: " + out.lines().count() + " pod(s) remaining");
+                LOG.info("Waiting for user pods to terminate (user=" + USERNAME + "): " + out.lines().count() + " pod(s) remaining");
             } catch (Exception e) {
                 LOG.warning("Could not check user pods: " + e.getMessage());
                 return;
@@ -274,6 +290,129 @@ abstract class K8sPupsE2EBase {
                 return;
             }
             try { Thread.sleep(5_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        }
+    }
+
+    // ── Desktop stability check ────────────────────────────────────────────────
+
+    private static final String GUAC_ERROR_SELECTOR =
+        ".connection-error, [ng-switch-when='CLIENT.STATUS.TUNNEL_ERROR'], " +
+        ".notification.error, .guac-notification.error";
+
+    /**
+     * Waits {@code durationMs} milliseconds while polling every 5s for a Guacamole
+     * disconnect error.  After the wait, verifies the VNC canvas is still live and
+     * that the final screenshot is not all-black.
+     *
+     * Reproduces the "Guacamole internal error after ~1 minute" regression:
+     * the disconnect appears as an error notification OR the canvas drops to 0x0.
+     *
+     * @param durationMs  how long to hold the connection open (e.g. 80_000)
+     * @param screenshotPath  path where the final screenshot is written
+     */
+    protected void assertStableNoDisconnect(long durationMs, Path screenshotPath) throws IOException {
+        LOG.info(String.format("Stability check: holding connection for %.0fs...", durationMs / 1000.0));
+        long start = System.currentTimeMillis();
+        long end   = start + durationMs;
+
+        while (System.currentTimeMillis() < end) {
+            long remaining = end - System.currentTimeMillis();
+            page.waitForTimeout(Math.min(5_000, remaining));
+
+            Locator errEl = page.locator(GUAC_ERROR_SELECTOR);
+            if (errEl.count() > 0) {
+                page.screenshot(new Page.ScreenshotOptions()
+                    .setPath(screenshotPath).setFullPage(false));
+                long elapsed = (System.currentTimeMillis() - start) / 1000;
+                throw new AssertionError(String.format(
+                    "Guacamole disconnected with error after %ds: %s — screenshot: %s",
+                    elapsed, errEl.first().textContent(), screenshotPath.toAbsolutePath()));
+            }
+
+            // Log canvas size each poll to track any intermittent issues
+            String dims = (String) page.evaluate(
+                "() => { const c = document.querySelector('#display canvas, .display canvas');"
+                + " return c ? c.width + 'x' + c.height : 'gone'; }");
+            long elapsed = (System.currentTimeMillis() - start) / 1000;
+            LOG.info(String.format("  +%ds: canvas=%s", elapsed, dims));
+
+            if ("gone".equals(dims) || dims == null) {
+                page.screenshot(new Page.ScreenshotOptions()
+                    .setPath(screenshotPath).setFullPage(false));
+                throw new AssertionError(String.format(
+                    "Guacamole canvas disappeared after %ds — screenshot: %s",
+                    elapsed, screenshotPath.toAbsolutePath()));
+            }
+            if (dims.startsWith("0x") || dims.endsWith("x0")) {
+                page.screenshot(new Page.ScreenshotOptions()
+                    .setPath(screenshotPath).setFullPage(false));
+                throw new AssertionError(String.format(
+                    "Guacamole canvas became %s after %ds (VNC framebuffer lost) — screenshot: %s",
+                    dims, elapsed, screenshotPath.toAbsolutePath()));
+            }
+        }
+
+        // Final verification: canvas still live, screenshot not black
+        page.screenshot(new Page.ScreenshotOptions()
+            .setPath(screenshotPath).setFullPage(false));
+        assertScreenshotNotBlack(screenshotPath);
+
+        LOG.info(String.format("Stability check PASSED: connection held for %.0fs",
+            durationMs / 1000.0));
+    }
+
+    /**
+     * Fails if the screenshot is essentially all-black OR a uniform solid color.
+     *
+     * Check 1 (brightness): at least 10% of sampled pixels must have total R+G+B > 30.
+     *   Catches a true black screen.
+     *
+     * Check 2 (color variance): at least 15% of sampled pixels must deviate from the
+     *   average brightness by more than 20.
+     *   Catches a uniform solid-color background (e.g. xsetroot alone with no MATE panel
+     *   or icons), which passes the brightness check but has near-zero pixel variance.
+     *   A real desktop with panel + wallpaper + icons always has significant color diversity.
+     */
+    protected static void assertScreenshotNotBlack(Path path) throws IOException {
+        BufferedImage img = ImageIO.read(path.toFile());
+        int w = img.getWidth(), h = img.getHeight();
+        int samples = 2000;
+        int[] brightness = new int[samples];
+        long sum = 0;
+        int nonBlack = 0;
+
+        for (int i = 0; i < samples; i++) {
+            int x = (w * i) / samples;
+            int y = h / 4 + (h / 2) * (i % 2);
+            int rgb = img.getRGB(x, Math.min(y, h - 1));
+            int b = ((rgb >> 16) & 0xff) + ((rgb >> 8) & 0xff) + (rgb & 0xff);
+            brightness[i] = b;
+            sum += b;
+            if (b > 30) nonBlack++;
+        }
+
+        double brightPct = 100.0 * nonBlack / samples;
+        LOG.info(String.format("Brightness check: %.1f%% non-black pixels (threshold 10%%)", brightPct));
+        if (brightPct < 10.0) {
+            throw new AssertionError(String.format(
+                "Desktop is all-black (%.1f%% non-black pixels). Screenshot: %s",
+                brightPct, path.toAbsolutePath()));
+        }
+
+        double avg = (double) sum / samples;
+        int deviated = 0;
+        for (int b : brightness) {
+            if (Math.abs(b - avg) > 20) deviated++;
+        }
+        double variancePct = 100.0 * deviated / samples;
+        LOG.info(String.format("Color variance: avg=%.0f, %.1f%% of pixels deviate >20 from avg (threshold 15%%)",
+            avg, variancePct));
+        if (variancePct < 15.0) {
+            throw new AssertionError(String.format(
+                "Desktop appears uniform (%.1f%% color variance, avg brightness=%.0f). "
+                + "MATE components (marco, mate-panel) are likely not rendering — "
+                + "only the solid xsetroot background is visible. Screenshot: %s",
+                variancePct, avg, path.toAbsolutePath()));
         }
     }
 

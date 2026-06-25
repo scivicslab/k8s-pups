@@ -51,7 +51,9 @@ spec:
   parentRefs:
   - name: k8s-pups-local-llm-gateway
   rules:
-  - matches:
+  - timeouts:
+      request: 3600s
+    matches:
     - path:
         type: PathPrefix
         value: /local-llm
@@ -64,7 +66,9 @@ spec:
     backendRefs:
     - name: k8s-pups-controller
       port: 8080
-  - matches:
+  - timeouts:
+      request: 3600s
+    matches:
     - path:
         type: PathPrefix
         value: /session
@@ -74,6 +78,11 @@ spec:
         set:
         - name: X-Forwarded-Proto
           value: https
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /local-llm/session
     backendRefs:
     - name: k8s-pups-controller
       port: 8080

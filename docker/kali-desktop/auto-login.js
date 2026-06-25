@@ -1,8 +1,9 @@
 // Auto-login to Guacamole with user-mapping.xml credentials (user / empty password).
 // Then redirect to the sole VNC connection "desktop".
 (function() {
-    if (sessionStorage.getItem("guac-auto-done")) return;
-    sessionStorage.setItem("guac-auto-done", "1");
+    var autoKey = "guac-auto-done:" + location.pathname;
+    if (sessionStorage.getItem(autoKey)) return;
+    sessionStorage.setItem(autoKey, "1");
 
     var xhr = new XMLHttpRequest();
     xhr.open("POST", "api/tokens", true);

@@ -133,23 +133,12 @@ public class SessionActor {
                 }
             }
 
-            // Create Pod, Service, and HTTPRoute in parallel.
-            // Service selector matches Pod labels, and HTTPRoute references Service —
-            // neither requires the Pod container to be running, only the Pod object to exist.
+            // Create Pod and Service. No per-session HTTPRoute is created;
+            // all /session/{id}/* traffic routes through the controller catch-all
+            // which enforces ownership before proxying to the pod Service.
             var podFuture = k8sClient.createPod(info);
 
             k8sClient.createService(info);
-
-            if (info.toolPlugin().connectionType() == ConnectionType.HTTP) {
-                k8sClient.createHTTPRoute(
-                    info.sessionId(),
-                    info.serviceName(),
-                    info.toolPlugin().containerPort(),
-                    info.toolPlugin().passthroughPath()
-                );
-                // SecurityPolicy disabled: OIDC moved to Quarkus controller
-                // k8sClient.createSecurityPolicy(info.sessionId(), info.userId());
-            }
 
             // Wait for Pod object to exist before setting up the watch.
             podFuture.get();
@@ -198,23 +187,12 @@ public class SessionActor {
             }
         }
 
-        // Re-create Service and HTTPRoute if missing (they may have been lost on controller restart)
+        // Re-create Service if missing (may have been lost on controller restart).
+        // No per-session HTTPRoute is needed; the controller catch-all handles routing.
         try {
             k8sClient.ensureService(info);
         } catch (Exception e) {
             LOG.warning("Failed to ensure Service for " + info.sessionId() + ": " + e.getMessage());
-        }
-        if (info.toolPlugin().connectionType() == ConnectionType.HTTP) {
-            try {
-                k8sClient.ensureHTTPRoute(
-                    info.sessionId(),
-                    info.serviceName(),
-                    info.toolPlugin().containerPort(),
-                    info.toolPlugin().passthroughPath()
-                );
-            } catch (Exception e) {
-                LOG.warning("Failed to ensure HTTPRoute for " + info.sessionId() + ": " + e.getMessage());
-            }
         }
 
         // Set up pod watch for ongoing status monitoring
@@ -244,19 +222,6 @@ public class SessionActor {
             podWatch = null;
         }
 
-        if (info.toolPlugin().connectionType() == ConnectionType.HTTP) {
-            try {
-                k8sClient.deleteHTTPRoute(info.sessionId());
-            } catch (Exception e) {
-                LOG.warning("Failed to delete HTTPRoute for " + info.sessionId() + ": " + e.getMessage());
-            }
-            // SecurityPolicy deletion disabled: SecurityPolicy no longer created
-            // try {
-            //     k8sClient.deleteSecurityPolicy(info.sessionId());
-            // } catch (Exception e) {
-            //     LOG.warning("Failed to delete SecurityPolicy for " + info.sessionId() + ": " + e.getMessage());
-            // }
-        }
         try {
             k8sClient.deleteService(info.serviceName());
         } catch (Exception e) {

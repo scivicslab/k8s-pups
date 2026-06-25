@@ -5,9 +5,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 # ---- Desktop + VNC + Java + guacamole build deps ----
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        xfce4 \
-        xfce4-terminal \
-        xfce4-goodies \
+        mate-desktop-environment \
+        mate-terminal \
         tigervnc-standalone-server \
         default-jre-headless \
         unzip \
@@ -21,6 +20,7 @@ RUN apt-get update && \
         hicolor-icon-theme \
         libgdk-pixbuf2.0-bin \
         shared-mime-info \
+        desktop-base \
         build-essential \
         libcairo2-dev \
         libjpeg62-turbo-dev \
@@ -34,6 +34,18 @@ RUN apt-get update && \
         libtelnet-dev \
     && update-mime-database /usr/share/mime \
     && rm -rf /var/lib/apt/lists/*
+
+# ---- Replace bwrap with a pass-through wrapper ----
+# glycin sandboxes image parsing via "bwrap --unshare-all", which requires CLONE_NEWUSER.
+# k8s pods block user namespace creation, so the real bwrap fails and crashes marco,
+# mate-panel, and mate-settings-daemon before the desktop renders.
+# The pod is already isolated by k8s namespaces, so the glycin sandbox is redundant.
+# Solution: replace /usr/bin/bwrap with a script that strips all namespace arguments
+# and runs the target binary directly. glycin's loader (glycin-image-rs) still runs
+# and loads images normally — just without the extra process isolation layer.
+# See: 030_operations/020_k8s-pups-local-llm/040_KaliDesktopContainer_260625_oo01
+COPY bwrap-wrapper.sh /usr/bin/bwrap
+RUN chmod +x /usr/bin/bwrap
 
 # ---- Build guacamole-server (guacd) from source ----
 ARG GUAC_VERSION=1.5.4

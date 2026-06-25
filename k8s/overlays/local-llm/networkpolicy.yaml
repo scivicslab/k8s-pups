@@ -105,6 +105,24 @@ spec:
         - protocol: TCP
           port: 16443
 ---
+# Allow the controller to proxy HTTP requests to user pod Services.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-user-pods
+  namespace: k8s-pups-local-llm
+spec:
+  podSelector:
+    matchLabels:
+      app: k8s-pups-controller
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: user-pods-local-llm
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
