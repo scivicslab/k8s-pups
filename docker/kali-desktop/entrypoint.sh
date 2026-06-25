@@ -21,7 +21,7 @@ DISPLAY=:${DISPLAY_NUM} xset s off
 DISPLAY=:${DISPLAY_NUM} xset -dpms
 
 # Set X11 root window to a visible color immediately so the VNC frame is never
-# all-black while MATE initializes. This is visible even before caja renders.
+# all-black while MATE initializes.
 DISPLAY=:${DISPLAY_NUM} xsetroot -solid '#1a1a2e'
 
 # Start a persistent dbus session. Without --exit-with-session, dbus outlives
@@ -32,26 +32,17 @@ echo "dbus started: $DBUS_SESSION_BUS_ADDRESS"
 
 export DISPLAY=:${DISPLAY_NUM}
 
-# Pre-configure MATE background before the session starts.
-# picture-options valid enum: wallpaper|zoom|centered|scaled|stretched|spanned
-# ('none' is NOT valid in Kali's MATE 1.26 and silently falls back to default)
-gsettings set org.mate.background picture-options 'wallpaper' 2>/dev/null || true
-gsettings set org.mate.background picture-filename '/usr/share/backgrounds/kali/kali-cubes-16x9.jpg' 2>/dev/null || true
+# Dark solid background (no Kali wallpaper in Ubuntu base; ubuntu-mate-wallpapers
+# are available but we keep the security-oriented dark theme)
+gsettings set org.mate.background picture-options 'none' 2>/dev/null || true
 gsettings set org.mate.background color-shading-type solid 2>/dev/null || true
 gsettings set org.mate.background primary-color '#1a1a2e' 2>/dev/null || true
-
-# Disable gdk-pixbuf/glycin bwrap sandboxing.
-# Kali's MATE uses glycin image loaders that call "bwrap --unshare-all" to sandbox icon loading.
-# In a k8s container, CLONE_NEWUSER is blocked, so bwrap fails.  This crashes marco (window
-# manager) and mate-settings-daemon before the desktop renders, leaving only the xsetroot
-# background visible.  Setting these env vars tells glycin to load images directly without bwrap.
-export GLYCIN_SANDBOX=None
-export GDK_PIXBUF_DISABLE_SANDBOX=1
 
 # Start MATE desktop session.
 # mate-session starts its required components automatically:
 #   marco (window manager), mate-panel, caja (file manager + desktop), mate-settings-daemon
-# Do NOT launch caja separately — a duplicate instance exits immediately, removing desktop rendering.
+# Ubuntu 24.04's MATE packages handle missing UDisks2 gracefully (warning only),
+# unlike Kali rolling which crashes and respawns caja at ~17 instances/second.
 cd "$HOME"
 DISPLAY=:${DISPLAY_NUM} mate-session &
 echo "MATE session started"
