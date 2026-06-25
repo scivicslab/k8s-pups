@@ -33,7 +33,7 @@ public class ServicePortalPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "192.168.5.23:32000/quarkus-service-portal:1.3.0-2604241525";
+        return "192.168.5.23:32000/quarkus-service-portal:2.2.2-2606251233";
     }
 
     @Override

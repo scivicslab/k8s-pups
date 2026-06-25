@@ -25,4 +25,4 @@ labels:
 images:
 - name: k8s-pups
   newName: 192.168.5.23:32000/k8s-pups
-  newTag: 0.1.0-2606251036
+  newTag: 0.1.0-2606251234
