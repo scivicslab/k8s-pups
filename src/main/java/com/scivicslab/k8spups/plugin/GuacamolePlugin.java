@@ -37,7 +37,7 @@ public class GuacamolePlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "10.0.0.23:32000/guacamole-desktop:0.1.2-2606251104";
+        return "${REGISTRY}/guacamole-desktop:0.1.3-2606271357";
     }
 
     @Override

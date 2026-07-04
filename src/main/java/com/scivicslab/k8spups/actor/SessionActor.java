@@ -338,7 +338,12 @@ public class SessionActor {
         if (info.userStorageType() != null && !info.userStorageType().isBlank()) {
             return info.userStorageType();
         }
-        return "longhorn";
+        // No per-user preference (user launched a tool before visiting Storage Settings):
+        // fall back to the configured default storage type instead of a hardcoded value,
+        // so the K8SPUPS_DEFAULT_STORAGE_TYPE default actually applies. A hardcoded
+        // "longhorn" here contradicted that default and silently placed new users on
+        // single-replica Longhorn volumes. Read from env to mirror resolveStorageSize().
+        return System.getenv().getOrDefault("K8SPUPS_DEFAULT_STORAGE_TYPE", "nfs-k8s");
     }
 
     private void onPodEvent(Watcher.Action action, Pod pod) {

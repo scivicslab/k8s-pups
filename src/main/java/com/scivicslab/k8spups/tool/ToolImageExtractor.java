@@ -16,7 +16,7 @@ public class ToolImageExtractor {
     /**
      * Extract ToolDescriptor from a container image.
      *
-     * @param imageRef Container image reference (e.g. "10.0.0.23:32000/ocr-file-manager:latest")
+     * @param imageRef Container image reference (e.g. "${REGISTRY}/ocr-file-manager:latest")
      * @return ToolDescriptor parsed from /tool-descriptor.yaml inside the image, or null if not found
      */
     public ToolDescriptor extractDescriptor(String imageRef) {

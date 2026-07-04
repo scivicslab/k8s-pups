@@ -5,3 +5,5 @@ com.scivicslab.k8spups.plugin.JupyterLabPlugin
 com.scivicslab.k8spups.plugin.FileBrowserPlugin
 com.scivicslab.k8spups.plugin.StorageSettingsPlugin
 com.scivicslab.k8spups.plugin.OcrPlugin
+com.scivicslab.k8spups.plugin.ComplianceTracerPlugin
+com.scivicslab.k8spups.plugin.Exdb2Plugin

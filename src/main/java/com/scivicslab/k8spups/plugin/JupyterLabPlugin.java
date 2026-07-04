@@ -36,7 +36,7 @@ public class JupyterLabPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "10.0.0.23:32000/jupyter-lab:4.5.5-2602281600";
+        return "${REGISTRY}/jupyter-lab:4.5.5-2602281600";
     }
 
     @Override

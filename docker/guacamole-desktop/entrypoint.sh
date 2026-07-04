@@ -56,6 +56,66 @@ echo "dbus started: $DBUS_SESSION_BUS_ADDRESS"
 # gsettings requires DBUS_SESSION_BUS_ADDRESS, which is now set.
 export DISPLAY=:${DISPLAY_NUM}
 
+# Set up the MATE panel layout on first launch only.
+# ubuntu-mate schema override sets default-layout='familiar' which references
+# brisk-menu/firefox applets not installed in this image, causing an empty panel.
+# We configure it once and write a flag so user customisations in later sessions
+# are not overwritten.
+PANEL_FLAG="$HOME/.config/mate-panel-auto-configured"
+if [ ! -f "$PANEL_FLAG" ]; then
+    gsettings set org.mate.panel toplevel-id-list "['top-panel', 'bottom-panel']"
+    gsettings set org.mate.panel object-id-list "['menu-bar', 'notification-area', 'clock', 'show-desktop', 'window-list', 'workspace-switcher']"
+
+    gsettings set org.mate.panel.toplevel:/org/mate/panel/toplevels/top-panel/ expand true
+    gsettings set org.mate.panel.toplevel:/org/mate/panel/toplevels/top-panel/ orientation 'top'
+    gsettings set org.mate.panel.toplevel:/org/mate/panel/toplevels/top-panel/ size 24
+
+    gsettings set org.mate.panel.toplevel:/org/mate/panel/toplevels/bottom-panel/ expand true
+    gsettings set org.mate.panel.toplevel:/org/mate/panel/toplevels/bottom-panel/ orientation 'bottom'
+    gsettings set org.mate.panel.toplevel:/org/mate/panel/toplevels/bottom-panel/ size 24
+
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/menu-bar/ object-type 'menu-bar'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/menu-bar/ toplevel-id 'top-panel'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/menu-bar/ position 0
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/menu-bar/ panel-right-stick false
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/menu-bar/ locked true
+
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/notification-area/ object-type 'applet'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/notification-area/ applet-iid 'NotificationAreaAppletFactory::NotificationArea'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/notification-area/ toplevel-id 'top-panel'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/notification-area/ position 10
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/notification-area/ panel-right-stick true
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/notification-area/ locked true
+
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/clock/ object-type 'applet'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/clock/ applet-iid 'ClockAppletFactory::ClockApplet'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/clock/ toplevel-id 'top-panel'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/clock/ position 0
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/clock/ panel-right-stick true
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/clock/ locked true
+
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/show-desktop/ object-type 'applet'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/show-desktop/ applet-iid 'WnckletFactory::ShowDesktopApplet'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/show-desktop/ toplevel-id 'bottom-panel'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/show-desktop/ position 0
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/show-desktop/ panel-right-stick false
+
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/window-list/ object-type 'applet'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/window-list/ applet-iid 'WnckletFactory::WindowListApplet'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/window-list/ toplevel-id 'bottom-panel'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/window-list/ position 10
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/window-list/ panel-right-stick false
+
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/workspace-switcher/ object-type 'applet'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/workspace-switcher/ applet-iid 'WnckletFactory::WorkspaceSwitcherApplet'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/workspace-switcher/ toplevel-id 'bottom-panel'
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/workspace-switcher/ position 0
+    gsettings set org.mate.panel.object:/org/mate/panel/objects/workspace-switcher/ panel-right-stick true
+
+    touch "$PANEL_FLAG"
+    echo "Panel layout configured (first launch)"
+fi
+
 # Theme and wallpaper
 gsettings set org.mate.background picture-filename \
     /usr/share/backgrounds/ubuntu-mate-noble/numbat_wallpaper_dimmed_3480x2160.jpg

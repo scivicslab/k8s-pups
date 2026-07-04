@@ -38,6 +38,8 @@ public class K8sPupsE2ERunner {
         new K8sPupsGuacamoleE2E().run();
         new K8sPupsServicePortalE2E().run();
         new K8sPupsServicePortalToolsE2E().run();
+        new K8sPupsExdb2E2E().run();
+        new K8sPupsComplianceTracerE2E().run();
         System.out.println("=== All E2E tests PASSED ===");
     }
 }

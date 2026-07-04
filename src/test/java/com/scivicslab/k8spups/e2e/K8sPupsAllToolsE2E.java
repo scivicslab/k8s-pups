@@ -61,7 +61,9 @@ class K8sPupsAllToolsE2E extends K8sPupsE2EBase {
         new ToolSpec("jupyter-lab",      ".jp-DirListing", SESSION_TIMEOUT_MS, true),
         new ToolSpec("guacamole",        "#content",       SESSION_TIMEOUT_MS, true),
         new ToolSpec("kali",             "#content",       SESSION_TIMEOUT_MS, true),
-        new ToolSpec("service-portal",   ".brand-name",    SESSION_TIMEOUT_MS, true)
+        new ToolSpec("service-portal",   ".brand-name",    SESSION_TIMEOUT_MS, true),
+        new ToolSpec("quarkus-exdb2",    ".brand-name",    SESSION_TIMEOUT_MS, true),
+        new ToolSpec("compliance-tracer",".brand-name",    SESSION_TIMEOUT_MS, true)
     );
 
     public static void main(String[] args) throws Exception {

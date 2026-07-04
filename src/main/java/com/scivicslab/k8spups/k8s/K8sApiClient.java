@@ -65,6 +65,11 @@ public class K8sApiClient {
     private final String basePath;
     private final String controllerUrl;
 
+    // Resolves each tool's image, allowing the plugin's compiled-in default to be
+    // overridden at runtime from a mounted ConfigMap (ToolImageReferencing_260630_oo01),
+    // so bumping a tool image needs no controller rebuild.
+    private final com.scivicslab.k8spups.plugin.ToolImageResolver imageResolver;
+
     public K8sApiClient(String userPodsNamespace, String httpRouteNamespace, List<String> gatewayNames,
                         String oidcIssuer, String oidcAuthorizationEndpoint, String oidcTokenEndpoint,
                         String oidcClientId, String oidcSecretName, String oidcJwksUri,
@@ -92,6 +97,11 @@ public class K8sApiClient {
         this.allowedNodes = allowedNodes;
         this.basePath = basePath;
         this.controllerUrl = controllerUrl;
+        var cfg = org.eclipse.microprofile.config.ConfigProvider.getConfig();
+        this.imageResolver = new com.scivicslab.k8spups.plugin.ToolImageResolver(
+                cfg.getOptionalValue("k8spups.tool-images-file", String.class)
+                        .orElse("/etc/k8s-pups/tool-images.properties"),
+                cfg.getOptionalValue("k8spups.registry", String.class).orElse(""));
     }
 
     // -- Pod operations --
@@ -1665,7 +1675,7 @@ public class K8sApiClient {
                 + "else echo 'PVC already has data, skipping seed'; fi";
             initContainers.add(new io.fabric8.kubernetes.api.model.ContainerBuilder()
                 .withName("seed-home")
-                .withImage(plugin.containerImage())
+                .withImage(imageResolver.resolve(plugin))
                 .withCommand("sh", "-c", seedCmd)
                 .withVolumeMounts(new VolumeMountBuilder()
                     .withName("user-data")
@@ -1702,7 +1712,7 @@ public class K8sApiClient {
                 .withAffinity(buildNodeAffinity())
                 .addNewContainer()
                     .withName("tool")
-                    .withImage(plugin.containerImage())
+                    .withImage(imageResolver.resolve(plugin))
                     .withCommand(plugin.containerCommand().isEmpty() ? null : plugin.containerCommand())
                     .addNewPort()
                         .withContainerPort(plugin.containerPort())
@@ -1811,7 +1821,7 @@ public class K8sApiClient {
                 // Container 1: service gateway (e.g. Guacamole)
                 .addNewContainer()
                     .withName("tool")
-                    .withImage(plugin.containerImage())
+                    .withImage(imageResolver.resolve(plugin))
                     .withCommand(sidecar.toolCommand())
                     .addNewPort()
                         .withContainerPort(plugin.containerPort())
@@ -1835,7 +1845,7 @@ public class K8sApiClient {
                 // Container 2: workspace desktop (e.g. VNC + MATE)
                 .addNewContainer()
                     .withName("desktop")
-                    .withImage(plugin.containerImage())
+                    .withImage(imageResolver.resolve(plugin))
                     .withCommand(sidecar.desktopCommand())
                     .withEnv(desktopEnvVars)
                     .withNewResources()

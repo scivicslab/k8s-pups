@@ -32,7 +32,7 @@ public class KaliPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "10.0.0.23:32000/kali-desktop:0.2.0-2606251301";
+        return "${REGISTRY}/kali-desktop:0.2.3-2606271338";
     }
 
     @Override

@@ -34,7 +34,7 @@ public class FileBrowserPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "ghcr.io/gtsteffaniak/filebrowser:stable";
+        return "${REGISTRY}/filebrowser:v1.4.0-stable";
     }
 
     @Override

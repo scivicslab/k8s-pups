@@ -35,7 +35,7 @@ public class OcrPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "10.0.0.23:32000/yomitoku-ocr-batch:0.1.0-2606151703";
+        return "${REGISTRY}/yomitoku-ocr-batch:0.1.0-2606151703";
     }
 
     @Override
