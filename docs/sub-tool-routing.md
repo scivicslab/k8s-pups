@@ -2,7 +2,7 @@
 
 ## 概要
 
-`quarkus-service-portal` のようなマルチプロセスツールは、Pod 内で複数のサブツール
+`quarkus-ai-workspace` のようなマルチプロセスツールは、Pod 内で複数のサブツール
 （chat-ui、MCP Gateway、Workflow Editor 等）を子プロセスとして起動する。
 各サブツールはポッド内部の `localhost:{port}` で待ち受けるが、ブラウザからは
 直接アクセスできない。
@@ -26,7 +26,7 @@ Service: pups-subtool-{parentSessionId}-{toolName}-{port}
   │ selector:  session={parentSessionId}
   │ port:      {port} → targetPort: {port}
   ▼
-user Pod（quarkus-service-portal）
+user Pod（quarkus-ai-workspace）
   └─ localhost:{port}（chat-ui、workflow-editor 等）
 ```
 

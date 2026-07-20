@@ -12,7 +12,7 @@ import java.util.logging.Logger;
 /**
  * REST API for dynamic sub-tool routing registration.
  *
- * Called by quarkus-service-portal (running inside a user Pod) when a child
+ * Called by quarkus-ai-workspace (running inside a user Pod) when a child
  * process (e.g. quarkus-chat-ui) becomes READY or stops. k8s-pups creates or
  * deletes a Service + HTTPRoute so the sub-tool is reachable from the browser.
  *

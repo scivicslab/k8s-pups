@@ -3,15 +3,15 @@ package com.scivicslab.k8spups.e2e;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
 
-class K8sPupsServicePortalInspect extends K8sPupsE2EBase {
+class K8sPupsAiWorkspaceInspect extends K8sPupsE2EBase {
 
-    public static void main(String[] args) throws Exception { new K8sPupsServicePortalInspect().run(); }
+    public static void main(String[] args) throws Exception { new K8sPupsAiWorkspaceInspect().run(); }
 
     void run() throws Exception {
         setup();
         try {
             login();
-            String sessionPath = waitForOpenToolButton("service-portal");
+            String sessionPath = waitForOpenToolButton("ai-workspace");
 
             page.navigate(sessionOrigin() + sessionPath);
             page.waitForLoadState(LoadState.NETWORKIDLE,

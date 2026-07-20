@@ -36,8 +36,8 @@ public class K8sPupsE2ERunner {
         new K8sPupsFileBrowserE2E().run();
         new K8sPupsJupyterLabE2E().run();
         new K8sPupsGuacamoleE2E().run();
-        new K8sPupsServicePortalE2E().run();
-        new K8sPupsServicePortalToolsE2E().run();
+        new K8sPupsAiWorkspaceE2E().run();
+        new K8sPupsAiWorkspaceToolsE2E().run();
         new K8sPupsExdb2E2E().run();
         new K8sPupsComplianceTracerE2E().run();
         System.out.println("=== All E2E tests PASSED ===");

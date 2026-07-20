@@ -14,7 +14,7 @@ import java.util.List;
  * Comprehensive E2E: tests every tool in k8s-pups.
  *
  * For each HTTP tool (storage-settings, file-browser, jupyter-lab, guacamole,
- * kali, service-portal):
+ * kali, ai-workspace):
  *   1. Launch the tool.
  *   2. Wait for the Open Tool button (pod is READY).
  *   3. Navigate to the session URL and verify a known UI element is present.
@@ -61,7 +61,7 @@ class K8sPupsAllToolsE2E extends K8sPupsE2EBase {
         new ToolSpec("jupyter-lab",      ".jp-DirListing", SESSION_TIMEOUT_MS, true),
         new ToolSpec("guacamole",        "#content",       SESSION_TIMEOUT_MS, true),
         new ToolSpec("kali",             "#content",       SESSION_TIMEOUT_MS, true),
-        new ToolSpec("service-portal",   ".brand-name",    SESSION_TIMEOUT_MS, true),
+        new ToolSpec("ai-workspace",   ".brand-name",    SESSION_TIMEOUT_MS, true),
         new ToolSpec("quarkus-exdb2",    ".brand-name",    SESSION_TIMEOUT_MS, true),
         new ToolSpec("compliance-tracer",".brand-name",    SESSION_TIMEOUT_MS, true)
     );

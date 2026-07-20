@@ -1,4 +1,4 @@
-com.scivicslab.k8spups.plugin.ServicePortalPlugin
+com.scivicslab.k8spups.plugin.AiWorkspacePlugin
 com.scivicslab.k8spups.plugin.GuacamolePlugin
 com.scivicslab.k8spups.plugin.KaliPlugin
 com.scivicslab.k8spups.plugin.JupyterLabPlugin

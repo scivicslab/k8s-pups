@@ -5,12 +5,12 @@ import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
 
 /**
- * E2E: verifies that service-portal launched from k8s-pups can start and use
+ * E2E: verifies that ai-workspace launched from k8s-pups can start and use
  * each sub-tool (html-saurus, chat-ui, turing-workflow-editor).
  *
  * Each sub-tool registers with the k8s-pups controller via POST /api/sub-tool/{sessionId},
  * which creates a dedicated Service + HTTPRoute. The browser reaches each sub-tool
- * directly via Envoy Gateway — service-portal does NOT proxy sub-tool traffic.
+ * directly via Envoy Gateway — ai-workspace does NOT proxy sub-tool traffic.
  *
  * html-saurus requires a workspace directory with Docusaurus projects (doc_* dirs).
  * When the NFS workspace is not mounted (e.g. admin has no LDAP account),
@@ -18,22 +18,22 @@ import com.microsoft.playwright.options.LoadState;
  *
  * Run via K8sPupsE2ERunner or standalone main().
  */
-class K8sPupsServicePortalToolsE2E extends K8sPupsE2EBase {
+class K8sPupsAiWorkspaceToolsE2E extends K8sPupsE2EBase {
 
     public static void main(String[] args) throws Exception {
-        new K8sPupsServicePortalToolsE2E().run();
+        new K8sPupsAiWorkspaceToolsE2E().run();
     }
 
     private String portalUrl;
 
     void run() throws Exception {
-        System.out.println("--- K8sPupsServicePortalToolsE2E ---");
+        System.out.println("--- K8sPupsAiWorkspaceToolsE2E ---");
         setup();
         try {
             login();
-            stopExistingSessionIfAny("service-portal");
-            launchToolSession("service-portal");
-            String sessionPath = waitForOpenToolButton("service-portal");
+            stopExistingSessionIfAny("ai-workspace");
+            launchToolSession("ai-workspace");
+            String sessionPath = waitForOpenToolButton("ai-workspace");
             portalUrl = sessionOrigin() + sessionPath;
 
             navigateToSession(portalUrl);
@@ -41,17 +41,17 @@ class K8sPupsServicePortalToolsE2E extends K8sPupsE2EBase {
                     new Page.WaitForLoadStateOptions().setTimeout(SESSION_TIMEOUT_MS));
             page.waitForSelector(".brand-name",
                     new Page.WaitForSelectorOptions().setTimeout(SESSION_TIMEOUT_MS));
-            LOG.info("service-portal dashboard ready: " + portalUrl);
+            LOG.info("ai-workspace dashboard ready: " + portalUrl);
 
             tryTestHtmlSaurus();
             testChatUi();
             testTuringWorkflowEditor();
 
-            stopExistingSessionIfAny("service-portal");
+            stopExistingSessionIfAny("ai-workspace");
         } finally {
             teardown();
         }
-        System.out.println("K8sPupsServicePortalToolsE2E: PASSED");
+        System.out.println("K8sPupsAiWorkspaceToolsE2E: PASSED");
     }
 
     // --- sub-tool test scenarios ---
@@ -154,7 +154,7 @@ class K8sPupsServicePortalToolsE2E extends K8sPupsE2EBase {
     }
 
     /**
-     * Polls /api/status on the service-portal page until the named sub-tool is READY,
+     * Polls /api/status on the ai-workspace page until the named sub-tool is READY,
      * then returns its accessUrl (e.g. /session/{id}-quarkus-chat-ui-28100/).
      *
      * k8s-pups registers the sub-tool's HTTPRoute asynchronously after the process
@@ -184,7 +184,7 @@ class K8sPupsServicePortalToolsE2E extends K8sPupsE2EBase {
 
     /**
      * Clicks btn-stop on the session card for the named sub-tool and waits for the
-     * page to reload (service-portal calls location.reload() after stopping).
+     * page to reload (ai-workspace calls location.reload() after stopping).
      */
     private void stopSubTool(String toolName) {
         Locator stopBtn = page.locator(".session-card")

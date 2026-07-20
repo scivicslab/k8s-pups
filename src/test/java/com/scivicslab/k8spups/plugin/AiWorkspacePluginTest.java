@@ -7,21 +7,21 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for ServicePortalPlugin configuration values.
+ * Unit tests for AiWorkspacePlugin configuration values.
  */
-class ServicePortalPluginTest {
+class AiWorkspacePluginTest {
 
-    private ServicePortalPlugin plugin;
+    private AiWorkspacePlugin plugin;
 
     @BeforeEach
     void setUp() {
-        plugin = new ServicePortalPlugin();
+        plugin = new AiWorkspacePlugin();
     }
 
     @Test
-    @DisplayName("name is service-portal")
+    @DisplayName("name is ai-workspace")
     void name() {
-        assertEquals("service-portal", plugin.name());
+        assertEquals("ai-workspace", plugin.name());
     }
 
     @Test
@@ -31,10 +31,10 @@ class ServicePortalPluginTest {
     }
 
     @Test
-    @DisplayName("containerImage references quarkus-service-portal")
+    @DisplayName("containerImage references quarkus-ai-workspace")
     void containerImage() {
-        assertTrue(plugin.containerImage().contains("quarkus-service-portal"),
-            "image must reference quarkus-service-portal");
+        assertTrue(plugin.containerImage().contains("quarkus-ai-workspace"),
+            "image must reference quarkus-ai-workspace");
         assertFalse(plugin.containerImage().endsWith(":latest"),
             "image must use a fixed version tag, not :latest");
     }

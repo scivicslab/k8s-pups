@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Tool plugin for the AI workspace (quarkus-service-portal).
+ * Tool plugin for the AI workspace (quarkus-ai-workspace).
  *
  * One Pod = one AI workspace. The Pod bundles all tool JARs
  * (mcp-gateway, chat-ui, html-saurus, turing-workflow-editor)
@@ -14,11 +14,11 @@ import java.util.Map;
  * Multi-user / multi-workspace management is k8s-pups' responsibility.
  * The portal itself is single-user.
  */
-public class ServicePortalPlugin implements ToolPlugin {
+public class AiWorkspacePlugin implements ToolPlugin {
 
     @Override
     public String name() {
-        return "service-portal";
+        return "ai-workspace";
     }
 
     @Override
@@ -33,7 +33,7 @@ public class ServicePortalPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/quarkus-service-portal:2.3.0-2606251450";
+        return "${REGISTRY}/quarkus-ai-workspace:2.3.0-2606251450";
     }
 
     @Override
@@ -109,11 +109,11 @@ public class ServicePortalPlugin implements ToolPlugin {
     public Map<String, String> environmentVariables() {
         Map<String, String> env = new HashMap<>();
         // Inject DEFAULT_PROVIDER so the chat-ui defaults to the correct LLM provider.
-        // Falls back to "claude" if K8SPUPS_SERVICE_PORTAL_DEFAULT_PROVIDER is not set.
-        String defaultProvider = System.getenv().getOrDefault("K8SPUPS_SERVICE_PORTAL_DEFAULT_PROVIDER", "claude");
+        // Falls back to "claude" if K8SPUPS_AI_WORKSPACE_DEFAULT_PROVIDER is not set.
+        String defaultProvider = System.getenv().getOrDefault("K8SPUPS_AI_WORKSPACE_DEFAULT_PROVIDER", "claude");
         env.put("DEFAULT_PROVIDER", defaultProvider);
         // Inject VLLM_ENDPOINT when a local LLM endpoint is configured for this deployment.
-        String vllmEndpoint = System.getenv("K8SPUPS_SERVICE_PORTAL_VLLM_ENDPOINT");
+        String vllmEndpoint = System.getenv("K8SPUPS_AI_WORKSPACE_VLLM_ENDPOINT");
         if (vllmEndpoint != null && !vllmEndpoint.isBlank()) {
             env.put("VLLM_ENDPOINT", vllmEndpoint);
         }
