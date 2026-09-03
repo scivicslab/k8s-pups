@@ -7,3 +7,4 @@ com.scivicslab.k8spups.plugin.StorageSettingsPlugin
 com.scivicslab.k8spups.plugin.OcrPlugin
 com.scivicslab.k8spups.plugin.ComplianceTracerPlugin
 com.scivicslab.k8spups.plugin.Exdb2Plugin
+com.scivicslab.k8spups.plugin.EnglishToolkitPlugin
