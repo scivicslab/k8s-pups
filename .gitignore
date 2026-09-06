@@ -11,3 +11,6 @@ node_modules/
 
 # Stray build artifact copied to repo root (the real build output is under target/)
 /k8s-pups.jar
+static-html/
+search-index/
+search-embedding/
