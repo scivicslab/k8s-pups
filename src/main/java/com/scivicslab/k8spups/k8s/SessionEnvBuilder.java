@@ -54,6 +54,20 @@ public class SessionEnvBuilder {
             .withName("PUPS_CONTROLLER_URL")
             .withValue(controllerUrl)
             .build());
+        // Who the session belongs to and which storage type backs its data. A tool that hands a
+        // path on that storage to another service (English Toolkit -> transcript server, which
+        // mounts the NFS-backed storage read-only) needs both to name the file as that service
+        // sees it, and to know when the storage is not shared at all (Longhorn).
+        envVars.add(new EnvVarBuilder()
+            .withName("PUPS_USER_ID")
+            .withValue(info.userId())
+            .build());
+        if (info.userStorageType() != null && !info.userStorageType().isBlank()) {
+            envVars.add(new EnvVarBuilder()
+                .withName("PUPS_STORAGE_TYPE")
+                .withValue(info.userStorageType())
+                .build());
+        }
 
         // tool registry config overrides plugin-defined env
         if (info.toolConfigEnv() != null) {
