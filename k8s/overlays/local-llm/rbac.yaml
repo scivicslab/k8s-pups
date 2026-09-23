@@ -64,8 +64,15 @@ rules:
     resources: ["pods"]
     verbs: ["list"]
   - apiGroups: [""]
-    resources: ["persistentvolumes", "persistentvolumeclaims", "resourcequotas"]
+    resources: ["persistentvolumeclaims", "resourcequotas"]
     verbs: ["list"]
+  # NFS-backed user storage (nfs-k8s, nfs-home) is a hand-built PersistentVolume
+  # bound to the user's PVC, and PersistentVolume is cluster-scoped. Without these
+  # verbs the controller cannot create a user's default storage, so the first
+  # launch of any tool fails.
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "create", "delete"]
   - apiGroups: ["metrics.k8s.io"]
     resources: ["nodes"]
     verbs: ["get", "list"]

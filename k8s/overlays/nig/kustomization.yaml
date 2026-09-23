@@ -27,5 +27,5 @@ labels:
 # NIG cluster container images
 images:
 - name: k8s-pups
-  newName: 10.96.0.100:5000/k8s-pups
-  newTag: 0.1.0-2603251700
+  newName: 192.168.5.13:32000/k8s-pups
+  newTag: 0.1.0-2608040545

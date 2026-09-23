@@ -44,17 +44,45 @@ spec:
           readOnly: true
         env:
         - name: QUARKUS_OIDC_AUTH_SERVER_URL
-          value: "http://keycloak-unit2.sc-account.svc:8080/sc-auth/realms/sc-account"
+          value: "http://keycloak.sc-account.svc:8080/sc-auth/realms/sc-account"
         - name: K8SPUPS_UNLIMITED_USERS
-          value: "admin,devteam"
+          value: "testadmin,devteam"
+        - name: K8SPUPS_ENABLED_PLUGINS
+          value: "ai-workspace,guacamole,kali,jupyter-lab,file-browser,storage-settings,pdf-ocr,compliance-tracer,quarkus-exdb2"
+        - name: K8SPUPS_USER_PODS_ALLOWED_NODES
+          value: "stonefly513,stonefly522"
+        # Tool images are named ${REGISTRY}/<image>; without this they resolve to the
+        # placeholder registry in application.properties and no tool Pod can pull.
+        - name: K8SPUPS_REGISTRY
+          value: "192.168.5.13:32000"
+        # Must name the namespace holding the Gateway that serves /pups. The controller
+        # creates sub-tool HTTPRoutes there, and the route-manager Role is bound there.
         - name: K8SPUPS_HTTPROUTE_NAMESPACE
-          value: "sc-account"
+          value: "k8s-pups"
         - name: K8SPUPS_GATEWAY_NAMES
-          value: "sc-account-gateway"
+          value: "k8s-pups-gateway"
+        # NFS server for user storage. The default in application.properties is an
+        # address from the previous network and does not answer.
+        - name: K8SPUPS_NFS_K8S_SERVER
+          value: "192.168.5.20"
+        - name: K8SPUPS_WORKSPACE_NFS_SERVER
+          value: "192.168.5.20"
         - name: K8SPUPS_WORKSPACE_LDAP_URL
-          value: "ldap://ldap.example.internal.svc:389"
+          value: "ldap://ldap-unit2.sc-account.svc:389"
         - name: K8SPUPS_WORKSPACE_LDAP_BASE_DN
-          value: "dc=example,dc=com"
+          value: "dc=nig,dc=ac,dc=jp"
+        # Logout builds the Keycloak end-session URL from these. The defaults point at
+        # a host that no longer exists, which made logout hang.
+        - name: K8SPUPS_SESSION_OIDC_ISSUER
+          value: "https://192.168.5.25/sc-auth/realms/sc-account"
+        - name: K8SPUPS_SESSION_OIDC_AUTHORIZATION_ENDPOINT
+          value: "https://192.168.5.25/sc-auth/realms/sc-account/protocol/openid-connect/auth"
+        - name: K8SPUPS_SESSION_OIDC_TOKEN_ENDPOINT
+          value: "http://keycloak.sc-account.svc:8080/sc-auth/realms/sc-account/protocol/openid-connect/token"
+        - name: K8SPUPS_SESSION_OIDC_JWKS_URI
+          value: "http://keycloak.sc-account.svc:8080/sc-auth/realms/sc-account/protocol/openid-connect/certs"
+        - name: K8SPUPS_SESSION_OIDC_REDIRECT_BASE_URL
+          value: "https://192.168.5.25"
         ports:
         - containerPort: 8080
           name: http

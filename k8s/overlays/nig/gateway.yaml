@@ -1,4 +1,4 @@
-# EnvoyProxy: pin NodePort 31087 for HAProxy routing
+# EnvoyProxy: pin NodePort 31084 for HAProxy routing (backend k8s_pups_gateway)
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy
 metadata:
@@ -19,7 +19,7 @@ spec:
             spec:
               ports:
               - name: http-80
-                nodePort: 31087
+                nodePort: 31084
                 port: 80
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -40,7 +40,7 @@ spec:
     protocol: HTTP
     allowedRoutes:
       namespaces:
-        from: Same
+        from: All
 ---
 # HTTPRoute: /pups -> k8s-pups-controller:8080
 # RequestHeaderModifier sets X-Forwarded-Proto because Envoy Gateway
@@ -55,7 +55,9 @@ spec:
   parentRefs:
   - name: k8s-pups-gateway
   rules:
-  - matches:
+  - timeouts:
+      request: 3600s
+    matches:
     - path:
         type: PathPrefix
         value: /pups
@@ -65,6 +67,30 @@ spec:
         set:
         - name: X-Forwarded-Proto
           value: https
+    backendRefs:
+    - name: k8s-pups-controller
+      port: 8080
+  # Tools inside a session Pod generate asset and API URLs from PUPS_SESSION_PATH,
+  # which is /session/{id}/ and carries no deployment root path. Requests therefore
+  # arrive at the gateway without the /pups prefix; this rule puts it back so they
+  # reach the controller's session proxy. Without it the tool page loads no assets.
+  - timeouts:
+      request: 3600s
+    matches:
+    - path:
+        type: PathPrefix
+        value: /session
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - name: X-Forwarded-Proto
+          value: https
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /pups/session
     backendRefs:
     - name: k8s-pups-controller
       port: 8080
