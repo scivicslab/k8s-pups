@@ -104,6 +104,42 @@ public class K8sApiClient {
                 cfg.getOptionalValue("k8spups.registry", String.class).orElse(""));
     }
 
+    // -- Shared services (cluster-wide Deployments, see SharedService) --
+
+    /** State of a shared service's Deployment as the dashboard shows it. */
+    public enum SharedServiceState { RUNNING, STARTING, DOWN, UNKNOWN }
+
+    /**
+     * RUNNING when the Deployment has a ready replica, STARTING when it asks for replicas that are
+     * not ready yet, DOWN when it is scaled to 0 or absent, UNKNOWN when the API could not be read
+     * (RBAC, network). Read fresh on every call; the dashboard renders it on page load.
+     */
+    public SharedServiceState sharedServiceState(String namespace, String deployment) {
+        try {
+            io.fabric8.kubernetes.api.model.apps.Deployment d =
+                client.apps().deployments().inNamespace(namespace).withName(deployment).get();
+            if (d == null) {
+                return SharedServiceState.DOWN;
+            }
+            int wanted = d.getSpec() != null && d.getSpec().getReplicas() != null ? d.getSpec().getReplicas() : 0;
+            int ready = d.getStatus() != null && d.getStatus().getReadyReplicas() != null
+                ? d.getStatus().getReadyReplicas() : 0;
+            if (ready > 0) {
+                return SharedServiceState.RUNNING;
+            }
+            return wanted > 0 ? SharedServiceState.STARTING : SharedServiceState.DOWN;
+        } catch (Exception e) {
+            LOG.warning("Cannot read Deployment " + namespace + "/" + deployment + ": " + e.getMessage());
+            return SharedServiceState.UNKNOWN;
+        }
+    }
+
+    /** Scale a shared service's Deployment (Launch = 1, Stop = 0). Idempotent. */
+    public void scaleSharedService(String namespace, String deployment, int replicas) {
+        client.apps().deployments().inNamespace(namespace).withName(deployment).scale(replicas);
+        LOG.info("Scaled Deployment " + namespace + "/" + deployment + " to " + replicas);
+    }
+
     // -- Pod operations --
 
     public CompletableFuture<Pod> createPod(SessionInfo info) {
@@ -682,10 +718,12 @@ public class K8sApiClient {
     }
 
     /**
-     * Returns the PV name for a shared NFS volume (same as PVC name).
+     * Returns the PV name for a shared NFS volume. Carries the user-pods namespace for
+     * the same reason as {@link #userPvName}: PVs are cluster-scoped and two instances
+     * can hold the same user names.
      */
     private String sharedPvName(String ownerUserId, String sourceUserId) {
-        return sharedPvcName(ownerUserId, sourceUserId);
+        return sharedPvcName(ownerUserId, sourceUserId) + "-" + userPodsNamespace;
     }
 
     /**
@@ -854,10 +892,19 @@ public class K8sApiClient {
 
     /**
      * Returns the PV name for NFS-based storage types (nfs-k8s, nfs-home).
-     * PV is cluster-scoped; name matches PVC for easy pairing.
+     *
+     * <p>PersistentVolume is cluster-scoped while the PVC is namespaced, so the name
+     * carries the user-pods namespace. Two k8s-pups instances (for example /pups and
+     * /local-llm) share the cluster and can hold the same user name; without the
+     * namespace both instances derive the same PV name, and the second instance's PVC
+     * stays Pending with "already bound to a different claim".
+     *
+     * <p>PVs created before this carry the short name. They keep working: their PVC
+     * already exists and stays bound, and the controller only builds a PV name when it
+     * has to create one.
      */
     private String userPvName(String userId, String storageType) {
-        return userPvcName(userId, storageType);
+        return userPvcName(userId, storageType) + "-" + userPodsNamespace;
     }
 
     /**
@@ -1511,8 +1558,13 @@ public class K8sApiClient {
         //   nfs-home  -> workspace NFS PVC (LDAP home directory), run as LDAP UID
         //   longhorn  -> Longhorn PVC (RWO block storage)
         //   nfs-k8s   -> NFS k8s-dedicated PVC (RWX)
+        // SessionActor resolves the storage type and writes it into SessionInfo before
+        // creating the Pod. This fallback only covers callers that build a Pod without
+        // going through SessionActor, and must agree with SessionActor.resolveStorageType():
+        // a hardcoded "longhorn" here mounted a PVC that was never provisioned.
         String storageType = info.userStorageType() != null && !info.userStorageType().isBlank()
-            ? info.userStorageType() : "longhorn";
+            ? info.userStorageType()
+            : System.getenv().getOrDefault("K8SPUPS_DEFAULT_STORAGE_TYPE", "nfs-k8s");
         boolean useNfsHome = "nfs-home".equals(storageType)
             && plugin.workspaceEnabled() && info.workspaceInfo() != null;
 

@@ -133,6 +133,18 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.enabled-plugins", defaultValue = "")
     String enabledPluginsConfig;
 
+    /** Names of the shared services to show (each described by k8spups.shared-service.<name>.*). */
+    @ConfigProperty(name = "k8spups.shared-services", defaultValue = "")
+    String sharedServicesConfig;
+
+    @ConfigProperty(name = "k8spups.admin-users", defaultValue = "")
+    String adminUsers;
+
+    @ConfigProperty(name = "k8spups.admin-roles", defaultValue = "admin")
+    String adminRoles;
+
+    private List<com.scivicslab.k8spups.plugin.SharedService> sharedServices = List.of();
+
     private ActorSystem actorSystem;
     private ActorRef<SessionManagerActor> sessionManager;
     private Scheduler scheduler;
@@ -166,6 +178,13 @@ public class K8sPupsActorSystem {
         }
         plugins.forEach((id, p) ->
             LOG.info("Registered tool plugin: " + id + " (" + p.displayName() + ")"));
+
+        // Shared services: cluster-wide Deployments shown as cards, never as sessions.
+        var cfg = org.eclipse.microprofile.config.ConfigProvider.getConfig();
+        sharedServices = com.scivicslab.k8spups.plugin.SharedService.allFromConfig(
+            sharedServicesConfig, key -> cfg.getOptionalValue(key, String.class));
+        sharedServices.forEach(svc ->
+            LOG.info("Registered shared service: " + svc.name() + " -> " + svc.clusterUrl()));
 
         // Create ActorSystem
         actorSystem = new ActorSystem("k8s-pups");
@@ -346,6 +365,25 @@ public class K8sPupsActorSystem {
 
     public K8sApiClient getK8sClient() {
         return k8sClient;
+    }
+
+    public List<com.scivicslab.k8spups.plugin.SharedService> getSharedServices() {
+        return sharedServices;
+    }
+
+    /** The shared service named {@code name}, or null. */
+    public com.scivicslab.k8spups.plugin.SharedService getSharedService(String name) {
+        for (var svc : sharedServices) {
+            if (svc.name().equals(name)) {
+                return svc;
+            }
+        }
+        return null;
+    }
+
+    /** Whether this user may Launch / Stop shared services (k8spups.admin-users / admin-roles). */
+    public boolean isAdmin(String userId, List<String> roles) {
+        return com.scivicslab.k8spups.tool.SharedServiceAccess.isAdmin(userId, roles, adminUsers, adminRoles);
     }
 
     public String getControllerNamespace() {

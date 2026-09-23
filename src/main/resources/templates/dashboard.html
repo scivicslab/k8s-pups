@@ -191,6 +191,13 @@
         .tool-name  { font-size: 17px; font-weight: 700; margin-bottom: 7px; }
         .tool-desc  { font-size: 13px; color: var(--muted); line-height: 1.6; flex: 1; margin-bottom: 20px; }
         .tool-card form { margin: 0; }
+        /* Shared service card: state badge in the title, admin buttons side by side under Open */
+        .shared-card .tool-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .shared-note { font-size: 12px; color: var(--muted); }
+        .shared-down { font-size: 12px; color: #991B1B; }
+        .shared-admin { display: flex; gap: 8px; margin-top: 8px; }
+        .shared-admin form { flex: 1; }
+        .btn[disabled] { opacity: .45; cursor: not-allowed; pointer-events: none; }
         .tool-card .btn { width: 100%; justify-content: center; }
         .profile-select {
             width: 100%; padding: 8px 12px; border-radius: 8px;
@@ -436,6 +443,32 @@
                 {/if}
                 <button type="submit" class="btn btn-primary">Launch</button>
             </form>
+        </div>
+        {/for}
+        {#for ss in sharedServices}
+        <div class="tool-card shared-card">
+            <div class="tool-icon"><img src="icons/{ss.service.name}.png" alt="{ss.service.displayName}" onerror="this.style.display='none'"></div>
+            <div class="tool-name">{ss.service.displayName} <span class="badge badge-{ss.badge}">{ss.state}</span></div>
+            <div class="tool-desc">{ss.service.description}<br>
+                <span class="shared-note">Shared by everyone on this cluster: one instance, not a session.</span>
+                {#if !ss.running}<br><span class="shared-down">Not running. Contact an administrator.</span>{/if}
+            </div>
+            {#if ss.running}
+            <a class="btn btn-open" href="service/{ss.service.name}/" target="_blank">Open</a>
+            {#else}
+            <button type="button" class="btn btn-open" disabled>Open</button>
+            {/if}
+            {#if isAdmin}
+            <div class="shared-admin">
+                <form method="post" action="service/{ss.service.name}/launch">
+                    <button type="submit" class="btn btn-primary" {#if ss.running || ss.starting}disabled{/if}>Launch</button>
+                </form>
+                <form method="post" action="service/{ss.service.name}/stop"
+                      onsubmit="return confirm('Stop {ss.service.displayName}? Every tool that uses it loses it until it is launched again.')">
+                    <button type="submit" class="btn btn-stop" {#if !ss.running && !ss.starting}disabled{/if}>Stop</button>
+                </form>
+            </div>
+            {/if}
         </div>
         {/for}
         {#for dt in dynamicTools}

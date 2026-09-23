@@ -5,6 +5,8 @@ import com.scivicslab.k8spups.actor.SessionManagerActor;
 import com.scivicslab.k8spups.actor.SessionStatus;
 import com.scivicslab.k8spups.actor.SessionSummary;
 import com.scivicslab.k8spups.k8s.MountSpec;
+import com.scivicslab.k8spups.k8s.K8sApiClient;
+import com.scivicslab.k8spups.plugin.SharedService;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
 import com.scivicslab.k8spups.plugin.UserParameter;
 import com.scivicslab.k8spups.tool.JwtRoleExtractor;
@@ -260,6 +262,15 @@ public class DashboardResource {
         data.put("sharedPvcs", sharedPvcs);
         data.put("basePath", basePath);
 
+        // Shared services: state read now, Launch / Stop only for administrators.
+        List<SharedServiceView> sharedServices = new ArrayList<>();
+        for (SharedService svc : actorSystem.getSharedServices()) {
+            sharedServices.add(SharedServiceView.of(svc,
+                actorSystem.getK8sClient().sharedServiceState(svc.namespace(), svc.deployment())));
+        }
+        data.put("sharedServices", sharedServices);
+        data.put("isAdmin", actorSystem.isAdmin(userId, userRoles));
+
         return dashboard.data(data).render();
     }
 
@@ -442,8 +453,12 @@ public class DashboardResource {
             @PathParam("sessionId") String sessionId,
             @PathParam("subPath") String subPath,
             @Context HttpHeaders inHeaders,
-            @Context jakarta.ws.rs.core.UriInfo uriInfo) {
-        return proxySession(sessionId, subPath, "DELETE", null, inHeaders, uriInfo);
+            @Context jakarta.ws.rs.core.UriInfo uriInfo,
+            byte[] body) {
+        // DELETE carries a body in some tool APIs (file-browser sends the list of items
+        // to remove to /api/resources/bulk). Dropping it made the tool answer 400 and
+        // the file stayed, so forward it like the other methods.
+        return proxySession(sessionId, subPath, "DELETE", body, inHeaders, uriInfo);
     }
 
     @PATCH
@@ -509,6 +524,14 @@ public class DashboardResource {
             + targetPath
             + (rawQuery != null && !rawQuery.isEmpty() ? "?" + rawQuery : "");
 
+        return forward(targetUrl, method, body, inHeaders, "session " + sessionId);
+    }
+
+    /**
+     * Forward one request to {@code targetUrl} and stream the answer back. Shared by the session
+     * proxy and the shared-service proxy; {@code what} names the target in the log.
+     */
+    private Response forward(String targetUrl, String method, byte[] body, HttpHeaders inHeaders, String what) {
         try {
             HttpRequest.Builder rb = HttpRequest.newBuilder().uri(URI.create(targetUrl));
             HttpRequest.BodyPublisher publisher = (body != null && body.length > 0)
@@ -556,10 +579,106 @@ public class DashboardResource {
             return responseBuilder.build();
 
         } catch (Exception e) {
-            LOG.severe("Proxy error for session " + sessionId + " path=" + targetUrl
+            LOG.severe("Proxy error for " + what + " path=" + targetUrl
                 + ": [" + e.getClass().getSimpleName() + "] " + e);
             return Response.serverError().entity("Proxy error: " + e).build();
         }
+    }
+
+    // ── Shared services (cluster-wide Deployments; see SharedService) ────────
+
+    /** One shared service as the dashboard card shows it. */
+    public record SharedServiceView(SharedService service, String state, String badge,
+                                    boolean running, boolean starting) {
+        static SharedServiceView of(SharedService svc, K8sApiClient.SharedServiceState st) {
+            String badge = switch (st) {
+                case RUNNING -> "READY";
+                case STARTING -> "STARTING";
+                case DOWN -> "STOPPED";
+                case UNKNOWN -> "FAILED";
+            };
+            return new SharedServiceView(svc, st.name(), badge,
+                st == K8sApiClient.SharedServiceState.RUNNING,
+                st == K8sApiClient.SharedServiceState.STARTING);
+        }
+    }
+
+    /** Open: proxy {@code /service/{name}/...} to the service's ClusterIP for any logged-in user. */
+    @GET
+    @Path("/service/{name}/{subPath: .*}")
+    @Authenticated
+    @Blocking
+    public Response proxySharedServiceGet(@PathParam("name") String name,
+                                          @PathParam("subPath") String subPath,
+                                          @Context HttpHeaders inHeaders,
+                                          @Context jakarta.ws.rs.core.UriInfo uriInfo) {
+        return proxySharedService(name, subPath, "GET", null, inHeaders, uriInfo);
+    }
+
+    @POST
+    @Path("/service/{name}/{subPath: .*}")
+    @Authenticated
+    @Blocking
+    public Response proxySharedServicePost(@PathParam("name") String name,
+                                           @PathParam("subPath") String subPath,
+                                           @Context HttpHeaders inHeaders,
+                                           @Context jakarta.ws.rs.core.UriInfo uriInfo,
+                                           byte[] body) {
+        return proxySharedService(name, subPath, "POST", body, inHeaders, uriInfo);
+    }
+
+    private Response proxySharedService(String name, String subPath, String method, byte[] body,
+                                        HttpHeaders inHeaders, jakarta.ws.rs.core.UriInfo uriInfo) {
+        SharedService svc = actorSystem.getSharedService(name);
+        if (svc == null) {
+            return Response.status(Response.Status.NOT_FOUND).entity("Unknown shared service").build();
+        }
+        // The service's own launch/stop paths are the dashboard's, never forwarded.
+        if ("launch".equals(subPath) || "stop".equals(subPath)) {
+            return Response.status(Response.Status.METHOD_NOT_ALLOWED).build();
+        }
+        String rawQuery = uriInfo.getRequestUri().getRawQuery();
+        String targetUrl = svc.clusterUrl() + "/" + subPath
+            + (rawQuery != null && !rawQuery.isEmpty() ? "?" + rawQuery : "");
+        return forward(targetUrl, method, body, inHeaders, "shared service " + name);
+    }
+
+    /** Launch: scale the Deployment to 1. Administrators only; idempotent when already running. */
+    @POST
+    @Path("/service/{name}/launch")
+    @Authenticated
+    public Response launchSharedService(@PathParam("name") String name) {
+        return scaleSharedService(name, 1);
+    }
+
+    /** Stop: scale the Deployment to 0. Administrators only. Every tool that uses the service loses it. */
+    @POST
+    @Path("/service/{name}/stop")
+    @Authenticated
+    public Response stopSharedService(@PathParam("name") String name) {
+        return scaleSharedService(name, 0);
+    }
+
+    private Response scaleSharedService(String name, int replicas) {
+        String userId = getCurrentUsername();
+        SharedService svc = actorSystem.getSharedService(name);
+        if (svc == null) {
+            return Response.status(Response.Status.NOT_FOUND).entity("Unknown shared service").build();
+        }
+        // Checked here, not only hidden in the page: a request without the button is still a request.
+        if (!actorSystem.isAdmin(userId, getCurrentUserRoles())) {
+            LOG.warning("Shared service " + name + " scale to " + replicas + " refused for user " + userId);
+            return Response.status(Response.Status.FORBIDDEN)
+                .entity("Only an administrator may launch or stop a shared service").build();
+        }
+        try {
+            actorSystem.getK8sClient().scaleSharedService(svc.namespace(), svc.deployment(), replicas);
+            LOG.info("Shared service " + name + " scaled to " + replicas + " by " + userId);
+        } catch (Exception e) {
+            LOG.severe("Shared service " + name + " scale failed: " + e.getMessage());
+            return Response.seeOther(URI.create("/dashboard?error=shared_service_scale_failed")).build();
+        }
+        return Response.seeOther(URI.create("/dashboard")).build();
     }
 
     // ── Storage endpoints ─────────────────────────────────────────────────────
