@@ -11,15 +11,15 @@
 #   1. Ensures a PV/PVC for the build context exists in the k8s-pups namespace
 #   2. Creates a K8s Job running gcr.io/kaniko-project/executor
 #   3. Mounts the build context from devteam-works NFS via PVC
-#   4. Pushes the built image to the local registry (10.0.0.23:32000)
+#   4. Pushes the built image to the local registry (192.168.5.13:32000)
 #   5. Optionally follows logs until completion (--follow)
 
 set -euo pipefail
 
-REGISTRY="10.0.0.23:32000"
+REGISTRY="192.168.5.13:32000"
 NAMESPACE="k8s-pups"
 # NFS details for the build context (devteam's works directory)
-NFS_SERVER="10.0.0.20"
+NFS_SERVER="192.168.5.20"
 NFS_PATH="/Public/Users/devteam/works"
 PV_NAME="kaniko-build-context-pv"
 PVC_NAME="kaniko-build-context-pvc"
@@ -123,7 +123,7 @@ echo "Job name:       ${JOB_NAME}"
 echo ""
 
 # --- Build Kaniko args ---
-KANIKO_ARGS='["--dockerfile=Dockerfile", "--context=/workspace", "--destination='"${DESTINATION}"'", "--insecure"'
+KANIKO_ARGS='["--dockerfile=Dockerfile", "--context=/workspace", "--destination='"${DESTINATION}"'", "--build-arg", "IMAGE_TAG='"${TAG}"'", "--insecure"'
 if [ "$NO_CACHE" = true ]; then
     KANIKO_ARGS="${KANIKO_ARGS}"', "--cache=false"'
 fi
