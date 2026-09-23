@@ -80,6 +80,17 @@ public record SessionInfo(
             Collections.emptyList(), Collections.emptyMap());
     }
 
+    /**
+     * Returns a copy with the storage type resolved. SessionActor resolves the
+     * effective type once (user preference, else the configured default) and writes
+     * it back here, so Pod building reads the same value instead of resolving again.
+     */
+    public SessionInfo withUserStorageType(String resolvedStorageType) {
+        return new SessionInfo(sessionId, userId, toolPlugin, allowedProjects, labId,
+            resourceProfile, userParams, userStoragePreference, resolvedStorageType,
+            workspaceInfo, additionalMounts, toolConfigEnv);
+    }
+
     public String podName() {
         return "pups-" + toolPlugin.name() + "-" + sessionId;
     }

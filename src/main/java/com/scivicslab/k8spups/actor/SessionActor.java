@@ -25,7 +25,9 @@ public class SessionActor {
 
     private static final Logger LOG = Logger.getLogger(SessionActor.class.getName());
 
-    private final SessionInfo info;
+    // Not final: start() resolves the effective storage type once and writes it back,
+    // so Pod building uses the same value instead of resolving it a second time.
+    private SessionInfo info;
     private final K8sApiClient k8sClient;
 
     private SessionState state = SessionState.CREATING;
@@ -57,6 +59,10 @@ public class SessionActor {
         try {
             ToolPlugin plugin = info.toolPlugin();
             String storageType = resolveStorageType();
+            // Write the resolved type back so createPod() mounts the volume this
+            // method provisions. Without this, a user with no stored preference had
+            // the PVC created for one type and the Pod built for another.
+            info = info.withUserStorageType(storageType);
 
             // Storage type determines what gets mounted at userDataMountPath:
             //   nfs-home  -> workspace NFS home directory (LDAP POSIX account)
