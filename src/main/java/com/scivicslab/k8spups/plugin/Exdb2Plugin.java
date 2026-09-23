@@ -21,7 +21,7 @@ public class Exdb2Plugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/quarkus-exdb2:1.6.1-2606300122";
+        return "${REGISTRY}/quarkus-exdb2:1.6.1-2607141109";
     }
 
     @Override

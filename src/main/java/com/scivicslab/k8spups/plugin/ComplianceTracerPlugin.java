@@ -21,7 +21,7 @@ public class ComplianceTracerPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/compliance-tracer:1.1.1-2606300135";
+        return "${REGISTRY}/compliance-tracer:1.1.1-2608040540";
     }
 
     @Override
