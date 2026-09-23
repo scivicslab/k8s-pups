@@ -10,8 +10,16 @@ FROM ubuntu:24.04
 # curl and ca-certificates fetch the GraalVM archive below and are kept for the entrypoint's own use.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      curl ca-certificates \
+      curl ca-certificates python3-pip \
  && rm -rf /var/lib/apt/lists/*
+
+# yt-dlp downloads a video once into the user's storage, so the transcript server reads a file
+# instead of asking YouTube again on every re-import and on each of the GPU broker's retries
+# (MediaDownloads). The pre-release is taken deliberately: YouTube's bot check is what the
+# downloader keeps up with, and the newest stable is 2026.8.19 while the fixes since are in the
+# development builds. No ffmpeg: MediaDownloads asks for a format that already carries both
+# video and audio, so nothing is merged.
+RUN pip3 install --break-system-packages --no-cache-dir --pre -U yt-dlp
 
 # GraalVM Community, the version the tool is built with on the developer's machine (sdkman 25-graalce).
 ENV GRAALVM_VERSION=25.0.0
