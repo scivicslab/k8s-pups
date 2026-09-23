@@ -113,7 +113,7 @@ public class EnglishToolkitPlugin implements ToolPlugin {
     @Override
     public Map<String, String> environmentVariables() {
         var cfg = ConfigProvider.getConfig();
-        return Map.of(
+        var env = new java.util.LinkedHashMap<String, String>(Map.of(
             "ENGLISH_COBUILD_PATH", DICTIONARY_MOUNT + "/cobuild.json",
             "ENGLISH_COBUILD_OCR_DIR", DICTIONARY_MOUNT + "/cobuild-ocr",
             "ENGLISH_ACTIVATOR_OCR_DIR", DICTIONARY_MOUNT + "/activator-ocr",
@@ -123,7 +123,14 @@ public class EnglishToolkitPlugin implements ToolPlugin {
             "GPU_BROKER_URL",
                 cfg.getOptionalValue("k8spups.english-toolkit.gpu-broker-url", String.class)
                     .orElse("http://gpu-broker:28005")
-        );
+        ));
+        // The AI Chat tab's default model. Left unset, the tool takes the first model the broker
+        // lists, and that order is the broker's discovery order, which differs between broker
+        // instances; pin it per deployment so a broker restart does not change the users' default.
+        cfg.getOptionalValue("k8spups.english-toolkit.chat-model", String.class)
+            .filter(m -> !m.isBlank())
+            .ifPresent(m -> env.put("ENGLISH_CHAT_MODEL", m));
+        return env;
     }
 
     @Override
