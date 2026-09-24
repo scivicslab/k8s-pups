@@ -396,6 +396,49 @@ public class DashboardResource {
     // passthroughPath=false (Guacamole, etc.): pod expects stripped path
     //   /session/{id}/sub/path → pups-svc-{id}:8080/sub/path
 
+    /**
+     * A tool that a session Pod started on its own (quarkus-ai-workspace launching html-saurus,
+     * chat-ui, ...) and registered through {@code SubToolResource}, which named it
+     * {@code {sessionId}-{toolName}-{port}} and created a Service {@code pups-subtool-} + that name.
+     *
+     * <p>Its traffic comes through this same proxy, under the same login and the same ownership
+     * check as the session it belongs to. It used to get its own HTTPRoute straight from the
+     * gateway to the Service, which carried no authentication at all: anyone who knew the URL
+     * reached the tool without logging in.</p>
+     */
+    record SubTool(String sessionId, String toolName, int port) {
+
+        /** The Service {@code SubToolResource} created for it, in the users' namespace. */
+        String serviceName() {
+            return "pups-subtool-" + sessionId + "-" + toolName + "-" + port;
+        }
+
+        /**
+         * Reads {@code {sessionId}-{toolName}-{port}}, accepting only a session the user owns.
+         * The session id is matched as a prefix because tool names carry hyphens themselves.
+         */
+        static SubTool parse(String name, List<SessionStatus> userSessions) {
+            int dash = name.lastIndexOf('-');
+            if (dash <= 0 || dash == name.length() - 1) {
+                return null;
+            }
+            int port;
+            try {
+                port = Integer.parseInt(name.substring(dash + 1));
+            } catch (NumberFormatException e) {
+                return null;
+            }
+            String head = name.substring(0, dash);            // {sessionId}-{toolName}
+            for (SessionStatus s : userSessions) {
+                String prefix = s.sessionId() + "-";
+                if (head.startsWith(prefix) && head.length() > prefix.length()) {
+                    return new SubTool(s.sessionId(), head.substring(prefix.length()), port);
+                }
+            }
+            return null;
+        }
+    }
+
     private static final java.util.Set<String> HOP_BY_HOP = java.util.Set.of(
         "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
         "te", "trailer", "transfer-encoding", "upgrade", "host",
@@ -493,6 +536,17 @@ public class DashboardResource {
             .findFirst()
             .orElse(null);
         if (session == null) {
+            // Not a session id: perhaps a tool started inside one of this user's session Pods,
+            // named {sessionId}-{toolName}-{port} by SubToolResource.
+            SubTool subTool = SubTool.parse(sessionId, userSessions);
+            if (subTool != null) {
+                sm.tell(mgr -> mgr.touchSession(subTool.sessionId()));
+                String rawQuery = uriInfo.getRequestUri().getRawQuery();
+                String targetUrl = "http://" + subTool.serviceName() + "." + userPodsNamespace
+                    + ".svc.cluster.local:" + subTool.port() + "/" + subPath
+                    + (rawQuery != null && !rawQuery.isEmpty() ? "?" + rawQuery : "");
+                return forward(targetUrl, method, body, inHeaders, "sub-tool " + sessionId);
+            }
             LOG.warning("Unauthorized session access: user=" + userId + " sessionId=" + sessionId);
             return Response.status(Response.Status.FORBIDDEN)
                 .entity("You do not own this session").build();

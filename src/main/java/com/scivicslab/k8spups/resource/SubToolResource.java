@@ -14,7 +14,8 @@ import java.util.logging.Logger;
  *
  * Called by quarkus-ai-workspace (running inside a user Pod) when a child
  * process (e.g. quarkus-chat-ui) becomes READY or stops. k8s-pups creates or
- * deletes a Service + HTTPRoute so the sub-tool is reachable from the browser.
+ * deletes a Service for it; the browser reaches it through the controller's own
+ * authenticated session proxy, never through a route of its own.
  *
  * Authentication: no OIDC required (called service-to-service inside the cluster).
  * The sessionId path parameter implicitly scopes the operation to that session's Pod.
@@ -36,8 +37,11 @@ public class SubToolResource {
             return Response.status(400).entity("toolName and port are required").build();
         }
         try {
+            // Only a Service. The controller's own session proxy (DashboardResource) carries the
+            // browser's traffic to it under the user's login, the way it does for the session
+            // itself. A gateway HTTPRoute straight to the Service, which this used to create as
+            // well, answered without any authentication.
             actorSystem.getK8sClient().createSubToolService(sessionId, req.toolName(), req.port());
-            actorSystem.getK8sClient().createSubToolHTTPRoute(sessionId, req.toolName(), req.port());
             String accessUrl = "/session/" + sessionId + "-" + req.toolName() + "-" + req.port() + "/";
             LOG.info("Sub-tool registered: " + sessionId + "/" + req.toolName() + ":" + req.port()
                 + " → " + accessUrl);
