@@ -1,5 +1,6 @@
 package com.scivicslab.k8spups.actor;
 
+import java.util.Optional;
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.k8s.LdapUserInfoClient;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
@@ -133,12 +134,20 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.enabled-plugins", defaultValue = "")
     String enabledPluginsConfig;
 
-    /** Names of the shared services to show (each described by k8spups.shared-service.<name>.*). */
-    @ConfigProperty(name = "k8spups.shared-services", defaultValue = "")
-    String sharedServicesConfig;
+    /**
+     * Names of the shared services to show (each described by k8spups.shared-service.<name>.*).
+     *
+     * <p>Optional, not String with an empty default: a deployment that names no shared services
+     * leaves K8SPUPS_SHARED_SERVICES unset, application.properties expands it to an empty value,
+     * and SmallRye refuses to convert an empty value to String. The controller then fails to
+     * start with "Failed to load config value of type class java.lang.String".</p>
+     */
+    @ConfigProperty(name = "k8spups.shared-services")
+    Optional<String> sharedServicesConfig;
 
-    @ConfigProperty(name = "k8spups.admin-users", defaultValue = "")
-    String adminUsers;
+    /** Administrators, by user id. Optional for the same reason as the field above. */
+    @ConfigProperty(name = "k8spups.admin-users")
+    Optional<String> adminUsers;
 
     @ConfigProperty(name = "k8spups.admin-roles", defaultValue = "admin")
     String adminRoles;
@@ -182,7 +191,7 @@ public class K8sPupsActorSystem {
         // Shared services: cluster-wide Deployments shown as cards, never as sessions.
         var cfg = org.eclipse.microprofile.config.ConfigProvider.getConfig();
         sharedServices = com.scivicslab.k8spups.plugin.SharedService.allFromConfig(
-            sharedServicesConfig, key -> cfg.getOptionalValue(key, String.class));
+            sharedServicesConfig.orElse(""), key -> cfg.getOptionalValue(key, String.class));
         sharedServices.forEach(svc ->
             LOG.info("Registered shared service: " + svc.name() + " -> " + svc.clusterUrl()));
 
@@ -383,7 +392,7 @@ public class K8sPupsActorSystem {
 
     /** Whether this user may Launch / Stop shared services (k8spups.admin-users / admin-roles). */
     public boolean isAdmin(String userId, List<String> roles) {
-        return com.scivicslab.k8spups.tool.SharedServiceAccess.isAdmin(userId, roles, adminUsers, adminRoles);
+        return com.scivicslab.k8spups.tool.SharedServiceAccess.isAdmin(userId, roles, adminUsers.orElse(""), adminRoles);
     }
 
     public String getControllerNamespace() {
