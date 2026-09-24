@@ -1,0 +1,21 @@
+# Lets the HTTPRoutes k8s-pups creates in its own namespace send traffic to the per-session and
+# per-tool Services it creates in the users' namespace. Gateway API refuses a cross-namespace
+# backendRef unless the target namespace grants it, and Envoy answers 500 for such a route: every
+# tool started inside a workspace Pod (html-saurus, chat-ui, ...) returned 500 after the cluster
+# was rebuilt without this grant.
+#
+# Lives in the users' namespace, so it is applied by file, not through the kustomization (whose
+# namespace field would move it). Apply: kubectl apply -f k8s/overlays/local-llm/user-pods-referencegrant.yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-k8s-pups-routes
+  namespace: user-pods-local-llm
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: k8s-pups-local-llm
+  to:
+  - group: ""
+    kind: Service
