@@ -15,6 +15,11 @@ RUN apt-get update \
       git openssh-client iproute2 curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# The JVM takes the encoding for file names (sun.jnu.encoding) from the locale. The Ubuntu base
+# has no LANG set, which is the POSIX locale, i.e. ASCII: any path containing a Japanese name then
+# fails with InvalidPathException. C.UTF-8 is built into glibc, so no locale package is needed.
+ENV LANG=C.UTF-8
+
 # GraalVM Community. The version tracks the one the tools are developed on (sdkman 25-graalce):
 # a tool that builds on the developer's machine has to build here too, and javac's behaviour
 # differs between JDK versions.

@@ -13,6 +13,11 @@ RUN apt-get update \
       curl ca-certificates python3-pip \
  && rm -rf /var/lib/apt/lists/*
 
+# The JVM takes the encoding for file names (sun.jnu.encoding) from the locale. The Ubuntu base
+# has no LANG set, which is the POSIX locale, i.e. ASCII: any path containing a Japanese name then
+# fails with InvalidPathException. C.UTF-8 is built into glibc, so no locale package is needed.
+ENV LANG=C.UTF-8
+
 # yt-dlp downloads a video once into the user's storage, so the transcript server reads a file
 # instead of asking YouTube again on every re-import and on each of the GPU broker's retries
 # (MediaDownloads). The pre-release is taken deliberately: YouTube's bot check is what the
