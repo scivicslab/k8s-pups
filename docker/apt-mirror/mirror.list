@@ -1,0 +1,16 @@
+# Ubuntu 24.04 (noble), amd64 only. The hosts are kept as the source names so that the mirror layout matches the
+# archive's: /data/mirror/archive.ubuntu.com/ubuntu and /data/mirror/security.ubuntu.com/ubuntu.
+set base_path /data
+set mirror_path $base_path/mirror
+set skel_path $base_path/skel
+set var_path $base_path/var
+set nthreads 4
+set _tilde 0
+
+deb-amd64 http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
+deb-amd64 http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
+deb-amd64 http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse
+deb-amd64 http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse
+
+clean http://archive.ubuntu.com/ubuntu
+clean http://security.ubuntu.com/ubuntu
