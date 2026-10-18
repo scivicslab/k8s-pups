@@ -1,5 +1,6 @@
 package com.scivicslab.k8spups.resource;
 
+import com.scivicslab.k8spups.k8s.SessionPath;
 import com.scivicslab.k8spups.actor.K8sPupsActorSystem;
 
 import jakarta.inject.Inject;
@@ -42,7 +43,7 @@ public class SubToolResource {
             // itself. A gateway HTTPRoute straight to the Service, which this used to create as
             // well, answered without any authentication.
             actorSystem.getK8sClient().createSubToolService(sessionId, req.toolName(), req.port());
-            String accessUrl = "/session/" + sessionId + "-" + req.toolName() + "-" + req.port() + "/";
+            String accessUrl = SessionPath.of(sessionId + "-" + req.toolName() + "-" + req.port()) + "/";
             LOG.info("Sub-tool registered: " + sessionId + "/" + req.toolName() + ":" + req.port()
                 + " → " + accessUrl);
             return Response.ok(new SubToolRegisterResponse(accessUrl)).build();

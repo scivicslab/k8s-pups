@@ -301,7 +301,7 @@ public class K8sApiClient {
                     .addNewMatch()
                         .withNewPath()
                             .withType("PathPrefix")
-                            .withValue("/session/" + sessionId)
+                            .withValue(SessionPath.of(sessionId))
                         .endPath()
                     .endMatch()
                     // Rewrite /session/{id}/* -> /* unless passthroughPath is set.
@@ -405,7 +405,7 @@ public class K8sApiClient {
 
     public void createSubToolHTTPRoute(String sessionId, String toolName, int port) {
         String name = subToolResourceName(sessionId, toolName, port);
-        String pathPrefix = "/session/" + sessionId + "-" + toolName + "-" + port;
+        String pathPrefix = SessionPath.of(sessionId + "-" + toolName + "-" + port);
 
         List<ParentReference> parentRefs = gatewayNames.stream()
             .map(gw -> new ParentReferenceBuilder()
@@ -505,7 +505,7 @@ public class K8sApiClient {
     public void createSecurityPolicy(String sessionId, String userId) {
         String policyName = "pups-session-sp-" + sessionId;
         String targetRouteName = "pups-session-" + sessionId;
-        String redirectURL = oidcRedirectBaseUrl + "/session/" + sessionId + "/oauth2/callback";
+        String redirectURL = oidcRedirectBaseUrl + SessionPath.of(sessionId) + "/oauth2/callback";
         // Fixed cookie name (per-session to avoid cross-session conflicts).
         // Must be specified explicitly because the default is a randomly generated suffix,
         // which would make it impossible to reference from the jwt section below.
@@ -535,7 +535,7 @@ public class K8sApiClient {
         // Fix the idToken cookie name so the jwt section below can extract it by name.
         oidc.put("cookieNames", Map.of("idToken", idTokenCookieName));
         // Limit cookie scope to this session's path to avoid cross-session cookie conflicts.
-        oidc.put("cookiePath", "/session/" + sessionId + "/");
+        oidc.put("cookiePath", SessionPath.of(sessionId) + "/");
 
         spec.put("oidc", oidc);
 
@@ -2056,30 +2056,15 @@ public class K8sApiClient {
 
     /** Parses CPU quantity string (e.g. "64", "3623m", "500n") to millicores. */
     private long parseCpuToMillis(String cpu) {
-        if (cpu.endsWith("n")) {
-            return Long.parseLong(cpu.substring(0, cpu.length() - 1)) / 1_000_000;
-        } else if (cpu.endsWith("u")) {
-            return Long.parseLong(cpu.substring(0, cpu.length() - 1)) / 1_000;
-        } else if (cpu.endsWith("m")) {
-            return Long.parseLong(cpu.substring(0, cpu.length() - 1));
-        } else {
-            return Long.parseLong(cpu) * 1000;
-        }
+        return Quantity.parse(cpu).getNumericalAmount().multiply(java.math.BigDecimal.valueOf(1000)).longValue();
     }
 
-    /** Parses memory quantity string (e.g. "131728508Ki", "19274Mi", "1024") to bytes. */
+    /**
+     * Parses a memory quantity (e.g. "131728508Ki", "19274Mi", "30M", "1024") to bytes. The decimal suffixes
+     * (k, M, G) and the binary ones (Ki, Mi, Gi) both occur in pod specs, so the Kubernetes parser is used.
+     */
     private long parseMemoryToBytes(String mem) {
-        if (mem.endsWith("Ki")) {
-            return Long.parseLong(mem.substring(0, mem.length() - 2)) * 1024;
-        } else if (mem.endsWith("Mi")) {
-            return Long.parseLong(mem.substring(0, mem.length() - 2)) * 1024 * 1024;
-        } else if (mem.endsWith("Gi")) {
-            return Long.parseLong(mem.substring(0, mem.length() - 2)) * 1024L * 1024 * 1024;
-        } else if (mem.endsWith("Ti")) {
-            return Long.parseLong(mem.substring(0, mem.length() - 2)) * 1024L * 1024 * 1024 * 1024;
-        } else {
-            return Long.parseLong(mem);
-        }
+        return Quantity.parse(mem).getNumericalAmount().longValue();
     }
 
     // === Tool Registry Management ===

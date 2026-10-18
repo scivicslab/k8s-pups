@@ -40,7 +40,7 @@ public class SessionEnvBuilder {
 
         envVars.add(new EnvVarBuilder()
             .withName("PUPS_SESSION_PATH")
-            .withValue("/session/" + info.sessionId() + "/")
+            .withValue(SessionPath.of(info.sessionId()) + "/")
             .build());
         envVars.add(new EnvVarBuilder()
             .withName("PUPS_API_BASE")

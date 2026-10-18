@@ -1,5 +1,6 @@
 package com.scivicslab.k8spups.resource;
 
+import com.scivicslab.k8spups.k8s.SessionPath;
 import com.scivicslab.k8spups.actor.K8sPupsActorSystem;
 import com.scivicslab.k8spups.actor.SessionManagerActor;
 import com.scivicslab.k8spups.actor.SessionStatus;
@@ -77,6 +78,11 @@ public class DashboardResource {
     @ConfigProperty(name = "k8spups.user-pods-namespace", defaultValue = "user-pods")
     String userPodsNamespace;
 
+    // Name shown in the page title and the header, so that several deployments of this
+    // controller (for example /pups and /pups-with-audit) can be told apart in the browser.
+    @ConfigProperty(name = "k8spups.display-name", defaultValue = "k8s-pups")
+    String displayName;
+
     @Context
     HttpHeaders httpHeaders;
 
@@ -89,7 +95,7 @@ public class DashboardResource {
             <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>k8s-pups - K8s Per-User Pod Service</title>
+            <title>{{NAME}} - K8s Per-User Pod Service</title>
             <link rel="icon" type="image/svg+xml" href="{{BASE}}/favicon.svg">
             <style>
                 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -143,7 +149,7 @@ public class DashboardResource {
             <body>
             <div class="landing">
                 <div class="logo">\uD83D\uDC3E</div>
-                <h1>k8s-pups</h1>
+                <h1>{{NAME}}</h1>
                 <p class="tagline">
                     Launch isolated tool environments &mdash; IDEs, notebooks, desktops
                     &mdash; each in its own Kubernetes Pod.
@@ -157,7 +163,7 @@ public class DashboardResource {
             </div>
             </body>
             </html>
-            """).replace("{{BASE}}", basePath);
+            """).replace("{{BASE}}", basePath).replace("{{NAME}}", displayName);
     }
 
     @GET
@@ -261,6 +267,7 @@ public class DashboardResource {
         data.put("pvcInfo", allPvcInfo);
         data.put("sharedPvcs", sharedPvcs);
         data.put("basePath", basePath);
+        data.put("displayName", displayName);
 
         // Shared services: state read now, Launch / Stop only for administrators.
         List<SharedServiceView> sharedServices = new ArrayList<>();
@@ -571,7 +578,7 @@ public class DashboardResource {
         }
 
         String targetPath = passthrough
-            ? "/session/" + sessionId + "/" + subPath
+            ? SessionPath.of(sessionId) + "/" + subPath
             : "/" + subPath;
         String rawQuery = uriInfo.getRequestUri().getRawQuery();
         String targetUrl = "http://pups-svc-" + sessionId + "." + userPodsNamespace + ".svc.cluster.local:" + containerPort

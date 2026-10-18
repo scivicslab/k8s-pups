@@ -1,5 +1,6 @@
 package com.scivicslab.k8spups.actor;
 
+import com.scivicslab.k8spups.k8s.SessionPath;
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.k8s.MountSpec;
 import com.scivicslab.k8spups.k8s.SessionInfo;
@@ -277,7 +278,7 @@ public class SessionActor {
     public SessionStatus getStatus() {
         String url = null;
         if (state == SessionState.READY && info.toolPlugin().connectionType() == ConnectionType.HTTP) {
-            url = "/session/" + info.sessionId() + "/";
+            url = SessionPath.of(info.sessionId()) + "/";
         }
         return new SessionStatus(
             info.sessionId(),
