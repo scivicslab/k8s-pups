@@ -2,6 +2,7 @@ package com.scivicslab.k8spups.actor;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.k8s.LdapUserInfoClient;
+import com.scivicslab.k8spups.dataset.DatasetRepository;
 import com.scivicslab.k8spups.k8s.MountSpec;
 import com.scivicslab.k8spups.k8s.SessionInfo;
 import com.scivicslab.k8spups.k8s.WorkspaceInfo;
@@ -35,6 +36,8 @@ public class SessionManagerActor {
     private final long maxLifetimeMinutes;
     private final Set<String> unlimitedUsers;
     private final LdapUserInfoClient ldapClient;
+    /** Entitlement list; null when the dataset feature is not configured. */
+    private final DatasetRepository datasets;
 
     /** sessionId -> child ActorRef<SessionActor> */
     private final Map<String, ActorRef<SessionActor>> sessions = new HashMap<>();
@@ -46,7 +49,8 @@ public class SessionManagerActor {
                                String controllerNamespace,
                                int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
                                long maxLifetimeMinutes,
-                               Set<String> unlimitedUsers, LdapUserInfoClient ldapClient) {
+                               Set<String> unlimitedUsers, LdapUserInfoClient ldapClient,
+                               DatasetRepository datasets) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
         this.controllerNamespace = controllerNamespace;
@@ -56,6 +60,7 @@ public class SessionManagerActor {
         this.maxLifetimeMinutes = maxLifetimeMinutes;
         this.unlimitedUsers = unlimitedUsers;
         this.ldapClient = ldapClient;
+        this.datasets = datasets;
     }
 
     /**
@@ -81,6 +86,34 @@ public class SessionManagerActor {
                                        String overrideStorageType) {
         return createSession(self, userId, toolName, allowedProjects, labId, resourceProfile,
             userParams, overrideStorageType, Collections.emptyList());
+    }
+
+    /**
+     * Returns the user's additional mounts plus the read-only dataset view when the user has at
+     * least one active grant. The view is rebuilt first; if that fails the mount is left out,
+     * because a stale view could still list files whose grant was revoked. A mount of type
+     * "dataset" requested by the user is dropped: only the controller adds it.
+     */
+    private List<MountSpec> withDatasetMount(String userId, List<MountSpec> requested) {
+        List<MountSpec> mounts = new ArrayList<>();
+        if (requested != null) {
+            for (MountSpec m : requested) {
+                if (!K8sApiClient.DATASET_STORAGE_TYPE.equals(m.storageType())) mounts.add(m);
+            }
+        }
+        if (datasets == null || !datasets.isAvailable()) return mounts;
+        try {
+            List<String> paths = datasets.activePaths(userId);
+            if (paths.isEmpty()) return mounts;
+            if (k8sClient.syncDatasetView(userId, paths)) {
+                mounts.add(new MountSpec(K8sApiClient.DATASET_STORAGE_TYPE, k8sClient.datasetMountPath(), null));
+            } else {
+                LOG.warning("Dataset view not ready for " + userId + "; session starts without it");
+            }
+        } catch (Exception e) {
+            LOG.warning("Dataset view failed for " + userId + ": " + e.getMessage());
+        }
+        return mounts;
     }
 
     /**
@@ -164,7 +197,7 @@ public class SessionManagerActor {
 
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType, workspaceInfo,
-            additionalMounts != null ? additionalMounts : Collections.emptyList(),
+            withDatasetMount(userId, additionalMounts),
             toolConfigEnv);
         SessionActor actor = new SessionActor(info, k8sClient);
 

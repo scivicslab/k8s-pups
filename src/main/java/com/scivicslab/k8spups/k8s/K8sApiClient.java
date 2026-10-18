@@ -58,6 +58,15 @@ public class K8sApiClient {
     // NFS k8s-dedicated config
     private final String nfsK8sServer;
     private final String nfsK8sBasePath;
+    /** Storage type key of the dataset view mount (added by the controller, never by the user). */
+    public static final String DATASET_STORAGE_TYPE = "dataset";
+
+    // Dataset entitlement views (see DatasetViewScript): NFS location read from config.
+    private final String datasetNfsServer;
+    private final String datasetBasePath;
+    private final String datasetOriginalDir;
+    private final String datasetViewDir;
+    private final String datasetMountPath;
 
     // Node allowlist for user pods (empty = no restriction)
     private final List<String> allowedNodes;
@@ -98,6 +107,11 @@ public class K8sApiClient {
         this.basePath = basePath;
         this.controllerUrl = controllerUrl;
         var cfg = org.eclipse.microprofile.config.ConfigProvider.getConfig();
+        this.datasetNfsServer = cfg.getOptionalValue("k8spups.dataset.nfs-server", String.class).orElse("");
+        this.datasetBasePath = cfg.getOptionalValue("k8spups.dataset.base-path", String.class).orElse("");
+        this.datasetOriginalDir = cfg.getOptionalValue("k8spups.dataset.original-dir", String.class).orElse("original");
+        this.datasetViewDir = cfg.getOptionalValue("k8spups.dataset.view-dir", String.class).orElse("view");
+        this.datasetMountPath = cfg.getOptionalValue("k8spups.dataset.mount-path", String.class).orElse("/datasets");
         this.imageResolver = new com.scivicslab.k8spups.plugin.ToolImageResolver(
                 cfg.getOptionalValue("k8spups.tool-images-file", String.class)
                         .orElse("/etc/k8s-pups/tool-images.properties"),
@@ -1031,16 +1045,26 @@ public class K8sApiClient {
      * container (UID 1000) unable to write and uploads failing with permission denied.
      */
     private void ensureNfsK8sDirectory(String sanitizedUserId) {
-        String podName = "nfs-k8s-init-" + sanitizedUserId + "-" + System.currentTimeMillis() % 100000;
         String cmd = "mkdir -p /mnt/nfs-base/" + sanitizedUserId
             + " && chown -R 1000:1000 /mnt/nfs-base/" + sanitizedUserId
             + " && echo 'Directory ready'";
+        runNfsScriptPod("nfs-k8s-init-" + sanitizedUserId, "k8s-pups-nfs-init",
+            nfsK8sServer, nfsK8sBasePath, cmd);
+    }
 
+    /**
+     * Runs a script in a short-lived busybox Pod that mounts {@code basePath} of an NFS server
+     * read-write at /mnt/nfs-base, waits up to 60 seconds, and deletes the Pod.
+     *
+     * @return true when the Pod reached the Succeeded phase
+     */
+    private boolean runNfsScriptPod(String namePrefix, String appLabel, String server, String basePath, String script) {
+        String podName = namePrefix + "-" + System.currentTimeMillis() % 100000;
         Pod initPod = new PodBuilder()
             .withNewMetadata()
                 .withName(podName)
                 .withNamespace(userPodsNamespace)
-                .addToLabels("app", "k8s-pups-nfs-init")
+                .addToLabels("app", appLabel)
                 .addToLabels("managed-by", "k8s-pups")
             .endMetadata()
             .withNewSpec()
@@ -1048,14 +1072,14 @@ public class K8sApiClient {
                 .addNewVolume()
                     .withName("nfs-base")
                     .withNewNfs()
-                        .withServer(nfsK8sServer)
-                        .withPath(nfsK8sBasePath)
+                        .withServer(server)
+                        .withPath(basePath)
                     .endNfs()
                 .endVolume()
                 .addNewContainer()
                     .withName("init")
                     .withImage("busybox:1.36")
-                    .withCommand("sh", "-c", cmd)
+                    .withCommand("sh", "-c", script)
                     .addNewVolumeMount()
                         .withName("nfs-base")
                         .withMountPath("/mnt/nfs-base")
@@ -1064,31 +1088,130 @@ public class K8sApiClient {
             .endSpec()
             .build();
 
+        boolean succeeded = false;
         try {
             client.pods().inNamespace(userPodsNamespace).resource(initPod).create();
-            LOG.info("NFS-k8s init pod created: " + podName);
+            LOG.info("NFS script pod created: " + podName);
 
-            // Wait for the init pod to complete (up to 60 seconds)
+            // Wait for the Pod to complete (up to 60 seconds)
             for (int i = 0; i < 60; i++) {
                 try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                 Pod pod = client.pods().inNamespace(userPodsNamespace).withName(podName).get();
                 if (pod == null) break;
                 String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown";
                 if ("Succeeded".equals(phase)) {
-                    LOG.info("NFS-k8s directory created for: " + sanitizedUserId);
+                    succeeded = true;
                     break;
                 } else if ("Failed".equals(phase)) {
-                    LOG.warning("NFS-k8s init pod failed for: " + sanitizedUserId);
+                    LOG.warning("NFS script pod failed: " + podName);
                     break;
                 }
             }
         } finally {
-            // Clean up init pod
             try {
                 client.pods().inNamespace(userPodsNamespace).withName(podName).delete();
             } catch (Exception e) {
-                LOG.warning("Failed to delete NFS-k8s init pod " + podName + ": " + e.getMessage());
+                LOG.warning("Failed to delete NFS script pod " + podName + ": " + e.getMessage());
             }
+        }
+        return succeeded;
+    }
+
+    // -- Dataset entitlement views --
+
+    /** Mount path of the user's dataset view inside a tool container. */
+    public String datasetMountPath() {
+        return datasetMountPath;
+    }
+
+    /** PVC name of the user's dataset view. */
+    public String datasetPvcName(String userId) {
+        return "pups-dataset-" + sanitizeUserId(userId);
+    }
+
+    private String datasetPvName(String userId) {
+        return datasetPvcName(userId) + "-" + userPodsNamespace;
+    }
+
+    /**
+     * Rebuilds the user's view directory on the NFS server so that it holds hardlinks to exactly
+     * {@code paths} (relative to the original directory), then makes sure the user's read-only
+     * PV/PVC for that directory exists.
+     *
+     * @return true when the view is in the requested state; false when it could not be built
+     *         (the caller must then not mount it, because it may still list revoked files)
+     */
+    public boolean syncDatasetView(String userId, List<String> paths) {
+        if (datasetNfsServer.isBlank() || datasetBasePath.isBlank()) {
+            LOG.warning("Dataset NFS location is not configured; view not built for " + userId);
+            return false;
+        }
+        String user = sanitizeUserId(userId);
+        String script = com.scivicslab.k8spups.dataset.DatasetViewScript.build(
+            datasetOriginalDir, datasetViewDir, user, paths);
+        if (!runNfsScriptPod("dataset-view-" + user, "k8s-pups-dataset-sync",
+                datasetNfsServer, datasetBasePath, script)) {
+            return false;
+        }
+        ensureDatasetPvPvc(userId);
+        return true;
+    }
+
+    /** Creates the user's read-only PV/PVC for the view directory if absent. */
+    private void ensureDatasetPvPvc(String userId) {
+        String pvName = datasetPvName(userId);
+        String pvcName = datasetPvcName(userId);
+        String viewPath = datasetBasePath + "/" + datasetViewDir + "/" + sanitizeUserId(userId);
+
+        if (client.persistentVolumes().withName(pvName).get() == null) {
+            PersistentVolume pv = new PersistentVolumeBuilder()
+                .withNewMetadata()
+                    .withName(pvName)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                    .addToLabels("storage-type", "dataset")
+                .endMetadata()
+                .withNewSpec()
+                    .withCapacity(Map.of("storage", new Quantity("1Ti")))
+                    .withAccessModes("ReadOnlyMany")
+                    .withPersistentVolumeReclaimPolicy("Retain")
+                    .withStorageClassName("")
+                    .withNewCsi()
+                        .withDriver("nfs.csi.k8s.io")
+                        .withVolumeHandle(pvName)
+                        .withReadOnly(true)
+                        .addToVolumeAttributes("server", datasetNfsServer)
+                        .addToVolumeAttributes("share", viewPath)
+                    .endCsi()
+                    .withMountOptions(List.of("nfsvers=4", "ro"))
+                .endSpec()
+                .build();
+            client.persistentVolumes().resource(pv).create();
+            LOG.info("Dataset PV created: " + pvName + " -> " + datasetNfsServer + ":" + viewPath);
+        }
+
+        if (client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() == null) {
+            PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+                .withNewMetadata()
+                    .withName(pvcName)
+                    .withNamespace(userPodsNamespace)
+                    .addToLabels("app", "k8s-pups-user")
+                    .addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId)
+                    .addToLabels("storage-type", "dataset")
+                .endMetadata()
+                .withNewSpec()
+                    .withAccessModes("ReadOnlyMany")
+                    .withStorageClassName("")
+                    .withVolumeName(pvName)
+                    .withNewResources()
+                        .addToRequests("storage", new Quantity("1Ti"))
+                    .endResources()
+                .endSpec()
+                .build();
+            client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+            LOG.info("Dataset PVC created: " + pvcName);
         }
     }
 
@@ -1661,19 +1784,22 @@ public class K8sApiClient {
             int idx = 0;
             for (MountSpec extra : info.additionalMounts()) {
                 String volName = "extra-data-" + idx;
-                String pvcName = extra.sharedFrom() != null
+                boolean dataset = DATASET_STORAGE_TYPE.equals(extra.storageType());
+                String pvcName = dataset ? datasetPvcName(info.userId())
+                    : extra.sharedFrom() != null
                     ? sharedPvcName(info.userId(), extra.sharedFrom())
                     : userPvcName(info.userId(), extra.storageType());
 
                 mounts.add(new VolumeMountBuilder()
                     .withName(volName)
                     .withMountPath(extra.mountPath())
+                    .withReadOnly(dataset)
                     .build());
 
                 volumes.add(new VolumeBuilder().withName(volName)
                     .withNewPersistentVolumeClaim()
                         .withClaimName(pvcName)
-                        .withReadOnly(false)
+                        .withReadOnly(dataset)
                     .endPersistentVolumeClaim()
                     .build());
                 idx++;

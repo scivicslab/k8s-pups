@@ -12,6 +12,7 @@ import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -116,6 +117,9 @@ public class K8sPupsActorSystem {
     String workspaceNfsBasePath;
 
     // NFS k8s-dedicated storage config
+    @Inject
+    com.scivicslab.k8spups.dataset.DatasetRepository datasetRepository;
+
     @ConfigProperty(name = "k8spups.nfs-k8s.server", defaultValue = "")
     String nfsK8sServer;
 
@@ -235,7 +239,7 @@ public class K8sPupsActorSystem {
         // Create SessionManagerActor
         SessionManagerActor manager = new SessionManagerActor(
             k8sClient, plugins, controllerNamespace, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
-            maxLifetimeMinutes, unlimitedUsers, ldapClient);
+            maxLifetimeMinutes, unlimitedUsers, ldapClient, datasetRepository);
         sessionManager = actorSystem.actorOf("session-manager", manager);
 
         // Schedule idle timeout checks

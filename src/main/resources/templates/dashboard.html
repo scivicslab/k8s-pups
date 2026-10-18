@@ -273,7 +273,8 @@
     <div class="user-chip">
         <div class="user-avatar">👤</div>
         <span>{userId}</span>
-        <a href="logout" class="btn-logout">Logout</a>
+        {#if isAdmin}<a href="datasets" class="btn-logout" id="datasets-link">Datasets</a>{/if}
+            <a href="logout" class="btn-logout">Logout</a>
     </div>
 </header>
 
