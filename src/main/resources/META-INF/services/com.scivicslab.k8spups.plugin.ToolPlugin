@@ -2,6 +2,10 @@ com.scivicslab.k8spups.plugin.AiWorkspacePlugin
 com.scivicslab.k8spups.plugin.GuacamolePlugin
 com.scivicslab.k8spups.plugin.KaliPlugin
 com.scivicslab.k8spups.plugin.JupyterLabPlugin
+com.scivicslab.k8spups.plugin.JupyterAiPlugin
+com.scivicslab.k8spups.plugin.ChatUiAuditTrailLocalLlmPlugin
+com.scivicslab.k8spups.plugin.CodeRaptorPlugin
+com.scivicslab.k8spups.plugin.AiChatPlugin
 com.scivicslab.k8spups.plugin.FileBrowserPlugin
 com.scivicslab.k8spups.plugin.StorageSettingsPlugin
 com.scivicslab.k8spups.plugin.OcrPlugin

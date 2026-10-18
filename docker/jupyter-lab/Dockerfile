@@ -120,8 +120,8 @@ RUN Rscript -e "install.packages('IRkernel', repos='https://cloud.r-project.org'
     Rscript -e "IRkernel::installspec(user=FALSE)"
 
 # ---- Julia + IJulia kernel ----
-ARG JULIA_VERSION=1.11.3
-RUN curl -fsSL "https://julialang-s3.julialang.org/bin/linux/x64/1.11/julia-${JULIA_VERSION}-linux-x86_64.tar.gz" \
+ARG JULIA_VERSION=1.13.0
+RUN curl -fsSL "https://julialang-s3.julialang.org/bin/linux/x64/1.13/julia-${JULIA_VERSION}-linux-x86_64.tar.gz" \
         -o /tmp/julia.tar.gz && \
     tar -xzf /tmp/julia.tar.gz -C /opt && \
     ln -s /opt/julia-${JULIA_VERSION}/bin/julia /usr/local/bin/julia && \
@@ -144,13 +144,13 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends openjdk-21-jdk && \
     rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL "https://github.com/padreati/rapaio-jupyter-kernel/releases/download/2.3.0/rapaio-jupyter-kernel-2.3.0.jar" \
+RUN curl -fsSL "https://github.com/padreati/rapaio-jupyter-kernel/releases/download/4.0.0/rapaio-jupyter-kernel-4.0.0.jar" \
         -o /tmp/rapaio-kernel.jar && \
     java -jar /tmp/rapaio-kernel.jar -i -auto && \
     rm /tmp/rapaio-kernel.jar
 
 # ---- NCBI SRA Toolkit (prefetch, fasterq-dump, etc.) ----
-ARG SRA_TOOLKIT_VERSION=3.2.1
+ARG SRA_TOOLKIT_VERSION=3.4.1
 RUN curl -fsSL "https://ftp-trace.ncbi.nlm.nih.gov/sra/sdk/${SRA_TOOLKIT_VERSION}/sratoolkit.${SRA_TOOLKIT_VERSION}-ubuntu64.tar.gz" \
         -o /tmp/sratoolkit.tar.gz && \
     tar -xzf /tmp/sratoolkit.tar.gz -C /opt && \
