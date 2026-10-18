@@ -121,6 +121,11 @@ public class SessionActor {
                         memo = "Duplicate mount path: " + extra.mountPath();
                         return;
                     }
+                    // The dataset view's PV/PVC is created by the controller while the view is built
+                    // (K8sApiClient.syncDatasetView), right before this session is created.
+                    if (K8sApiClient.DATASET_STORAGE_TYPE.equals(extra.storageType())) {
+                        continue;
+                    }
                     // PVC existence check
                     String extraPvcName = extra.sharedFrom() != null
                         ? k8sClient.sharedPvcName(info.userId(), extra.sharedFrom())
