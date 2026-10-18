@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storage Settings - k8s-pups</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --orange:        #F97316;
+            --orange-dark:   #EA580C;
+            --orange-darker: #C2410C;
+            --orange-light:  #FFF7ED;
+            --orange-border: #FDBA74;
+            --green:         #059669;
+            --green-light:   #D1FAE5;
+            --red:           #DC2626;
+            --red-light:     #FEE2E2;
+            --blue:          #2563EB;
+            --blue-light:    #DBEAFE;
+            --bg:     #F8FAFC;
+            --card:   #FFFFFF;
+            --text:   #1E293B;
+            --muted:  #64748B;
+            --border: #E2E8F0;
+            --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 14px rgba(0,0,0,.06);
+            --radius: 14px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--orange-darker) 0%, var(--orange) 100%);
+            padding: 0 28px;
+            height: 58px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 10px rgba(0,0,0,.18);
+        }
+        .brand { display: flex; align-items: center; gap: 10px; color: white; text-decoration: none; }
+        .brand-logo { font-size: 26px; line-height: 1; }
+        .brand-name { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+        .brand-sep { width: 1px; height: 18px; background: rgba(255,255,255,.4); margin: 0 6px; }
+        .brand-tag  { font-size: 14px; font-weight: 500; color: rgba(255,255,255,.85); }
+        .user-chip { color: rgba(255,255,255,.92); font-size: 14px; font-weight: 500; }
+
+        main {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 36px 24px 60px;
+        }
+
+        .page-title { font-size: 24px; font-weight: 800; margin-bottom: 8px; }
+        .page-desc { font-size: 14px; color: var(--muted); margin-bottom: 28px; line-height: 1.6; }
+
+        .section {
+            background: var(--card);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 24px 28px;
+            margin-bottom: 20px;
+        }
+        .section-title {
+            font-size: 16px; font-weight: 700; margin-bottom: 4px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .section-desc { font-size: 13px; color: var(--muted); margin-bottom: 16px; line-height: 1.5; }
+
+        .badge {
+            display: inline-block; font-size: 11px; font-weight: 700;
+            padding: 2px 8px; border-radius: 4px;
+        }
+        .badge-green { background: var(--green-light); color: #065F46; }
+        .badge-red { background: var(--red-light); color: #991B1B; }
+        .badge-blue { background: var(--blue-light); color: #1E40AF; }
+        .badge-orange { background: var(--orange-light); color: var(--orange-darker); }
+
+        .pvc-status {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 0; border-bottom: 1px solid var(--border);
+            margin-bottom: 12px;
+        }
+        .pvc-status:last-child { border-bottom: none; margin-bottom: 0; }
+        .pvc-detail { font-size: 13px; color: var(--muted); }
+        .pvc-detail strong { color: var(--text); font-weight: 600; }
+
+        .size-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .size-row label { font-size: 13px; font-weight: 600; white-space: nowrap; }
+        .size-select {
+            flex: 1; padding: 8px 12px; border-radius: 8px;
+            border: 1.5px solid var(--border);
+            font-size: 13px; color: var(--text); background: var(--bg);
+            cursor: pointer; outline: none;
+        }
+        .size-select:focus { border-color: var(--orange); }
+
+        .btn-row { display: flex; gap: 8px; margin-top: 12px; }
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            padding: 9px 20px; border-radius: 8px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            border: none; transition: all .15s ease;
+        }
+        .btn-create { background: var(--green); color: white; }
+        .btn-create:hover { background: #047857; }
+        .btn-expand { background: var(--blue); color: white; }
+        .btn-expand:hover { background: #1D4ED8; }
+        .btn-delete { background: var(--red); color: white; }
+        .btn-delete:hover { background: #B91C1C; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .s3-endpoint {
+            font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+            font-size: 13px; background: #F1F5F9;
+            padding: 8px 14px; border-radius: 6px; color: var(--text);
+        }
+
+        .toast {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+            padding: 12px 24px; border-radius: 10px;
+            font-size: 14px; font-weight: 600;
+            box-shadow: 0 8px 30px rgba(0,0,0,.15);
+            opacity: 0; transition: opacity .3s ease; z-index: 1000;
+        }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #065F46; color: white; }
+        .toast.error { background: #991B1B; color: white; }
+
+        .loading { text-align: center; padding: 60px; color: var(--muted); font-size: 15px; }
+        .spinner {
+            display: inline-block; width: 24px; height: 24px;
+            border: 3px solid var(--border); border-top-color: var(--orange);
+            border-radius: 50%; animation: spin .8s linear infinite;
+            margin-bottom: 12px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,.5); z-index: 999;
+            align-items: center; justify-content: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: white; border-radius: var(--radius);
+            padding: 28px; max-width: 400px; width: 90%;
+            box-shadow: 0 20px 60px rgba(0,0,0,.25);
+        }
+        .modal h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; color: var(--red); }
+        .modal p { font-size: 13px; color: var(--muted); margin-bottom: 16px; line-height: 1.5; }
+        .modal input {
+            width: 100%; padding: 10px 14px; border-radius: 8px;
+            border: 1.5px solid var(--border); font-size: 14px;
+            margin-bottom: 16px; outline: none;
+        }
+        .modal input:focus { border-color: var(--red); }
+        .modal .btn-row { justify-content: flex-end; }
+        .btn-cancel {
+            background: #F1F5F9; color: var(--text); border: 1.5px solid var(--border);
+            padding: 9px 20px; border-radius: 8px; font-size: 13px; font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-orange { background: var(--orange); color: white; }
+        .btn-orange:hover { background: var(--orange-dark); }
+        .btn-sm {
+            padding: 6px 14px; font-size: 12px; border-radius: 6px;
+        }
+
+        .share-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 0; border-bottom: 1px solid var(--border);
+        }
+        .share-row:last-child { border-bottom: none; }
+        .share-user { font-size: 14px; font-weight: 600; }
+        .share-mode { font-size: 12px; color: var(--muted); margin-left: 8px; }
+
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .form-group input, .form-group select {
+            width: 100%; padding: 8px 12px; border-radius: 8px;
+            border: 1.5px solid var(--border); font-size: 13px;
+            color: var(--text); background: var(--bg); outline: none;
+        }
+        .form-group input:focus, .form-group select:focus { border-color: var(--orange); }
+        .form-inline { display: flex; align-items: center; gap: 10px; }
+        .toggle-label {
+            display: flex; align-items: center; gap: 8px; cursor: pointer;
+            font-size: 14px; font-weight: 600;
+        }
+        .toggle-label input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--orange); }
+        .empty-msg { font-size: 13px; color: var(--muted); padding: 8px 0; }
+
+        .overview-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .overview-table th {
+            text-align: left; font-size: 11px; font-weight: 700;
+            color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+            padding: 6px 8px; border-bottom: 2px solid var(--border);
+        }
+        .overview-table td {
+            padding: 8px; border-bottom: 1px solid var(--border);
+            vertical-align: middle;
+        }
+        .overview-table tr:last-child td { border-bottom: none; }
+        .overview-sub { font-size: 14px; font-weight: 700; margin-top: 16px; margin-bottom: 8px; }
+        .overview-sub:first-child { margin-top: 0; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="brand">
+        <span class="brand-logo">&#128062;</span>
+        <span class="brand-name">k8s-pups</span>
+        <span class="brand-sep"></span>
+        <span class="brand-tag">Storage Settings</span>
+    </div>
+    <div class="user-chip" id="user-id"></div>
+</header>
+
+<main>
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <div>Loading storage settings...</div>
+    </div>
+
+    <div id="content" style="display:none;">
+        <h1 class="page-title">Storage Settings</h1>
+        <p class="page-desc">
+            Manage your personal storage volumes. Create, expand, or delete PVCs as needed.
+            Storage type is selected per session when launching a tool.
+        </p>
+
+        <!-- 0. Current Status -->
+        <div class="section" id="sec-overview">
+            <div class="section-title">Current Status</div>
+            <div class="section-desc">
+                Overview of your storage volumes and active sessions.
+            </div>
+            <div id="overview-body"></div>
+        </div>
+
+        <!-- 1. Longhorn PVC -->
+        <div class="section" id="sec-longhorn">
+            <div class="section-title">
+                Longhorn (Block Storage)
+                <span class="badge badge-green" style="font-size:10px;">RWO / Fast</span>
+            </div>
+            <div class="section-desc">
+                High-performance block storage. Single Pod access only (ReadWriteOnce).
+            </div>
+            <div id="longhorn-body"></div>
+        </div>
+
+        <!-- 3. NFS k8s PVC -->
+        <div class="section" id="sec-nfs-k8s">
+            <div class="section-title">
+                NFS (k8s Dedicated)
+                <span class="badge badge-blue" style="font-size:10px;">RWX / Shared</span>
+            </div>
+            <div class="section-desc">
+                Network filesystem dedicated to k8s. Multi-Pod shared access (ReadWriteMany).
+            </div>
+            <div id="nfs-k8s-body"></div>
+        </div>
+
+        <!-- 4. NFS Home PVC -->
+        <div class="section" id="sec-nfs-home">
+            <div class="section-title">
+                NFS (Home Directory)
+                <span class="badge badge-blue" style="font-size:10px;">RWX / Shared</span>
+            </div>
+            <div class="section-desc">
+                Mount your physical cluster home directory. Requires LDAP POSIX account.
+            </div>
+            <div id="nfs-home-body"></div>
+        </div>
+
+        <!-- 5. Object Storage (S3) -->
+        <div class="section">
+            <div class="section-title">Object Storage (S3)</div>
+            <div class="section-desc">
+                S3-compatible object storage. Access via S3 API (aws-cli, boto3, mc).
+            </div>
+            <div class="s3-endpoint">Endpoint: minio.minio.svc.cluster.local:9000</div>
+            <div style="margin-top: 8px; font-size: 12px; color: var(--muted);">
+                Buckets are managed manually via mc/aws-cli. Independent of PVC lifecycle.
+            </div>
+        </div>
+
+        <!-- 6. My Share Settings -->
+        <div class="section" id="sec-my-share">
+            <div class="section-title">
+                My Share Settings
+                <span class="badge badge-orange" style="font-size:10px;">NFS Sharing</span>
+            </div>
+            <div class="section-desc">
+                Allow other users to mount your NFS (k8s) volume as a shared read-only or read-write volume.
+            </div>
+            <div id="my-share-body"></div>
+        </div>
+
+        <!-- 7. Available Shared Volumes -->
+        <div class="section" id="sec-available-shares">
+            <div class="section-title">
+                Available Shared Volumes
+                <span class="badge badge-blue" style="font-size:10px;">From Others</span>
+            </div>
+            <div class="section-desc">
+                NFS volumes shared by other users that you can mount.
+            </div>
+            <div id="available-shares-body"></div>
+        </div>
+
+        <!-- 8. My Mounted Shares -->
+        <div class="section" id="sec-mounted-shares">
+            <div class="section-title">
+                My Mounted Shares
+                <span class="badge badge-green" style="font-size:10px;">Active</span>
+            </div>
+            <div class="section-desc">
+                Shared volumes you have mounted. These can be added as extra mounts when launching Pods.
+            </div>
+            <div id="mounted-shares-body"></div>
+        </div>
+    </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal-overlay" id="delete-modal">
+    <div class="modal">
+        <h3>Remove PVC</h3>
+        <p id="delete-msg">This will remove the PVC. Type <strong>DELETE</strong> to confirm.</p>
+        <input type="text" id="delete-confirm-input" placeholder='Type "DELETE" to confirm'>
+        <div class="btn-row">
+            <button class="btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+            <button class="btn btn-delete" id="delete-confirm-btn" onclick="confirmDelete()">Remove PVC</button>
+        </div>
+    </div>
+</div>
+
+<script>
+var API_BASE = '/pups';
+var currentData = null;
+var pendingDeleteType = null;
+
+fetch('config').then(function(r) { return r.json(); }).then(function(c) {
+    API_BASE = c.apiBase;
+    loadSettings();
+}).catch(function() { loadSettings(); });
+
+var TYPE_LABELS = {
+    'longhorn': 'Longhorn',
+    'nfs-k8s': 'NFS (k8s)',
+    'nfs-home': 'NFS (Home)'
+};
+
+function showToast(msg, type) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show ' + type;
+    setTimeout(function() { t.className = 'toast'; }, 3500);
+}
+
+function loadSettings() {
+    fetch(API_BASE + '/storage/info', { credentials: 'include' })
+        .then(function(r) {
+            if (!r.ok) throw new Error('Failed to load (HTTP ' + r.status + ')');
+            return r.json();
+        })
+        .then(function(data) {
+            currentData = data;
+            render(data);
+        })
+        .catch(function(err) {
+            document.getElementById('loading').innerHTML =
+                '<div style="color:#991B1B;">Failed to load storage settings.<br>' + err.message + '</div>';
+        });
+}
+
+function render(data) {
+    document.getElementById('user-id').textContent = data.userId || '';
+    var pvc = data.pvcInfo || {};
+    var sizeOpts = data.storageSizeOptions || [];
+    var currentSize = data.currentStorageSize || '100Gi';
+
+    // Overview (storage + sessions)
+    renderOverview(pvc, data.activeSessions || []);
+
+    // Per-type sections
+    renderLonghorn(pvc.longhorn || {}, sizeOpts, currentSize);
+    renderNfsSection('nfs-k8s', pvc['nfs-k8s'] || {});
+    renderNfsSection('nfs-home', pvc['nfs-home'] || {});
+
+    // Share sections
+    renderMyShareSettings(data.myShareSettings || {});
+    renderAvailableShares(data.sharableVolumes || []);
+    renderMountedShares(data.mySharedPvcs || []);
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+}
+
+function renderOverview(pvc, sessions) {
+    var body = document.getElementById('overview-body');
+    var html = '';
+
+    // Storage volumes table
+    html += '<div class="overview-sub">Storage Volumes</div>';
+    html += '<table class="overview-table"><thead><tr>';
+    html += '<th>Type</th><th>Status</th><th>Size</th><th>State</th>';
+    html += '</tr></thead><tbody>';
+
+    var types = ['longhorn', 'nfs-k8s', 'nfs-home'];
+    types.forEach(function(t) {
+        var info = pvc[t] || {};
+        var exists = info.exists === 'true';
+        var inUse = info.inUse === 'true';
+        html += '<tr>';
+        html += '<td style="font-weight:600;">' + TYPE_LABELS[t] + '</td>';
+        if (exists) {
+            html += '<td><span class="badge badge-green">Created</span></td>';
+            html += '<td>' + (info.size && info.size !== '0' ? info.size : '-') + '</td>';
+            html += '<td>';
+            if (inUse) {
+                html += '<span class="badge badge-red">In Use</span>';
+                if (info.usedBy) {
+                    html += ' <span style="font-size:12px;color:var(--muted);">' + info.usedBy + '</span>';
+                }
+            } else {
+                html += '<span style="color:var(--muted);">Idle</span>';
+            }
+            html += '</td>';
+        } else {
+            html += '<td><span style="color:var(--muted);">Not created</span></td>';
+            html += '<td>-</td><td>-</td>';
+        }
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+
+    // Active sessions
+    html += '<div class="overview-sub" style="margin-top:20px;">Active Sessions</div>';
+    if (!sessions || sessions.length === 0) {
+        html += '<div class="empty-msg">No active sessions.</div>';
+    } else {
+        sessions.forEach(function(s) {
+            var stateLabel = s.state === 'READY' ? 'Ready' : 'Starting';
+            var stateBadge = s.state === 'READY'
+                ? '<span class="badge badge-green">' + stateLabel + '</span>'
+                : '<span class="badge badge-orange">' + stateLabel + '</span>';
+            var storageLabel = TYPE_LABELS[s.storageType] || s.storageType || 'N/A';
+            html += '<div class="pvc-status">';
+            html += '<div><div style="font-weight:600;font-size:14px;">' + s.toolName + '</div>';
+            html += '<div class="pvc-detail">Storage: <strong>' + storageLabel + '</strong>';
+            if (s.podName) html += ' &nbsp; Pod: <code>' + s.podName + '</code>';
+            html += '</div></div>';
+            html += stateBadge;
+            html += '</div>';
+        });
+    }
+
+    body.innerHTML = html;
+}
+
+function renderLonghorn(info, sizeOpts, currentSize) {
+    var body = document.getElementById('longhorn-body');
+    var exists = info.exists === 'true';
+    var inUse = info.inUse === 'true';
+
+    if (!exists) {
+        var html = '<div class="size-row"><label>Size:</label><select id="longhorn-size" class="size-select">';
+        sizeOpts.forEach(function(s) {
+            html += '<option value="' + s + '"' + (s === currentSize ? ' selected' : '') + '>' + s + '</option>';
+        });
+        html += '</select></div>';
+        html += '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'longhorn\')">Create Longhorn PVC</button></div>';
+        body.innerHTML = html;
+        return;
+    }
+
+    var usedBy = info.usedBy || '';
+    var html = '<div class="pvc-status"><div class="pvc-detail">' +
+        '<strong>Size:</strong> ' + (info.size || '-') +
+        ' &nbsp; <strong>Status:</strong> ' + (info.phase || '-') +
+        '</div>' +
+        (inUse ? '<span class="badge badge-red">In Use</span>' : '') +
+        '</div>';
+    if (inUse && usedBy) {
+        html += '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Pod: <code>' +
+            usedBy.split(',').join('</code>, <code>') + '</code></div>';
+    }
+
+    html += '<div class="size-row"><label>Expand to:</label><select id="longhorn-expand-size" class="size-select">';
+    sizeOpts.forEach(function(s) {
+        html += '<option value="' + s + '"' + (s === info.size ? ' selected' : '') + '>' + s + '</option>';
+    });
+    html += '</select></div>';
+
+    html += '<div class="btn-row">';
+    html += '<button class="btn btn-expand" onclick="expandPvc()">Expand</button>';
+    html += '<button class="btn btn-delete" ' + (inUse ? 'disabled title="Cannot delete while in use"' : '') +
+        ' onclick="openDeleteModal(\'longhorn\')">Delete PVC</button>';
+    html += '</div>';
+    body.innerHTML = html;
+}
+
+function renderNfsSection(type, info) {
+    var body = document.getElementById(type + '-body');
+    var exists = info.exists === 'true';
+    var inUse = info.inUse === 'true';
+
+    if (!exists) {
+        body.innerHTML = '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'' + type + '\')">Create ' + TYPE_LABELS[type] + ' PVC</button></div>';
+        return;
+    }
+
+    var usedBy = info.usedBy || '';
+    var html = '<div class="pvc-status"><div class="pvc-detail">' +
+        '<strong>Status:</strong> ' + (info.phase || '-') +
+        '</div>' +
+        (inUse ? '<span class="badge badge-red">In Use</span>' : '') +
+        '</div>';
+    if (inUse && usedBy) {
+        html += '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Pod: <code>' +
+            usedBy.split(',').join('</code>, <code>') + '</code></div>';
+    }
+    html += '<div class="btn-row">';
+    html += '<button class="btn btn-delete" ' + (inUse ? 'disabled title="Cannot remove while in use"' : '') +
+        ' onclick="openDeleteModal(\'' + type + '\')">Remove PVC</button>';
+    html += '</div>';
+
+    if (type === 'nfs-home') {
+        html += '<div style="margin-top:10px;font-size:12px;color:var(--muted);">' +
+            'Note: Deleting removes only the PV/PVC objects. Files on NFS remain.</div>';
+    }
+    body.innerHTML = html;
+}
+
+function createPvc(type) {
+    var body = { storageType: type };
+    if (type === 'longhorn') {
+        var sel = document.getElementById('longhorn-size');
+        body.storageSize = sel ? sel.value : '100Gi';
+    }
+    fetch(API_BASE + '/storage/pvc/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+    })
+    .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Create failed'); });
+        showToast(TYPE_LABELS[type] + ' PVC created', 'success');
+        setTimeout(loadSettings, 1000);
+    })
+    .catch(function(err) { showToast(err.message, 'error'); });
+}
+
+function expandPvc() {
+    var sel = document.getElementById('longhorn-expand-size');
+    if (!sel) return;
+    fetch(API_BASE + '/storage/pvc/expand', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ storageSize: sel.value })
+    })
+    .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Expand failed'); });
+        showToast('Longhorn PVC expanded to ' + sel.value, 'success');
+        setTimeout(loadSettings, 1000);
+    })
+    .catch(function(err) { showToast(err.message, 'error'); });
+}
+
+function openDeleteModal(type) {
+    pendingDeleteType = type;
+    var msg = 'This will permanently delete the <strong>' + TYPE_LABELS[type] + '</strong> PVC';
+    if (type === 'nfs-home') {
+        msg += '. <br><em>Note: Only the PV/PVC objects are removed. NFS files remain.</em>';
+    } else {
+        msg += ' and <strong>all data will be lost</strong>.';
+    }
+    msg += '<br><br>Type <strong>DELETE</strong> to confirm.';
+    document.getElementById('delete-msg').innerHTML = msg;
+    document.getElementById('delete-confirm-input').value = '';
+    document.getElementById('delete-modal').classList.add('show');
+}
+
+function closeDeleteModal() {
+    pendingDeleteType = null;
+    document.getElementById('delete-modal').classList.remove('show');
+}
+
+function confirmDelete() {
+    var input = document.getElementById('delete-confirm-input').value.trim();
+    if (input !== 'DELETE') {
+        showToast('Please type DELETE to confirm', 'error');
+        return;
+    }
+    if (!pendingDeleteType) return;
+    var type = pendingDeleteType;
+    closeDeleteModal();
+
+    fetch(API_BASE + '/storage/pvc/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ storageType: type, confirmation: 'DELETE' })
+    })
+    .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Delete failed'); });
+        showToast(TYPE_LABELS[type] + ' PVC deleted', 'success');
+        setTimeout(loadSettings, 1000);
+    })
+    .catch(function(err) { showToast(err.message, 'error'); });
+}
+
+// -- Share settings --
+
+function renderMyShareSettings(settings) {
+    var body = document.getElementById('my-share-body');
+    var enabled = settings['share.enabled'] === 'true';
+    var allow = settings['share.allow'] || '';
+    var mode = settings['share.mode'] || 'ro';
+
+    var html = '<div class="form-group">';
+    html += '<label class="toggle-label">';
+    html += '<input type="checkbox" id="share-enabled" ' + (enabled ? 'checked' : '') + '>';
+    html += 'Enable sharing of my NFS (k8s) volume</label></div>';
+    html += '<div class="form-group"><label>Allowed users (comma-separated, or * for all):</label>';
+    html += '<input type="text" id="share-allow" value="' + allow + '" placeholder="user1,user2 or *"></div>';
+    html += '<div class="form-group"><label>Access mode:</label>';
+    html += '<select id="share-mode" class="size-select" style="width:auto;min-width:160px;">';
+    html += '<option value="ro"' + (mode === 'ro' ? ' selected' : '') + '>Read Only</option>';
+    html += '<option value="rw"' + (mode === 'rw' ? ' selected' : '') + '>Read / Write</option>';
+    html += '</select></div>';
+    html += '<div class="btn-row"><button class="btn btn-orange" onclick="saveShareSettings()">Save Share Settings</button></div>';
+    body.innerHTML = html;
+}
+
+function saveShareSettings() {
+    var enabled = document.getElementById('share-enabled').checked;
+    var allow = document.getElementById('share-allow').value.trim();
+    var mode = document.getElementById('share-mode').value;
+
+    fetch(API_BASE + '/storage/share/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ enabled: String(enabled), allow: allow, mode: mode })
+    })
+    .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Save failed'); });
+        showToast('Share settings saved', 'success');
+    })
+    .catch(function(err) { showToast(err.message, 'error'); });
+}
+
+function renderAvailableShares(volumes) {
+    var body = document.getElementById('available-shares-body');
+    if (!volumes || volumes.length === 0) {
+        body.innerHTML = '<div class="empty-msg">No shared volumes available.</div>';
+        return;
+    }
+    var html = '';
+    volumes.forEach(function(v) {
+        html += '<div class="share-row">';
+        html += '<div><span class="share-user">' + v.userId + '</span>';
+        html += '<span class="share-mode">(' + (v.shareMode === 'rw' ? 'Read/Write' : 'Read Only') + ')</span></div>';
+        html += '<button class="btn btn-create btn-sm" onclick="mountShare(\'' + v.userId + '\')">Mount</button>';
+        html += '</div>';
+    });
+    body.innerHTML = html;
+}
+
+function mountShare(sourceUserId) {
+    fetch(API_BASE + '/storage/share/mount', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ sourceUserId: sourceUserId })
+    })
+    .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Mount failed'); });
+        showToast('Shared volume from ' + sourceUserId + ' mounted', 'success');
+        setTimeout(loadSettings, 1000);
+    })
+    .catch(function(err) { showToast(err.message, 'error'); });
+}
+
+function renderMountedShares(pvcs) {
+    var body = document.getElementById('mounted-shares-body');
+    if (!pvcs || pvcs.length === 0) {
+        body.innerHTML = '<div class="empty-msg">No shared volumes mounted.</div>';
+        return;
+    }
+    var html = '';
+    pvcs.forEach(function(p) {
+        var inUse = p.inUse === 'true';
+        html += '<div class="share-row">';
+        html += '<div><span class="share-user">From: ' + p.sharedFrom + '</span>';
+        html += '<span class="share-mode">' + p.pvcName + '</span>';
+        if (inUse) html += ' <span class="badge badge-red">In Use</span>';
+        html += '</div>';
+        html += '<button class="btn btn-delete btn-sm" ' + (inUse ? 'disabled title="In use by a Pod"' : '') +
+            ' onclick="unmountShare(\'' + p.sharedFrom + '\')">Unmount</button>';
+        html += '</div>';
+    });
+    body.innerHTML = html;
+}
+
+function unmountShare(sourceUserId) {
+    fetch(API_BASE + '/storage/share/unmount', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ sourceUserId: sourceUserId })
+    })
+    .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Unmount failed'); });
+        showToast('Shared volume unmounted', 'success');
+        setTimeout(loadSettings, 1000);
+    })
+    .catch(function(err) { showToast(err.message, 'error'); });
+}
+
+// loadSettings() is called after /config resolves API_BASE (see top of script)
+</script>
+
+</body>
+</html>
