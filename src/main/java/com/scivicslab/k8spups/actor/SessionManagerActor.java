@@ -2,7 +2,7 @@ package com.scivicslab.k8spups.actor;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.k8s.LdapUserInfoClient;
-import com.scivicslab.k8spups.dataset.DatasetRepository;
+import com.scivicslab.k8spups.dataset.DatasetService;
 import com.scivicslab.k8spups.k8s.MountSpec;
 import com.scivicslab.k8spups.k8s.SessionInfo;
 import com.scivicslab.k8spups.k8s.WorkspaceInfo;
@@ -36,8 +36,8 @@ public class SessionManagerActor {
     private final long maxLifetimeMinutes;
     private final Set<String> unlimitedUsers;
     private final LdapUserInfoClient ldapClient;
-    /** Entitlement list; null when the dataset feature is not configured. */
-    private final DatasetRepository datasets;
+    /** The dataset-manager actor; builds the user's dataset view before a session starts. */
+    private final ActorRef<DatasetService> datasets;
 
     /** sessionId -> child ActorRef<SessionActor> */
     private final Map<String, ActorRef<SessionActor>> sessions = new HashMap<>();
@@ -50,7 +50,7 @@ public class SessionManagerActor {
                                int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
                                long maxLifetimeMinutes,
                                Set<String> unlimitedUsers, LdapUserInfoClient ldapClient,
-                               DatasetRepository datasets) {
+                               ActorRef<DatasetService> datasets) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
         this.controllerNamespace = controllerNamespace;
@@ -101,14 +101,10 @@ public class SessionManagerActor {
                 if (!K8sApiClient.DATASET_STORAGE_TYPE.equals(m.storageType())) mounts.add(m);
             }
         }
-        if (datasets == null || !datasets.isAvailable()) return mounts;
+        if (datasets == null) return mounts;
         try {
-            List<String> paths = datasets.activePaths(userId);
-            if (paths.isEmpty()) return mounts;
-            if (k8sClient.syncDatasetView(userId, paths)) {
+            if (datasets.ask(d -> d.prepareView(userId)).get()) {
                 mounts.add(new MountSpec(K8sApiClient.DATASET_STORAGE_TYPE, k8sClient.datasetMountPath(), null));
-            } else {
-                LOG.warning("Dataset view not ready for " + userId + "; session starts without it");
             }
         } catch (Exception e) {
             LOG.warning("Dataset view failed for " + userId + ": " + e.getMessage());

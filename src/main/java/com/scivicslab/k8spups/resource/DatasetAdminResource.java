@@ -2,7 +2,7 @@ package com.scivicslab.k8spups.resource;
 
 import com.scivicslab.k8spups.actor.K8sPupsActorSystem;
 import com.scivicslab.k8spups.dataset.DatasetPath;
-import com.scivicslab.k8spups.dataset.DatasetRepository;
+import com.scivicslab.k8spups.dataset.DatasetService;
 import com.scivicslab.k8spups.tool.JwtRoleExtractor;
 
 import io.quarkus.oidc.IdToken;
@@ -23,10 +23,9 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.function.Function;
 import java.util.logging.Logger;
 
 /**
@@ -42,9 +41,6 @@ public class DatasetAdminResource {
 
     @Inject
     K8sPupsActorSystem actorSystem;
-
-    @Inject
-    DatasetRepository repository;
 
     @Inject
     @IdToken
@@ -65,13 +61,12 @@ public class DatasetAdminResource {
     public Response page(@QueryParam("error") String error) {
         Response denied = requireAdmin();
         if (denied != null) return denied;
-        boolean available = repository.isAvailable();
         Map<String, Object> data = new java.util.HashMap<>();
         data.put("basePath", basePath);
-        data.put("available", available);
+        data.put("available", call(DatasetService::isAvailable));
         data.put("error", error);
-        data.put("files", available ? repository.listFiles() : List.of());
-        data.put("grants", available ? repository.listGrants() : List.of());
+        data.put("files", call(DatasetService::listFiles));
+        data.put("grants", call(DatasetService::listGrants));
         return Response.ok(datasets.data(data).render()).build();
     }
 
@@ -84,7 +79,7 @@ public class DatasetAdminResource {
         if (!DatasetPath.isValidRelativePath(dataset) || !DatasetPath.isValidRelativePath(path)) {
             return back("invalid_path");
         }
-        repository.addFile(dataset, path);
+        call(d -> { d.addFile(dataset, path); return null; });
         LOG.info("Dataset file registered by " + currentUser() + ": " + dataset + " " + path);
         return back(null);
     }
@@ -95,10 +90,9 @@ public class DatasetAdminResource {
     public Response deleteFile(@FormParam("fileId") long fileId) {
         Response denied = requireAdmin();
         if (denied != null) return denied;
-        Set<String> affected = usersOfFile(fileId);
-        repository.deleteFile(fileId);
+        boolean ok = call(d -> d.deleteFile(fileId));
         LOG.info("Dataset file " + fileId + " deleted by " + currentUser());
-        return resync(affected);
+        return back(ok ? null : "sync_failed");
     }
 
     @POST
@@ -118,9 +112,11 @@ public class DatasetAdminResource {
                 return back("invalid_date");
             }
         }
-        repository.grant(user, fileId, expiresAt, currentUser());
-        LOG.info("Dataset grant by " + currentUser() + ": user=" + user + " file=" + fileId + " expires=" + expiresAt);
-        return resync(Set.of(user));
+        Instant expires = expiresAt;
+        String admin = currentUser();
+        boolean ok = call(d -> d.grant(user, fileId, expires, admin));
+        LOG.info("Dataset grant by " + admin + ": user=" + user + " file=" + fileId + " expires=" + expires);
+        return back(ok ? null : "sync_failed");
     }
 
     @POST
@@ -130,26 +126,18 @@ public class DatasetAdminResource {
         Response denied = requireAdmin();
         if (denied != null) return denied;
         if (!DatasetPath.isValidUserName(user)) return back("invalid_user");
-        repository.revoke(user, fileId);
+        boolean ok = call(d -> d.revoke(user, fileId));
         LOG.info("Dataset grant revoked by " + currentUser() + ": user=" + user + " file=" + fileId);
-        return resync(Set.of(user));
-    }
-
-    /** Rebuilds the views of the given users; the page is shown again with an error if one fails. */
-    private Response resync(Set<String> users) {
-        boolean ok = true;
-        for (String user : users) {
-            ok &= actorSystem.getK8sClient().syncDatasetView(user, repository.activePaths(user));
-        }
         return back(ok ? null : "sync_failed");
     }
 
-    private Set<String> usersOfFile(long fileId) {
-        Set<String> users = new LinkedHashSet<>();
-        for (var g : repository.listGrants()) {
-            if (g.fileId() == fileId) users.add(g.user());
+    /** Runs an operation on the dataset-manager actor and waits for its result. */
+    private <T> T call(Function<DatasetService, T> operation) {
+        try {
+            return actorSystem.getDatasetManager().ask(operation::apply).get();
+        } catch (Exception e) {
+            throw new IllegalStateException("Dataset operation failed: " + e.getMessage(), e);
         }
-        return users;
     }
 
     private Response back(String error) {

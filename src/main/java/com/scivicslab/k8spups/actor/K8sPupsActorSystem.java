@@ -160,6 +160,7 @@ public class K8sPupsActorSystem {
 
     private ActorSystem actorSystem;
     private ActorRef<SessionManagerActor> sessionManager;
+    private ActorRef<com.scivicslab.k8spups.dataset.DatasetService> datasetManager;
     private Scheduler scheduler;
     private K8sApiClient k8sClient;
 
@@ -236,10 +237,14 @@ public class K8sPupsActorSystem {
             if (!trimmed.isEmpty()) unlimitedUsers.add(trimmed);
         }
 
+        // Dataset entitlement: one actor serializes list changes and view rebuilds
+        datasetManager = actorSystem.actorOf("dataset-manager",
+            new com.scivicslab.k8spups.dataset.DatasetService(datasetRepository, k8sClient));
+
         // Create SessionManagerActor
         SessionManagerActor manager = new SessionManagerActor(
             k8sClient, plugins, controllerNamespace, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
-            maxLifetimeMinutes, unlimitedUsers, ldapClient, datasetRepository);
+            maxLifetimeMinutes, unlimitedUsers, ldapClient, datasetManager);
         sessionManager = actorSystem.actorOf("session-manager", manager);
 
         // Schedule idle timeout checks
@@ -354,6 +359,10 @@ public class K8sPupsActorSystem {
         } catch (Exception e) {
             LOG.warning("Orphan reconciliation failed: " + e.getMessage());
         }
+    }
+
+    public ActorRef<com.scivicslab.k8spups.dataset.DatasetService> getDatasetManager() {
+        return datasetManager;
     }
 
     public ActorRef<SessionManagerActor> getSessionManager() {
