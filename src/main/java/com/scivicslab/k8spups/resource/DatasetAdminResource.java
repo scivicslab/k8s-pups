@@ -181,6 +181,8 @@ public class DatasetAdminResource {
         data.put("user", user == null ? "" : user);
         data.put("dataset", dataset == null ? "" : dataset);
         data.put("type", type == null ? "" : type);
+        data.put("eventTypes", List.of("dataset.grant", "dataset.revoke", "file.grant", "file.revoke", "import.catalog",
+                "import.access", "dataset.delete", "session.start", "session.stop"));
         data.put("filter", "user=" + enc(user) + "&dataset=" + enc(dataset) + "&type=" + enc(type));
         data.put("result", result);
         data.put("rows", result.items());

@@ -8,7 +8,7 @@
     <input name="dataset" value="{dataset}" placeholder="dataset">
     <select name="type">
         <option value="" {#if !type}selected{/if}>any event</option>
-        {#for t in ['dataset.grant','dataset.revoke','file.grant','file.revoke','import.catalog','import.access','dataset.delete','session.start','session.stop']}
+        {#for t in eventTypes}
         <option value="{t}" {#if t == type}selected{/if}>{t}</option>
         {/for}
     </select>
@@ -16,11 +16,11 @@
 </form>
 <p class="note">{result.total} events.</p>
 <table id="audit-rows">
-    <tr><th>Time (UTC)</th><th>Event</th><th>By</th><th>User</th><th>Dataset</th><th>Session</th><th>Tool</th><th>Detail</th></tr>
+    <tr><th>Time (UTC)</th><th>Event</th><th>By</th><th>User</th><th>Dataset</th><th>Session</th><th>Pod</th><th>Tool</th><th>Detail</th></tr>
     {#for r in rows}
     <tr>
         <td>{r.at}</td><td>{r.eventType}</td><td>{r.actor}</td><td>{#if r.user}{r.user}{/if}</td>
-        <td>{#if r.dataset}{r.dataset}{/if}</td><td>{#if r.sessionId}{r.sessionId}{/if}</td>
+        <td>{#if r.dataset}{r.dataset}{/if}</td><td>{#if r.sessionId}{r.sessionId}{/if}</td><td>{#if r.podName}{r.podName}{/if}</td>
         <td>{#if r.tool}{r.tool}{/if}</td><td>{r.detail}</td>
     </tr>
     {/for}

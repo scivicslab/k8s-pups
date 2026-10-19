@@ -474,34 +474,37 @@ public class SessionManager {
     }
 
     /**
-     * Stops the sessions that mount a dataset their user may no longer read (access revoked, dataset deleted, or
-     * expired). The set of mounted datasets is fixed when a Pod is created, so the Pod must go; the user starts the
-     * tool again and gets the datasets that are still allowed. Called after every change of access and periodically
+     * Stops every session of a user who has a session mounting a dataset the user may no longer read (access
+     * revoked, dataset deleted, or expired). The set of mounted datasets is fixed when a Pod is created, so the Pod
+     * must go; the user starts the tools again and gets the datasets that are still allowed. Called after every change of access and periodically
      * (for expiry).
      */
     public void enforceDatasetAccess(ActorRef<SessionManager> self) {
         ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
         if (datasets == null) return;
         Map<String, Set<String>> activeByUser = new HashMap<>();
-        List<String> toStop = new ArrayList<>();
+        Map<String, String> userOfSession = new HashMap<>();
+        Set<String> revokedUsers = new HashSet<>();
         for (ActorRef<Session> ref : sessions(self)) {
             try {
+                String user = ref.ask(Session::getUserId).get();
+                userOfSession.put(sessionIdOf(ref), user);
                 List<String> mounted = ref.ask(Session::getDatasetNames).get();
                 if (mounted.isEmpty()) continue;
-                String user = ref.ask(Session::getUserId).get();
                 Set<String> active = activeByUser.get(user);
                 if (active == null) {
                     active = new HashSet<>(datasets.ask(d -> d.activeDatasets(user)).get());
                     activeByUser.put(user, active);
                 }
-                if (!active.containsAll(mounted)) toStop.add(sessionIdOf(ref));
+                if (!active.containsAll(mounted)) revokedUsers.add(user);
             } catch (Exception e) {
                 LOG.warning("Dataset access check failed for " + ref.getName() + ": " + e.getMessage());
             }
         }
-        for (String sessionId : toStop) {
-            LOG.info("Stopping session " + sessionId + ": it mounts a dataset its user may no longer read");
-            destroySession(self, sessionId, "access to a mounted dataset was taken away or expired");
+        for (var entry : userOfSession.entrySet()) {
+            if (!revokedUsers.contains(entry.getValue())) continue;
+            LOG.info("Stopping session " + entry.getKey() + ": its user lost access to a mounted dataset");
+            destroySession(self, entry.getKey(), "access to a mounted dataset was taken away or expired");
         }
     }
 
