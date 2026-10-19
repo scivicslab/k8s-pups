@@ -16,6 +16,9 @@ import java.util.logging.Logger;
  */
 public class DatasetService {
 
+    /** Name the controller registers this service under in the actor system. */
+    public static final String ACTOR_NAME = "dataset-manager";
+
     private static final Logger LOG = Logger.getLogger(DatasetService.class.getName());
 
     private final DatasetRepository repository;

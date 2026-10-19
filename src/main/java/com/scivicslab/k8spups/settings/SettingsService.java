@@ -11,6 +11,9 @@ import java.util.Map;
  */
 public class SettingsService {
 
+    /** Name the controller registers this service under in the actor system. */
+    public static final String ACTOR_NAME = "settings-manager";
+
     static final String CONFIG_MAP = "k8s-pups-settings";
     static final String KEY_URL = "gpu-broker-url";
     static final String KEY_MODEL = "default-model";

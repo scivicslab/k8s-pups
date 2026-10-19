@@ -39,10 +39,6 @@ public class SessionManagerActor {
     private final long maxLifetimeMinutes;
     private final Set<String> unlimitedUsers;
     private final LdapUserInfoClient ldapClient;
-    /** The dataset-manager actor; builds the user's dataset view before a session starts. */
-    private final ActorRef<DatasetService> datasets;
-    /** The settings-manager actor; the shared settings are read when a session is created. */
-    private final ActorRef<SettingsService> settings;
 
     /** sessionId -> child ActorRef<SessionActor> */
     private final Map<String, ActorRef<SessionActor>> sessions = new HashMap<>();
@@ -54,8 +50,7 @@ public class SessionManagerActor {
                                String controllerNamespace,
                                int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
                                long maxLifetimeMinutes,
-                               Set<String> unlimitedUsers, LdapUserInfoClient ldapClient,
-                               ActorRef<DatasetService> datasets, ActorRef<SettingsService> settings) {
+                               Set<String> unlimitedUsers, LdapUserInfoClient ldapClient) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
         this.controllerNamespace = controllerNamespace;
@@ -65,8 +60,6 @@ public class SessionManagerActor {
         this.maxLifetimeMinutes = maxLifetimeMinutes;
         this.unlimitedUsers = unlimitedUsers;
         this.ldapClient = ldapClient;
-        this.datasets = datasets;
-        this.settings = settings;
     }
 
     /**
@@ -98,8 +91,10 @@ public class SessionManagerActor {
      * The environment the administrator's shared settings set for this tool, under the tool's own registry
      * config: a value in {@code toolConfigEnv} still wins. Without settings the deployment's values stay.
      */
-    private Map<String, String> withSharedSettings(String toolName, Map<String, String> toolConfigEnv) {
+    private Map<String, String> withSharedSettings(ActorRef<SessionManagerActor> self, String toolName,
+                                                   Map<String, String> toolConfigEnv) {
         Map<String, String> env = new HashMap<>();
+        ActorRef<SettingsService> settings = self.system().getActor(SettingsService.ACTOR_NAME);
         if (settings != null) {
             try {
                 SystemSettings s = settings.ask(SettingsService::load).get();
@@ -118,13 +113,15 @@ public class SessionManagerActor {
      * because a stale view could still list files whose grant was revoked. A mount of type
      * "dataset" requested by the user is dropped: only the controller adds it.
      */
-    private List<MountSpec> withDatasetMount(String userId, List<MountSpec> requested) {
+    private List<MountSpec> withDatasetMount(ActorRef<SessionManagerActor> self, String userId,
+                                             List<MountSpec> requested) {
         List<MountSpec> mounts = new ArrayList<>();
         if (requested != null) {
             for (MountSpec m : requested) {
                 if (!K8sApiClient.DATASET_STORAGE_TYPE.equals(m.storageType())) mounts.add(m);
             }
         }
+        ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
         if (datasets == null) return mounts;
         try {
             if (datasets.ask(d -> d.prepareView(userId)).get()) {
@@ -217,8 +214,8 @@ public class SessionManagerActor {
 
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType, workspaceInfo,
-            withDatasetMount(userId, additionalMounts),
-            withSharedSettings(toolName, toolConfigEnv));
+            withDatasetMount(self, userId, additionalMounts),
+            withSharedSettings(self, toolName, toolConfigEnv));
         SessionActor actor = new SessionActor(info, k8sClient);
 
         // Create as child actor

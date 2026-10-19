@@ -160,8 +160,6 @@ public class K8sPupsActorSystem {
 
     private ActorSystem actorSystem;
     private ActorRef<SessionManagerActor> sessionManager;
-    private ActorRef<com.scivicslab.k8spups.dataset.DatasetService> datasetManager;
-    private ActorRef<com.scivicslab.k8spups.settings.SettingsService> settingsManager;
     private Scheduler scheduler;
     private K8sApiClient k8sClient;
 
@@ -239,17 +237,17 @@ public class K8sPupsActorSystem {
         }
 
         // Dataset entitlement: one actor serializes list changes and view rebuilds
-        datasetManager = actorSystem.actorOf("dataset-manager",
+        actorSystem.actorOf(com.scivicslab.k8spups.dataset.DatasetService.ACTOR_NAME,
             new com.scivicslab.k8spups.dataset.DatasetService(datasetRepository, k8sClient));
 
         // Shared settings: one actor serializes saves and the reads of starting sessions
-        settingsManager = actorSystem.actorOf("settings-manager",
+        actorSystem.actorOf(com.scivicslab.k8spups.settings.SettingsService.ACTOR_NAME,
             new com.scivicslab.k8spups.settings.SettingsService(k8sClient, controllerNamespace));
 
         // Create SessionManagerActor
         SessionManagerActor manager = new SessionManagerActor(
             k8sClient, plugins, controllerNamespace, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
-            maxLifetimeMinutes, unlimitedUsers, ldapClient, datasetManager, settingsManager);
+            maxLifetimeMinutes, unlimitedUsers, ldapClient);
         sessionManager = actorSystem.actorOf("session-manager", manager);
 
         // Schedule idle timeout checks
@@ -366,12 +364,14 @@ public class K8sPupsActorSystem {
         }
     }
 
+    /** The settings-manager actor, looked up by name in the actor system. */
     public ActorRef<com.scivicslab.k8spups.settings.SettingsService> getSettingsManager() {
-        return settingsManager;
+        return actorSystem.getActor(com.scivicslab.k8spups.settings.SettingsService.ACTOR_NAME);
     }
 
+    /** The dataset-manager actor, looked up by name in the actor system. */
     public ActorRef<com.scivicslab.k8spups.dataset.DatasetService> getDatasetManager() {
-        return datasetManager;
+        return actorSystem.getActor(com.scivicslab.k8spups.dataset.DatasetService.ACTOR_NAME);
     }
 
     public ActorRef<SessionManagerActor> getSessionManager() {
