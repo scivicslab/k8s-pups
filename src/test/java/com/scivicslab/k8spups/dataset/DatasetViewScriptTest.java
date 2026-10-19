@@ -28,6 +28,13 @@ class DatasetViewScriptTest {
     }
 
     @Test
+    void neverChangesTheOwnerOfAFile() {
+        String s = DatasetViewScript.build("original", "view", "alice", List.of("JGAD000001/sample1.txt"));
+        assertFalse(s.contains("chown"), "a hardlink is the original file: chown would change the original's owner");
+        assertFalse(s.contains("chmod"));
+    }
+
+    @Test
     void emptyEntitlementProducesAnEmptyWantedList() {
         String s = DatasetViewScript.build("original", "view", "bob", List.of());
         assertTrue(s.contains("<<'EOF_WANTED'\nEOF_WANTED\n"));

@@ -48,7 +48,8 @@ public final class DatasetViewScript {
         sb.append("(cd $V && find . -type f | sed 's|^\\./||' | sort) > /tmp/have\n");
         sb.append("comm -13 /tmp/wanted /tmp/have | while read -r p; do rm -f \"$V/$p\"; done\n");
         sb.append("find $V -mindepth 1 -type d -empty -delete\n");
-        sb.append("chown -R 1000:1000 $V\n");
+        // No chown: a hardlink is the original file, so changing its owner would change the original. The view
+        // directories stay root-owned and world-searchable (0755); who may read a file is set on the original.
         sb.append("echo 'View ready: ").append(sorted.size()).append(" entitled files'\n");
         return sb.toString();
     }
