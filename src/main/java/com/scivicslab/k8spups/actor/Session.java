@@ -315,6 +315,14 @@ public class Session {
         return info.toolPlugin().name();
     }
 
+    /** What the audit trail records about this session: who, which Pod, which datasets it mounted. */
+    public com.scivicslab.k8spups.dataset.DatasetService.SessionMounts getMounts() {
+        boolean fileView = info.additionalMounts() != null && info.additionalMounts().stream()
+            .anyMatch(m -> K8sApiClient.DATASET_STORAGE_TYPE.equals(m.storageType()));
+        return new com.scivicslab.k8spups.dataset.DatasetService.SessionMounts(
+            info.userId(), info.sessionId(), info.podName(), info.toolPlugin().name(), getDatasetNames(), fileView);
+    }
+
     /** Names of the whole datasets this session mounted (fixed when the Pod was created). */
     public List<String> getDatasetNames() {
         List<String> names = new ArrayList<>();

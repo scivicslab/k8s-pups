@@ -254,6 +254,7 @@ public class SessionManager {
 
         // Create as child actor
         ActorRef<Session> childRef = self.createChild(CHILD_PREFIX + sessionId, actor);
+        auditSessionStart(self, childRef);
 
         // Auto-populate memo from the first non-secret user parameter (e.g. project path)
         String autoMemo = "";
@@ -341,8 +342,36 @@ public class SessionManager {
      * ensuring the k8s resource cleanup finishes before the actor thread terminates.
      */
     public void destroySession(ActorRef<SessionManager> self, String sessionId) {
+        destroySession(self, sessionId, "stopped by the user");
+    }
+
+    /** Records in the audit trail that a session that mounted datasets ended, and why. */
+    private void auditSessionStop(ActorRef<SessionManager> self, ActorRef<Session> ref, String reason) {
+        ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
+        if (datasets == null) return;
+        try {
+            DatasetService.SessionMounts mounts = ref.ask(Session::getMounts).get();
+            if (!mounts.datasets().isEmpty() || mounts.fileView()) datasets.tell(d -> d.auditSessionStop(mounts, reason));
+        } catch (Exception e) {
+            LOG.warning("Audit of the stop of " + ref.getName() + " failed: " + e.getMessage());
+        }
+    }
+
+    private void auditSessionStart(ActorRef<SessionManager> self, ActorRef<Session> ref) {
+        ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
+        if (datasets == null) return;
+        try {
+            DatasetService.SessionMounts mounts = ref.ask(Session::getMounts).get();
+            if (!mounts.datasets().isEmpty() || mounts.fileView()) datasets.tell(d -> d.auditSessionStart(mounts));
+        } catch (Exception e) {
+            LOG.warning("Audit of the start of " + ref.getName() + " failed: " + e.getMessage());
+        }
+    }
+
+    public void destroySession(ActorRef<SessionManager> self, String sessionId, String reason) {
         ActorRef<Session> ref = session(self, sessionId);
         if (ref != null) {
+            auditSessionStop(self, ref, reason);
             try {
                 // Wait for stop() to complete before closing the actor
                 ref.tell(Session::stop).get();
@@ -440,7 +469,7 @@ public class SessionManager {
             }
         }
         for (String sessionId : toRemove) {
-            destroySession(self, sessionId);
+            destroySession(self, sessionId, "idle or lifetime limit reached");
         }
     }
 
@@ -472,7 +501,7 @@ public class SessionManager {
         }
         for (String sessionId : toStop) {
             LOG.info("Stopping session " + sessionId + ": it mounts a dataset its user may no longer read");
-            destroySession(self, sessionId);
+            destroySession(self, sessionId, "access to a mounted dataset was taken away or expired");
         }
     }
 

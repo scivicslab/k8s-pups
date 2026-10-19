@@ -1,0 +1,34 @@
+{#include dataset-base title='Audit trail'}
+{#content}
+<h1>Audit trail</h1>
+<p class="note">Newest first. Administrator changes, imports, and which session mounted which dataset (and when it ended).
+    The trail cannot be changed through the database.</p>
+<form method="get" action="{basePath}/datasets/audit" id="audit-filter">
+    <input name="user" value="{user}" placeholder="user">
+    <input name="dataset" value="{dataset}" placeholder="dataset">
+    <select name="type">
+        <option value="" {#if !type}selected{/if}>any event</option>
+        {#for t in ['dataset.grant','dataset.revoke','file.grant','file.revoke','import.catalog','import.access','dataset.delete','session.start','session.stop']}
+        <option value="{t}" {#if t == type}selected{/if}>{t}</option>
+        {/for}
+    </select>
+    <button type="submit">Filter</button>
+</form>
+<p class="note">{result.total} events.</p>
+<table id="audit-rows">
+    <tr><th>Time (UTC)</th><th>Event</th><th>By</th><th>User</th><th>Dataset</th><th>Session</th><th>Tool</th><th>Detail</th></tr>
+    {#for r in rows}
+    <tr>
+        <td>{r.at}</td><td>{r.eventType}</td><td>{r.actor}</td><td>{#if r.user}{r.user}{/if}</td>
+        <td>{#if r.dataset}{r.dataset}{/if}</td><td>{#if r.sessionId}{r.sessionId}{/if}</td>
+        <td>{#if r.tool}{r.tool}{/if}</td><td>{r.detail}</td>
+    </tr>
+    {/for}
+</table>
+<div class="pager">
+    Page {result.page + 1} of {result.pages}
+    {#if result.hasPrevious}<a href="{basePath}/datasets/audit?{filter}&page={prev}" id="prev">&larr; previous</a>{/if}
+    {#if result.hasNext}<a href="{basePath}/datasets/audit?{filter}&page={next}" id="next">next &rarr;</a>{/if}
+</div>
+{/content}
+{/include}

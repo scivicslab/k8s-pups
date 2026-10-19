@@ -263,6 +263,42 @@ public class DatasetRepository {
         return new Page<>(rows, total, page, size);
     }
 
+
+    // ── audit trail ────────────────────────────────────────────────────────────
+
+    public record AuditRow(long id, Instant at, String eventType, String actor, String user, String sessionId,
+                           String podName, String tool, String dataset, String detail) {}
+
+    /** Appends one event to the audit trail (nothing can change it afterwards). */
+    public void addAudit(String eventType, String actor, String user, String sessionId, String podName,
+                         String tool, String dataset, String detail) {
+        execute("INSERT INTO audit_event (event_type, actor, user_name, session_id, pod_name, tool, dataset, detail) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ps -> {
+                ps.setString(1, eventType); ps.setString(2, actor); ps.setString(3, user); ps.setString(4, sessionId);
+                ps.setString(5, podName); ps.setString(6, tool); ps.setString(7, dataset);
+                ps.setString(8, detail == null ? "" : detail);
+            });
+    }
+
+    /** The audit trail, newest first; each filter that is not empty must match (user, dataset and type exactly). */
+    public Page<AuditRow> audit(String user, String dataset, String type, int page, int size) {
+        String where = "WHERE (? = '' OR user_name = ?) AND (? = '' OR dataset = ?) AND (? = '' OR event_type = ?)";
+        String u = user == null ? "" : user.strip(), d = dataset == null ? "" : dataset.strip(), t = type == null ? "" : type.strip();
+        long total = query("SELECT count(*) FROM audit_event " + where,
+            ps -> { ps.setString(1, u); ps.setString(2, u); ps.setString(3, d); ps.setString(4, d); ps.setString(5, t); ps.setString(6, t); },
+            rs -> rs.getLong(1)).get(0);
+        List<AuditRow> rows = query("SELECT id, at, event_type, actor, user_name, session_id, pod_name, tool, dataset, detail "
+                + "FROM audit_event " + where + " ORDER BY id DESC LIMIT ? OFFSET ?",
+            ps -> {
+                ps.setString(1, u); ps.setString(2, u); ps.setString(3, d); ps.setString(4, d); ps.setString(5, t); ps.setString(6, t);
+                ps.setInt(7, size); ps.setInt(8, page * size);
+            },
+            rs -> new AuditRow(rs.getLong(1), rs.getTimestamp(2).toInstant(), rs.getString(3), rs.getString(4), rs.getString(5),
+                rs.getString(6), rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10)));
+        return new Page<>(rows, total, page, size);
+    }
+
     private AccessRow accessRow(ResultSet rs) throws SQLException {
         Timestamp granted = rs.getTimestamp(3);
         Timestamp expires = rs.getTimestamp(4);

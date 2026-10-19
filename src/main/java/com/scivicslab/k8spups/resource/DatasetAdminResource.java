@@ -78,6 +78,10 @@ public class DatasetAdminResource {
     @Location("dataset-user")
     Template userPage;
 
+    @Inject
+    @Location("dataset-audit")
+    Template auditPage;
+
     @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/pups")
     String basePath;
 
@@ -164,6 +168,27 @@ public class DatasetAdminResource {
         return html(userPage, data);
     }
 
+    @GET
+    @Path("/audit")
+    @Authenticated
+    @Produces(MediaType.TEXT_HTML)
+    public Response audit(@QueryParam("user") String user, @QueryParam("dataset") String dataset,
+                          @QueryParam("type") String type, @QueryParam("page") int page, @QueryParam("msg") String msg) {
+        Response denied = requireAdmin();
+        if (denied != null) return denied;
+        Map<String, Object> data = base(msg);
+        var result = call(d -> d.audit(user, dataset, type, Math.max(page, 0), PAGE_SIZE));
+        data.put("user", user == null ? "" : user);
+        data.put("dataset", dataset == null ? "" : dataset);
+        data.put("type", type == null ? "" : type);
+        data.put("filter", "user=" + enc(user) + "&dataset=" + enc(dataset) + "&type=" + enc(type));
+        data.put("result", result);
+        data.put("rows", result.items());
+        data.put("prev", result.page() - 1);
+        data.put("next", result.page() + 1);
+        return html(auditPage, data);
+    }
+
     // ── imports ────────────────────────────────────────────────────────────────
 
     /** Catalog import: a CSV file with {@code dataset,path} or {@code path} per line, read in chunks. */
@@ -197,7 +222,10 @@ public class DatasetAdminResource {
         } catch (Exception e) {
             return back("/datasets", "the catalog file could not be read: " + e.getMessage());
         }
-        LOG.info("Catalog imported by " + currentUser() + ": lines=" + read + " added=" + added + " errors=" + errorCount);
+        String admin = currentUser();
+        long linesRead = read, filesAdded = added, errorsFound = errorCount;
+        call(d -> { d.auditCatalogImport(admin, linesRead, filesAdded, errorsFound); return null; });
+        LOG.info("Catalog imported by " + admin + ": lines=" + read + " added=" + added + " errors=" + errorCount);
         return back("/datasets", summary("Catalog import", read, added, "files added", errorCount, errors));
     }
 
@@ -259,7 +287,8 @@ public class DatasetAdminResource {
         if (denied != null) return denied;
         String page = "/datasets/d/" + name;
         if (!DatasetPath.isValidUserName(user)) return back(page, "invalid user name");
-        boolean ok = call(d -> d.revokeDataset(user, name));
+        String admin = currentUser();
+        boolean ok = call(d -> d.revokeDataset(user, name, admin));
         enforceAccess();
         LOG.info("Dataset access revoked by " + currentUser() + ": user=" + user + " dataset=" + name);
         return back(page, ok ? "revoked" : "revoked, but the user's file view could not be rebuilt");
@@ -272,7 +301,8 @@ public class DatasetAdminResource {
         Response denied = requireAdmin();
         if (denied != null) return denied;
         if (!DatasetPath.isValidRelativePath(name) || name.contains("/")) return back("/datasets", "invalid dataset name");
-        boolean ok = call(d -> d.deleteDataset(name));
+        String admin = currentUser();
+        boolean ok = call(d -> d.deleteDataset(name, admin));
         enforceAccess();
         LOG.info("Dataset " + name + " deleted by " + currentUser());
         return back("/datasets", ok ? "dataset " + name + " deleted" : "deleted, but a user's file view could not be rebuilt");
@@ -304,7 +334,8 @@ public class DatasetAdminResource {
         Response denied = requireAdmin();
         if (denied != null) return denied;
         if (!DatasetPath.isValidUserName(user)) return back("/datasets/users", "invalid user name");
-        call(d -> d.revokeDataset(user, dataset));
+        String admin = currentUser();
+        call(d -> d.revokeDataset(user, dataset, admin));
         enforceAccess();
         LOG.info("Dataset access revoked by " + currentUser() + ": user=" + user + " dataset=" + dataset);
         return back("/datasets/u/" + user, "revoked " + dataset);
@@ -335,7 +366,8 @@ public class DatasetAdminResource {
         Response denied = requireAdmin();
         if (denied != null) return denied;
         if (!DatasetPath.isValidUserName(user) || !DatasetPath.isValidRelativePath(path)) return back("/datasets/users", "invalid request");
-        call(d -> d.revokeFile(user, path));
+        String admin = currentUser();
+        call(d -> d.revokeFile(user, path, admin));
         LOG.info("File access revoked by " + currentUser() + ": user=" + user + " file=" + path);
         return back("/datasets/u/" + user, "revoked " + path);
     }

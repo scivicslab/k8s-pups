@@ -67,11 +67,19 @@ public class DatasetService {
         return new CatalogImport(text.lines().count(), added, parsed.errors());
     }
 
+    /** Records one finished catalog import (a file is imported in chunks; this is one event per file). */
+    public void auditCatalogImport(String by, long lines, long added, long errors) {
+        repository.addAudit("import.catalog", by, null, null, null, null, null,
+            lines + " lines, " + added + " files added, " + errors + " errors");
+    }
+
     /** Deletes a dataset with its files and access, then rebuilds the views of the users that had access. */
-    public boolean deleteDataset(String name) {
+    public boolean deleteDataset(String name, String by) {
         Set<String> affected = new LinkedHashSet<>();
         for (var a : repository.accessOfDataset(name)) affected.add(a.user());
         repository.deleteDataset(name);
+        repository.addAudit("dataset.delete", by, null, null, null, null, name,
+            "access of " + affected.size() + " users removed with it");
         return rebuild(affected);
     }
 
@@ -91,11 +99,14 @@ public class DatasetService {
 
     public boolean grantDataset(String user, String dataset, Instant expiresAt, String grantedBy) {
         repository.grantDataset(user, dataset, expiresAt, grantedBy);
+        repository.addAudit("dataset.grant", grantedBy, user, null, null, null, dataset,
+            expiresAt == null ? "no expiry" : "valid until " + expiresAt);
         return rebuild(Set.of(user));
     }
 
-    public boolean revokeDataset(String user, String dataset) {
+    public boolean revokeDataset(String user, String dataset, String by) {
         repository.revokeDataset(user, dataset);
+        repository.addAudit("dataset.revoke", by, user, null, null, null, dataset, "");
         return rebuild(Set.of(user));
     }
 
@@ -103,6 +114,10 @@ public class DatasetService {
     public AccessImport importAccess(String text, String grantedBy) {
         var parsed = CsvLines.access(text.lines().toList());
         long granted = parsed.entries().isEmpty() ? 0 : repository.importAccess(parsed.entries(), grantedBy);
+        for (var e : parsed.entries()) {
+            repository.addAudit("import.access", grantedBy, e.user(), null, null, null, e.dataset(),
+                e.expiresAt() == null ? "no expiry" : "valid until " + e.expiresAt());
+        }
         Set<String> users = new LinkedHashSet<>();
         for (var e : parsed.entries()) users.add(e.user());
         rebuild(users);
@@ -120,14 +135,17 @@ public class DatasetService {
         Long id = repository.fileId(path);
         if (id == null) return false;
         repository.grant(user, id, expiresAt, grantedBy);
+        repository.addAudit("file.grant", grantedBy, user, null, null, null, datasetOf(path),
+            path + (expiresAt == null ? ", no expiry" : ", valid until " + expiresAt));
         rebuild(Set.of(user));
         return true;
     }
 
-    public boolean revokeFile(String user, String path) {
+    public boolean revokeFile(String user, String path, String by) {
         Long id = repository.fileId(path);
         if (id == null) return false;
         repository.revoke(user, id);
+        repository.addAudit("file.revoke", by, user, null, null, null, datasetOf(path), path);
         rebuild(Set.of(user));
         return true;
     }
@@ -135,6 +153,40 @@ public class DatasetService {
     /** The datasets the user may read now (access that has not expired). */
     public List<String> activeDatasets(String user) {
         return repository.activeDatasets(user);
+    }
+
+    // ── audit trail ────────────────────────────────────────────────────────────
+
+    /** What the audit trail needs to know about a session that mounts datasets. */
+    public record SessionMounts(String user, String sessionId, String podName, String tool,
+                                List<String> datasets, boolean fileView) {}
+
+    /** Records that a session started with these datasets (one event per dataset, one for the file-level view). */
+    public void auditSessionStart(SessionMounts s) {
+        auditSession("session.start", s, "");
+    }
+
+    /** Records that a session that mounted datasets ended, and why. */
+    public void auditSessionStop(SessionMounts s, String reason) {
+        auditSession("session.stop", s, reason);
+    }
+
+    private void auditSession(String type, SessionMounts s, String detail) {
+        for (String d : s.datasets()) {
+            repository.addAudit(type, "controller", s.user(), s.sessionId(), s.podName(), s.tool(), d, detail);
+        }
+        if (s.fileView()) {
+            repository.addAudit(type, "controller", s.user(), s.sessionId(), s.podName(), s.tool(), null,
+                ("files granted one by one " + detail).strip());
+        }
+    }
+
+    public DatasetRepository.Page<DatasetRepository.AuditRow> audit(String user, String dataset, String type, int page, int size) {
+        return repository.audit(user, dataset, type, page, size);
+    }
+
+    private static String datasetOf(String path) {
+        return path.contains("/") ? path.substring(0, path.indexOf('/')) : path;
     }
 
     // ── mounts of a tool Pod ───────────────────────────────────────────────────
