@@ -71,6 +71,8 @@ public class K8sApiClient {
     // Dataset entitlement views (see DatasetViewScript): NFS location read from config.
     private final String datasetNfsServer;
     private final String datasetBasePath;
+    private final String longhornStorageClass;
+    private final String lustreCsiStorageClass;
     private final String datasetOriginalDir;
     private final String datasetViewDir;
     private final String datasetMountPath;
@@ -119,6 +121,10 @@ public class K8sApiClient {
         var cfg = org.eclipse.microprofile.config.ConfigProvider.getConfig();
         this.datasetNfsServer = cfg.getOptionalValue("k8spups.dataset.nfs-server", String.class).orElse("");
         this.datasetBasePath = cfg.getOptionalValue("k8spups.dataset.base-path", String.class).orElse("");
+        this.longhornStorageClass = cfg.getOptionalValue("k8spups.longhorn.storage-class", String.class)
+            .filter(v -> !v.isBlank()).orElse("longhorn-single");
+        this.lustreCsiStorageClass = cfg.getOptionalValue("k8spups.lustre-csi.storage-class", String.class)
+            .filter(v -> !v.isBlank()).orElse("lustre-csi");
         this.datasetOriginalDir = cfg.getOptionalValue("k8spups.dataset.original-dir", String.class).orElse("original");
         this.datasetViewDir = cfg.getOptionalValue("k8spups.dataset.view-dir", String.class).orElse("view");
         this.datasetMountPath = cfg.getOptionalValue("k8spups.dataset.mount-path", String.class).orElse("/datasets");
@@ -936,7 +942,7 @@ public class K8sApiClient {
 
     /**
      * Creates a Longhorn PVC for the user.
-     * StorageClass: longhorn-single, AccessMode: ReadWriteOnce.
+     * StorageClass: {@code k8spups.longhorn.storage-class} (default longhorn-single), AccessMode: ReadWriteOnce.
      * If the PVC already exists, this is a no-op.
      *
      * @param userId      the user identifier
@@ -950,25 +956,33 @@ public class K8sApiClient {
             LOG.info("Longhorn PVC already exists: " + pvcName);
             return;
         }
-        PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
-            .withNewMetadata()
-                .withName(pvcName)
-                .withNamespace(userPodsNamespace)
-                .addToLabels("app", "k8s-pups-user")
-                .addToLabels("managed-by", "k8s-pups")
-                .addToLabels("user", userId)
-                .addToLabels("storage-type", "longhorn")
-            .endMetadata()
-            .withNewSpec()
-                .withStorageClassName("longhorn-single")
-                .withAccessModes("ReadWriteOnce")
-                .withNewResources()
-                    .addToRequests("storage", new Quantity(storageSize))
-                .endResources()
-            .endSpec()
-            .build();
+        PersistentVolumeClaim pvc = UserPvcs.build(pvcName, userPodsNamespace, userId, "longhorn",
+            longhornStorageClass, "ReadWriteOnce", storageSize);
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
         LOG.info("Longhorn PVC created: " + pvcName + " (" + storageSize + ")");
+    }
+
+    /**
+     * Creates a Lustre CSI PVC for the user (dynamically provisioned, shared by several Pods).
+     * StorageClass: {@code k8spups.lustre-csi.storage-class} (default lustre-csi), AccessMode: ReadWriteMany.
+     * If the PVC already exists, this is a no-op. The StorageClass reclaims with Retain, so deleting the
+     * PVC leaves the PV and the data directory behind.
+     *
+     * @param userId      the user identifier
+     * @param storageSize the requested size (e.g. "100Gi")
+     */
+    public void createLustreCsiPvc(String userId, String storageSize) {
+        String pvcName = userPvcName(userId, "lustre-csi");
+        PersistentVolumeClaim existing = client.persistentVolumeClaims()
+            .inNamespace(userPodsNamespace).withName(pvcName).get();
+        if (existing != null) {
+            LOG.info("Lustre CSI PVC already exists: " + pvcName);
+            return;
+        }
+        PersistentVolumeClaim pvc = UserPvcs.build(pvcName, userPodsNamespace, userId, "lustre-csi",
+            lustreCsiStorageClass, "ReadWriteMany", storageSize);
+        client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+        LOG.info("Lustre CSI PVC created: " + pvcName + " (" + storageSize + ")");
     }
 
     /**
@@ -1467,11 +1481,11 @@ public class K8sApiClient {
     }
 
     /**
-     * Returns PVC info for all storage types (longhorn, nfs-k8s, nfs-home).
+     * Returns PVC info for all storage types (lustre-csi, longhorn, nfs-k8s, nfs-home).
      */
     public Map<String, Object> getAllUserPvcInfo(String userId) {
         Map<String, Object> result = new HashMap<>();
-        for (String type : List.of("longhorn", "nfs-k8s", "nfs-home")) {
+        for (String type : List.of("lustre-csi", "longhorn", "nfs-k8s", "nfs-home")) {
             result.put(type, getUserPvcInfo(userId, type));
         }
         return result;

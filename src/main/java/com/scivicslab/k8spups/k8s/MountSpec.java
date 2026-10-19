@@ -5,7 +5,7 @@ package com.scivicslab.k8spups.k8s;
  * The primary mount (at ToolPlugin.userDataMountPath()) is handled separately;
  * this record describes secondary mounts added by the user or by the controller.
  *
- * @param storageType  storage type key: "longhorn", "nfs-k8s", "nfs-k8s-shared"; "dataset" and "dataset-root"
+ * @param storageType  storage type key: "lustre-csi", "longhorn", "nfs-k8s", "nfs-k8s-shared"; "dataset" and "dataset-root"
  *                     are added by the controller only
  * @param mountPath    absolute path inside the container (e.g. "/data")
  * @param sharedFrom   source userId for shared NFS mounts; null for own PVCs

@@ -842,7 +842,8 @@ public class DashboardResource {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(Map.of("error", "invalid_storage_type")).build();
         }
-        if ("longhorn".equals(storageType) && (storageSize == null || storageSize.isBlank())) {
+        if (("longhorn".equals(storageType) || "lustre-csi".equals(storageType))
+                && (storageSize == null || storageSize.isBlank())) {
             storageSize = actorSystem.getDefaultStorageSize();
         }
         ActorRef<SessionManager> sm = actorSystem.getSessionManager();

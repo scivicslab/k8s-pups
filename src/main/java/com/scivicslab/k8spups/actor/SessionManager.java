@@ -316,6 +316,7 @@ public class SessionManager {
                 if (vol.getPersistentVolumeClaim() != null) {
                     String claim = vol.getPersistentVolumeClaim().getClaimName();
                     if (claim != null) {
+                        if (claim.endsWith("-lustre-csi")) { storageType = "lustre-csi"; break; }
                         if (claim.endsWith("-longhorn")) { storageType = "longhorn"; break; }
                         if (claim.endsWith("-nfs-k8s")) { storageType = "nfs-k8s"; break; }
                         if (claim.startsWith("pups-workspace-")) { storageType = "nfs-home"; break; }
@@ -622,6 +623,7 @@ public class SessionManager {
     public String createUserPvc(String userId, String storageType, String storageSize) {
         try {
             switch (storageType) {
+                case "lustre-csi" -> k8sClient.createLustreCsiPvc(userId, storageSize);
                 case "longhorn" -> k8sClient.createLonghornPvc(userId, storageSize);
                 case "nfs-k8s" -> k8sClient.createNfsK8sPvPvc(userId, storageSize);
                 case "nfs-home" -> {

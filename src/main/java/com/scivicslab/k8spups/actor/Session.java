@@ -70,6 +70,7 @@ public class Session {
             // Storage type determines what gets mounted at userDataMountPath:
             //   nfs-home  -> workspace NFS home directory (LDAP POSIX account)
             //   longhorn  -> Longhorn PVC (RWO block storage)
+            //   lustre-csi -> Lustre CSI PVC (RWX)
             //   nfs-k8s   -> NFS k8s-dedicated PVC (RWX)
             boolean useNfsHome = "nfs-home".equals(storageType)
                 && plugin.workspaceEnabled() && info.workspaceInfo() != null;
@@ -88,6 +89,9 @@ public class Session {
                     if ("longhorn".equals(storageType)) {
                         LOG.info("Auto-creating Longhorn PVC for user=" + info.userId() + " size=" + size);
                         k8sClient.createLonghornPvc(info.userId(), size);
+                    } else if ("lustre-csi".equals(storageType)) {
+                        LOG.info("Auto-creating Lustre CSI PVC for user=" + info.userId() + " size=" + size);
+                        k8sClient.createLustreCsiPvc(info.userId(), size);
                     } else if ("nfs-k8s".equals(storageType)) {
                         LOG.info("Auto-creating nfs-k8s PVC for user=" + info.userId() + " size=" + size);
                         k8sClient.createNfsK8sPvPvc(info.userId(), size);
