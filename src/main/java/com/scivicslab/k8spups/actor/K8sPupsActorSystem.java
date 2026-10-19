@@ -244,7 +244,9 @@ public class K8sPupsActorSystem {
 
         // Shared settings: one actor serializes saves and the reads of starting sessions
         actorSystem.actorOf(com.scivicslab.k8spups.settings.SettingsService.ACTOR_NAME,
-            new com.scivicslab.k8spups.settings.SettingsService(k8sClient, controllerNamespace));
+            new com.scivicslab.k8spups.settings.SettingsService(k8sClient, controllerNamespace,
+                sharedServices.stream().filter(x -> "gpu-broker".equals(x.name())).findFirst()
+                    .map(com.scivicslab.k8spups.plugin.SharedService::clusterUrl).orElse("")));
 
         // Shared services: one actor serializes Launch and Stop
         actorSystem.actorOf(com.scivicslab.k8spups.k8s.SharedServiceControl.ACTOR_NAME,

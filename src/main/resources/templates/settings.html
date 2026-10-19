@@ -22,11 +22,21 @@
 {#if saved}<div class="saved" id="settings-saved">Saved. Tools started from now on use these values; running sessions keep theirs.</div>{/if}
 <form method="post" action="{basePath}/settings" id="settings-form">
     <label for="gpuBrokerUrl">GPU Broker URL</label>
-    <input id="gpuBrokerUrl" name="gpuBrokerUrl" value="{gpuBrokerUrl}" placeholder="http://gpu-broker.gpu-broker.svc:28005">
-    <div class="note">Without a trailing /v1. Used by AI Chat, Jupyter AI, Chat UI with Audit Trail and Code Raptor. Empty keeps the value the deployment was installed with.</div>
+    <input id="gpuBrokerUrl" name="gpuBrokerUrl" value="{gpuBrokerUrl}" placeholder="{defaultBrokerUrl}">
+    <div class="note">Without a trailing /v1. Used by AI Chat, Jupyter AI, Chat UI with Audit Trail and Code Raptor.
+        Empty uses the GPU broker of this deployment{#if defaultBrokerUrl}: <code id="default-broker-url">{defaultBrokerUrl}</code>{/if}.
+        The model list below is read from the broker; save to read it from a changed URL.</div>
     <label for="defaultModel">Default model</label>
+    {#if hasModels}
+    <select id="defaultModel" name="defaultModel" style="width:100%;font-size:.95rem;padding:6px 8px;margin-top:4px;">
+        <option value="" {#if !defaultModel}selected{/if}>(the deployment's own default)</option>
+        {#for m in models}<option value="{m}" {#if m == defaultModel}selected{/if}>{m}</option>{/for}
+    </select>
+    {#else}
     <input id="defaultModel" name="defaultModel" value="{defaultModel}" placeholder="google/gemma-4-26B-A4B-it">
-    <div class="note">The model the tools select by default. Empty keeps the value the deployment was installed with.</div>
+    <div class="note">The broker did not return a model list; type the model name.</div>
+    {/if}
+    <div class="note">The model the tools select by default.</div>
     <button type="submit">Save</button>
 </form>
 </body>

@@ -20,6 +20,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,12 +60,22 @@ public class SettingsAdminResource {
         Response denied = requireAdmin();
         if (denied != null) return denied;
         SystemSettings current = call(SettingsService::load);
+        String defaultUrl = call(SettingsService::defaultBrokerUrl);
+        // The models come from the broker that applies: the saved URL, else the deployment's own.
+        String effectiveUrl = current.gpuBrokerUrl().isEmpty() ? defaultUrl : current.gpuBrokerUrl();
+        List<String> models = new ArrayList<>(call(d -> d.listModels(effectiveUrl)));
+        if (!current.defaultModel().isEmpty() && !models.isEmpty() && !models.contains(current.defaultModel())) {
+            models.add(0, current.defaultModel());   // a saved name the broker does not list stays selectable
+        }
         Map<String, Object> data = new HashMap<>();
         data.put("basePath", basePath);
         data.put("error", error);
         data.put("saved", saved != null);
         data.put("gpuBrokerUrl", current.gpuBrokerUrl());
+        data.put("defaultBrokerUrl", defaultUrl);
         data.put("defaultModel", current.defaultModel());
+        data.put("models", models);
+        data.put("hasModels", !models.isEmpty());
         return Response.ok(settings.data(data).render()).build();
     }
 
