@@ -15,7 +15,7 @@ k8s-pupsダッシュボードの「Storage Settings」カードにより、ユ�
 DashboardResource
     │ バリデーション（選択肢に含まれるか確認）
     ↓
-SessionManagerActor → K8sApiClient
+SessionManager → K8sApiClient
     │ ConfigMap "pups-prefs-{userId}" に保存
     ↓
 user-pods namespace の ConfigMap
@@ -28,11 +28,11 @@ user-pods namespace の ConfigMap
 ```
 ツール Launch ボタン
     ↓
-SessionManagerActor.createSession()
+SessionManager.createSession()
     │ ConfigMap から storageSize を読み取り
     │ SessionInfo.userStoragePreference にセット
     ↓
-SessionActor.start()
+Session.start()
     │ resolveStorageSize():
     │   1. userStoragePreference があればそれを使用
     │   2. なければ ResourceProfile のデフォルト値にフォールバック
@@ -115,8 +115,8 @@ data:
 |---------|---------|
 | `K8sApiClient.java` | `getUserPvcInfo()`, `getUserStoragePreference()`, `saveUserStoragePreference()` 追加 |
 | `SessionInfo.java` | `userStoragePreference` フィールド追加 |
-| `SessionManagerActor.java` | ConfigMap委譲メソッド追加、`createSession()`でストレージ設定読み取り |
-| `SessionActor.java` | `resolveStorageSize()`でユーザー設定優先 |
+| `SessionManager.java` | ConfigMap委譲メソッド追加、`createSession()`でストレージ設定読み取り |
+| `Session.java` | `resolveStorageSize()`でユーザー設定優先 |
 | `K8sPupsActorSystem.java` | `storageSizeOptions`, `defaultStorageSize` 設定プロパティ追加 |
 | `DashboardResource.java` | テンプレートデータ追加、`POST /storage/save` エンドポイント追加 |
 | `application.properties` | `k8spups.storage-size-options`, `k8spups.default-storage-size` 追加、auth permissionに `/storage/*` 追加 |

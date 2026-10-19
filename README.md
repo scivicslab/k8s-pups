@@ -29,10 +29,10 @@ Browser → HAProxy (VIP) → Envoy Gateway (Gateway API)
 
 ```
 K8sPupsActorSystem (CDI singleton, @ApplicationScoped)
-  └─ SessionManagerActor (singleton)
-       ├─ SessionActor (session abc-123)
+  └─ SessionManager (singleton)
+       ├─ Session (session abc-123)
        │    └─ manages: Pod, Service, HTTPRoute, SecurityPolicy
-       ├─ SessionActor (session def-456)
+       ├─ Session (session def-456)
        │    └─ manages: Pod, Service, HTTPRoute, SecurityPolicy
        └─ ...
 ```
@@ -46,8 +46,8 @@ CREATING → STARTING → READY → STOPPING → STOPPED
 ```
 
 1. User selects a tool and clicks **Launch** on the dashboard
-2. `SessionManagerActor` enforces global/per-user session limits, creates a `SessionActor`
-3. `SessionActor.start()` creates Kubernetes resources:
+2. `SessionManager` enforces global/per-user session limits, creates a `Session`
+3. `Session.start()` creates Kubernetes resources:
    - PVC (per-user persistent storage) or NFS workspace PV/PVC
    - Pod (tool container with security context, volumes, probes)
    - Service (ClusterIP in `user-pods` namespace)
@@ -142,8 +142,8 @@ k8s-pups/
 ├── src/main/java/com/scivicslab/k8spups/
 │   ├── actor/             # Actor system, session management
 │   │   ├── K8sPupsActorSystem.java    # CDI singleton, plugin discovery, scheduler
-│   │   ├── SessionManagerActor.java   # Global session management, limits
-│   │   ├── SessionActor.java          # Per-session Pod lifecycle
+│   │   ├── SessionManager.java   # Global session management, limits
+│   │   ├── Session.java          # Per-session Pod lifecycle
 │   │   ├── SessionState.java          # State enum
 │   │   ├── SessionStatus.java         # Immutable status snapshot
 │   │   └── SessionSummary.java        # Aggregated counts

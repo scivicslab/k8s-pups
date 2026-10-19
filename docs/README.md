@@ -297,7 +297,7 @@ chat-uiを起動してKeycloak認証後、`/session/{id}/oauth2/callback` で404
 
 **原因**
 
-`k8s-pups-pod-manager` RoleにPVC作成権限がなく、`SessionActor.start()` がPVC作成でForbiddenエラーになり、以後のSecurityPolicy/HTTPRoute作成に到達できない。
+`k8s-pups-pod-manager` RoleにPVC作成権限がなく、`Session.start()` がPVC作成でForbiddenエラーになり、以後のSecurityPolicy/HTTPRoute作成に到達できない。
 
 **修正方法**
 
