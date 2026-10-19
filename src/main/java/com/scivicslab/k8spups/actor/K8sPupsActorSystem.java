@@ -262,6 +262,9 @@ public class K8sPupsActorSystem {
         scheduler = new Scheduler();
         scheduler.scheduleAtFixedRate("idle-check", sessionManager,
             sm -> sm.checkIdleSessions(sessionManager), 60, 60, TimeUnit.SECONDS);
+        // Access to a dataset can expire; the sessions that still mount it are stopped
+        scheduler.scheduleAtFixedRate("dataset-access-check", sessionManager,
+            sm -> sm.enforceDatasetAccess(sessionManager), 60, 60, TimeUnit.SECONDS);
 
         // Clean up any orphaned resources left from a previous controller instance
         reconcileOrphanedResources();

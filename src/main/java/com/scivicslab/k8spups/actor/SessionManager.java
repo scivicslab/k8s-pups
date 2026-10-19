@@ -141,27 +141,32 @@ public class SessionManager {
     }
 
     /**
-     * Returns the user's additional mounts plus the read-only dataset view when the user has at
-     * least one active grant. The view is rebuilt first; if that fails the mount is left out,
-     * because a stale view could still list files whose grant was revoked. A mount of type
-     * "dataset" requested by the user is dropped: only the controller adds it.
+     * Returns the user's additional mounts plus the read-only dataset mounts: every dataset the user may read as a
+     * subPath mount, and the file-level view when files are granted one by one. Mounts of the dataset types requested
+     * by the user are dropped: only the controller adds them.
      */
     private List<MountSpec> withDatasetMount(ActorRef<SessionManager> self, String userId,
                                              List<MountSpec> requested) {
         List<MountSpec> mounts = new ArrayList<>();
         if (requested != null) {
             for (MountSpec m : requested) {
-                if (!K8sApiClient.DATASET_STORAGE_TYPE.equals(m.storageType())) mounts.add(m);
+                if (!K8sApiClient.isDatasetStorageType(m.storageType())) mounts.add(m);
             }
         }
         ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
         if (datasets == null) return mounts;
         try {
-            if (datasets.ask(d -> d.prepareView(userId)).get()) {
-                mounts.add(new MountSpec(K8sApiClient.DATASET_STORAGE_TYPE, k8sClient.datasetMountPath(), null));
+            DatasetService.Mounts granted = datasets.ask(d -> d.prepareMounts(userId)).get();
+            for (String dataset : granted.datasets()) {
+                // each dataset: a read-only subPath of the user's volume on the original directory
+                mounts.add(new MountSpec(K8sApiClient.DATASET_ROOT_STORAGE_TYPE,
+                    k8sClient.datasetMountPath() + "/" + dataset, null, dataset));
+            }
+            if (granted.fileView()) {
+                mounts.add(new MountSpec(K8sApiClient.DATASET_STORAGE_TYPE, k8sClient.datasetFilesMountPath(), null));
             }
         } catch (Exception e) {
-            LOG.warning("Dataset view failed for " + userId + ": " + e.getMessage());
+            LOG.warning("Dataset mounts failed for " + userId + ": " + e.getMessage());
         }
         return mounts;
     }
@@ -435,6 +440,38 @@ public class SessionManager {
             }
         }
         for (String sessionId : toRemove) {
+            destroySession(self, sessionId);
+        }
+    }
+
+    /**
+     * Stops the sessions that mount a dataset their user may no longer read (access revoked, dataset deleted, or
+     * expired). The set of mounted datasets is fixed when a Pod is created, so the Pod must go; the user starts the
+     * tool again and gets the datasets that are still allowed. Called after every change of access and periodically
+     * (for expiry).
+     */
+    public void enforceDatasetAccess(ActorRef<SessionManager> self) {
+        ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
+        if (datasets == null) return;
+        Map<String, Set<String>> activeByUser = new HashMap<>();
+        List<String> toStop = new ArrayList<>();
+        for (ActorRef<Session> ref : sessions(self)) {
+            try {
+                List<String> mounted = ref.ask(Session::getDatasetNames).get();
+                if (mounted.isEmpty()) continue;
+                String user = ref.ask(Session::getUserId).get();
+                Set<String> active = activeByUser.get(user);
+                if (active == null) {
+                    active = new HashSet<>(datasets.ask(d -> d.activeDatasets(user)).get());
+                    activeByUser.put(user, active);
+                }
+                if (!active.containsAll(mounted)) toStop.add(sessionIdOf(ref));
+            } catch (Exception e) {
+                LOG.warning("Dataset access check failed for " + ref.getName() + ": " + e.getMessage());
+            }
+        }
+        for (String sessionId : toStop) {
+            LOG.info("Stopping session " + sessionId + ": it mounts a dataset its user may no longer read");
             destroySession(self, sessionId);
         }
     }

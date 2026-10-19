@@ -13,7 +13,9 @@ import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
@@ -123,7 +125,7 @@ public class Session {
                     }
                     // The dataset view's PV/PVC is created by the controller while the view is built
                     // (K8sApiClient.syncDatasetView), right before this session is created.
-                    if (K8sApiClient.DATASET_STORAGE_TYPE.equals(extra.storageType())) {
+                    if (K8sApiClient.isDatasetStorageType(extra.storageType())) {
                         continue;
                     }
                     // PVC existence check
@@ -311,6 +313,17 @@ public class Session {
 
     public String getToolName() {
         return info.toolPlugin().name();
+    }
+
+    /** Names of the whole datasets this session mounted (fixed when the Pod was created). */
+    public List<String> getDatasetNames() {
+        List<String> names = new ArrayList<>();
+        if (info.additionalMounts() != null) {
+            for (MountSpec m : info.additionalMounts()) {
+                if (K8sApiClient.DATASET_ROOT_STORAGE_TYPE.equals(m.storageType()) && m.subPath() != null) names.add(m.subPath());
+            }
+        }
+        return names;
     }
 
     public String getUserId() {

@@ -9,10 +9,11 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 /**
- * The dataset entitlement operations: the list of files and grants, and the per-user view directories
- * that follow from it. A plain POJO; the controller runs one instance as the actor {@code dataset-manager}, so
- * every change of a list and every rebuild of a view directory happens one at a time. Two rebuilds of the same
- * user's view (an administrator changing a grant while the user starts a tool) therefore never overlap.
+ * The dataset entitlement operations: the catalog of datasets and files, who may read which dataset (the main grant),
+ * the files granted one by one (the exception), and what a tool Pod gets mounted as a result. A plain POJO; the
+ * controller runs one instance as the actor {@code dataset-manager}, so every change and every rebuild of a user's
+ * file-level view happens one at a time. Two rebuilds of the same view (an administrator changing a grant while the
+ * user starts a tool) therefore never overlap.
  */
 public class DatasetService {
 
@@ -20,6 +21,17 @@ public class DatasetService {
     public static final String ACTOR_NAME = "dataset-manager";
 
     private static final Logger LOG = Logger.getLogger(DatasetService.class.getName());
+
+    /** What a tool Pod of one user gets: whole datasets (subPath mounts) and, if any, the file-level view. */
+    public record Mounts(List<String> datasets, boolean fileView) {
+        public static final Mounts NONE = new Mounts(List.of(), false);
+    }
+
+    /** Result of a catalog import. */
+    public record CatalogImport(long linesRead, long filesAdded, List<String> errors) {}
+
+    /** Result of an access import. */
+    public record AccessImport(long linesRead, long granted, List<String> errors) {}
 
     private final DatasetRepository repository;
     private final K8sApiClient k8sClient;
@@ -34,60 +46,124 @@ public class DatasetService {
         return repository.isAvailable();
     }
 
-    public List<DatasetRepository.FileRow> listFiles() {
-        return isAvailable() ? repository.listFiles() : List.of();
+    // ── catalog ────────────────────────────────────────────────────────────────
+
+    public DatasetRepository.Page<DatasetRepository.DatasetRow> datasets(String q, int page, int size) {
+        return repository.datasets(q, page, size);
     }
 
-    public List<DatasetRepository.GrantRow> listGrants() {
-        return isAvailable() ? repository.listGrants() : List.of();
+    public boolean datasetExists(String name) {
+        return repository.datasetExists(name);
     }
 
-    public void addFile(String dataset, String path) {
-        repository.addFile(dataset, path);
+    public DatasetRepository.Page<String> files(String dataset, String q, int page, int size) {
+        return repository.files(dataset, q, page, size);
     }
 
-    /** Deletes the file and every grant on it, then rebuilds the views of the users that had a grant. */
-    public boolean deleteFile(long fileId) {
+    /** Adds the files of a catalog import ({@code dataset,path} or {@code path} per line). */
+    public CatalogImport importCatalog(String text) {
+        var parsed = CsvLines.catalog(text.lines().toList());
+        long added = parsed.entries().isEmpty() ? 0 : repository.importCatalog(parsed.entries());
+        return new CatalogImport(text.lines().count(), added, parsed.errors());
+    }
+
+    /** Deletes a dataset with its files and access, then rebuilds the views of the users that had access. */
+    public boolean deleteDataset(String name) {
         Set<String> affected = new LinkedHashSet<>();
-        for (var g : repository.listGrants()) {
-            if (g.fileId() == fileId) affected.add(g.user());
-        }
-        repository.deleteFile(fileId);
+        for (var a : repository.accessOfDataset(name)) affected.add(a.user());
+        repository.deleteDataset(name);
         return rebuild(affected);
     }
 
-    /** Grants the file to the user and rebuilds the user's view. */
-    public boolean grant(String user, long fileId, Instant expiresAt, String grantedBy) {
-        repository.grant(user, fileId, expiresAt, grantedBy);
+    // ── access to whole datasets (the main grant) ──────────────────────────────
+
+    public List<DatasetRepository.AccessRow> accessOfDataset(String dataset) {
+        return repository.accessOfDataset(dataset);
+    }
+
+    public List<DatasetRepository.AccessRow> accessOfUser(String user) {
+        return repository.accessOfUser(user);
+    }
+
+    public DatasetRepository.Page<DatasetRepository.UserRow> users(String q, int page, int size) {
+        return repository.users(q, page, size);
+    }
+
+    public boolean grantDataset(String user, String dataset, Instant expiresAt, String grantedBy) {
+        repository.grantDataset(user, dataset, expiresAt, grantedBy);
         return rebuild(Set.of(user));
     }
 
-    /** Revokes the grant and rebuilds the user's view. */
-    public boolean revoke(String user, long fileId) {
-        repository.revoke(user, fileId);
+    public boolean revokeDataset(String user, String dataset) {
+        repository.revokeDataset(user, dataset);
         return rebuild(Set.of(user));
     }
+
+    /** Sets the access of an import ({@code user,dataset[,YYYY-MM-DD]} per line) and rebuilds the users' views. */
+    public AccessImport importAccess(String text, String grantedBy) {
+        var parsed = CsvLines.access(text.lines().toList());
+        long granted = parsed.entries().isEmpty() ? 0 : repository.importAccess(parsed.entries(), grantedBy);
+        Set<String> users = new LinkedHashSet<>();
+        for (var e : parsed.entries()) users.add(e.user());
+        rebuild(users);
+        return new AccessImport(text.lines().count(), granted, parsed.errors());
+    }
+
+    // ── files granted one by one (the exception) ───────────────────────────────
+
+    public DatasetRepository.Page<String> exceptionsOfUser(String user, int page, int size) {
+        return repository.exceptionsOfUser(user, page, size);
+    }
+
+    /** Grants one catalog file to the user; false when the file is not in the catalog. */
+    public boolean grantFile(String user, String path, Instant expiresAt, String grantedBy) {
+        Long id = repository.fileId(path);
+        if (id == null) return false;
+        repository.grant(user, id, expiresAt, grantedBy);
+        rebuild(Set.of(user));
+        return true;
+    }
+
+    public boolean revokeFile(String user, String path) {
+        Long id = repository.fileId(path);
+        if (id == null) return false;
+        repository.revoke(user, id);
+        rebuild(Set.of(user));
+        return true;
+    }
+
+    /** The datasets the user may read now (access that has not expired). */
+    public List<String> activeDatasets(String user) {
+        return repository.activeDatasets(user);
+    }
+
+    // ── mounts of a tool Pod ───────────────────────────────────────────────────
 
     /**
-     * Rebuilds the user's view for a tool that is about to start.
-     *
-     * @return true when the user has at least one active grant and the view is ready to be mounted; false when
-     *         there is nothing to mount, the database is not available, or the view could not be built (a stale
-     *         view could still list files whose grant was revoked, so it must not be mounted)
+     * Prepares what a tool Pod of the user gets mounted: the read-only volume on the original directory (for the
+     * dataset subPath mounts) and the file-level view. The file-level view is rebuilt first; if that fails it is left
+     * out, because a stale view could still list files whose grant was revoked. Datasets need no rebuild: the list
+     * comes from the database at this moment.
      */
-    public boolean prepareView(String userId) {
-        if (!isAvailable()) return false;
+    public Mounts prepareMounts(String userId) {
+        if (!isAvailable()) return Mounts.NONE;
         try {
+            List<String> datasets = repository.activeDatasets(userId);
             List<String> paths = repository.activePaths(userId);
-            if (paths.isEmpty()) return false;
-            if (k8sClient.syncDatasetView(userId, paths)) return true;
-            LOG.warning("Dataset view not ready for " + userId + "; the session starts without it");
+            if (datasets.isEmpty() && paths.isEmpty()) return Mounts.NONE;
+            if (!datasets.isEmpty()) k8sClient.ensureDatasetRootPvPvc(userId);
+            boolean fileView = !paths.isEmpty() && k8sClient.syncDatasetView(userId, paths);
+            if (!paths.isEmpty() && !fileView) {
+                LOG.warning("File-level dataset view not ready for " + userId + "; the session starts without it");
+            }
+            return new Mounts(datasets, fileView);
         } catch (Exception e) {
-            LOG.warning("Dataset view failed for " + userId + ": " + e.getMessage());
+            LOG.warning("Dataset mounts failed for " + userId + ": " + e.getMessage());
+            return Mounts.NONE;
         }
-        return false;
     }
 
+    /** Rebuilds the file-level view of each user (a removed file-level grant must leave the running Pods at once). */
     private boolean rebuild(Set<String> users) {
         boolean ok = true;
         for (String user : users) {

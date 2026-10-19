@@ -58,8 +58,15 @@ public class K8sApiClient {
     // NFS k8s-dedicated config
     private final String nfsK8sServer;
     private final String nfsK8sBasePath;
-    /** Storage type key of the dataset view mount (added by the controller, never by the user). */
+    /** Storage type key of the mount of the file-level view (added by the controller, never by the user). */
     public static final String DATASET_STORAGE_TYPE = "dataset";
+    /** Storage type key of the mounts of whole datasets (subPaths of the original directory; controller only). */
+    public static final String DATASET_ROOT_STORAGE_TYPE = "dataset-root";
+
+    /** True for the storage types that only the controller adds to a session. */
+    public static boolean isDatasetStorageType(String storageType) {
+        return DATASET_STORAGE_TYPE.equals(storageType) || DATASET_ROOT_STORAGE_TYPE.equals(storageType);
+    }
 
     // Dataset entitlement views (see DatasetViewScript): NFS location read from config.
     private final String datasetNfsServer;
@@ -67,6 +74,9 @@ public class K8sApiClient {
     private final String datasetOriginalDir;
     private final String datasetViewDir;
     private final String datasetMountPath;
+    private final String datasetFilesMountPath;
+    /** Group that owns the restricted dataset files; added to the Pods that mount a dataset. Null = none. */
+    private final Long datasetGid;
 
     // Node allowlist for user pods (empty = no restriction)
     private final List<String> allowedNodes;
@@ -112,6 +122,9 @@ public class K8sApiClient {
         this.datasetOriginalDir = cfg.getOptionalValue("k8spups.dataset.original-dir", String.class).orElse("original");
         this.datasetViewDir = cfg.getOptionalValue("k8spups.dataset.view-dir", String.class).orElse("view");
         this.datasetMountPath = cfg.getOptionalValue("k8spups.dataset.mount-path", String.class).orElse("/datasets");
+        this.datasetFilesMountPath = cfg.getOptionalValue("k8spups.dataset.files-mount-path", String.class).orElse("/dataset-files");
+        this.datasetGid = cfg.getOptionalValue("k8spups.dataset.gid", String.class)
+            .filter(v -> !v.isBlank()).map(Long::valueOf).orElse(null);
         this.imageResolver = new com.scivicslab.k8spups.plugin.ToolImageResolver(
                 cfg.getOptionalValue("k8spups.tool-images-file", String.class)
                         .orElse("/etc/k8s-pups/tool-images.properties"),
@@ -1119,9 +1132,61 @@ public class K8sApiClient {
 
     // -- Dataset entitlement views --
 
-    /** Mount path of the user's dataset view inside a tool container. */
+    /** Directory in a tool container under which every granted dataset is mounted as {@code <path>/<dataset>}. */
     public String datasetMountPath() {
         return datasetMountPath;
+    }
+
+    /** Mount path of the user's file-level view (the files granted one by one) inside a tool container. */
+    public String datasetFilesMountPath() {
+        return datasetFilesMountPath;
+    }
+
+    /** PVC name of the user's read-only volume on the original directory (whole datasets are subPaths of it). */
+    public String datasetRootPvcName(String userId) {
+        return "pups-dataset-root-" + sanitizeUserId(userId);
+    }
+
+    private String datasetRootPvName(String userId) {
+        return datasetRootPvcName(userId) + "-" + userPodsNamespace;
+    }
+
+    /** Creates the user's read-only PV/PVC on the original directory if absent (no Pod is needed: nothing is built). */
+    public void ensureDatasetRootPvPvc(String userId) {
+        String pvName = datasetRootPvName(userId);
+        String pvcName = datasetRootPvcName(userId);
+        String path = datasetBasePath + "/" + datasetOriginalDir;
+        if (client.persistentVolumes().withName(pvName).get() == null) {
+            PersistentVolume pv = new PersistentVolumeBuilder()
+                .withNewMetadata().withName(pvName)
+                    .addToLabels("app", "k8s-pups-user").addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId).addToLabels("storage-type", "dataset-root")
+                .endMetadata()
+                .withNewSpec()
+                    .withCapacity(Map.of("storage", new Quantity("1Ti")))
+                    .withAccessModes("ReadOnlyMany")
+                    .withPersistentVolumeReclaimPolicy("Retain")
+                    .withStorageClassName("")
+                    .withNewCsi().withDriver("nfs.csi.k8s.io").withVolumeHandle(pvName).withReadOnly(true)
+                        .addToVolumeAttributes("server", datasetNfsServer).addToVolumeAttributes("share", path)
+                    .endCsi()
+                    .withMountOptions(List.of("nfsvers=4", "ro"))
+                .endSpec().build();
+            client.persistentVolumes().resource(pv).create();
+            LOG.info("Dataset root PV created: " + pvName + " -> " + datasetNfsServer + ":" + path);
+        }
+        if (client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() == null) {
+            PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+                .withNewMetadata().withName(pvcName).withNamespace(userPodsNamespace)
+                    .addToLabels("app", "k8s-pups-user").addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("user", userId).addToLabels("storage-type", "dataset-root")
+                .endMetadata()
+                .withNewSpec().withAccessModes("ReadOnlyMany").withStorageClassName("").withVolumeName(pvName)
+                    .withNewResources().addToRequests("storage", new Quantity("1Ti")).endResources()
+                .endSpec().build();
+            client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+            LOG.info("Dataset root PVC created: " + pvcName);
+        }
     }
 
     /** PVC name of the user's dataset view. */
@@ -1720,6 +1785,17 @@ public class K8sApiClient {
      *   nfs-home (useNfsHome=true) -> workspace NFS PVC, run as LDAP UID
      *   longhorn / nfs-k8s         -> user PVC by type name
      */
+    /**
+     * The group that owns the dataset files, for a Pod that mounts a dataset (whole or file-level); nothing for other
+     * Pods. The files are readable by this group only, so a Pod without a dataset mount cannot read them even if it
+     * reached the files.
+     */
+    List<Long> datasetSupplementalGroups(SessionInfo info) {
+        if (datasetGid == null || info.additionalMounts() == null) return List.of();
+        boolean hasDataset = info.additionalMounts().stream().anyMatch(m -> isDatasetStorageType(m.storageType()));
+        return hasDataset ? List.of(datasetGid) : List.of();
+    }
+
     private Pod buildSingleContainerPod(SessionInfo info, ToolPlugin plugin,
             List<EnvVar> envVars, Map<String, Quantity> requests, Map<String, Quantity> limits,
             boolean useNfsHome, String storageType, Map<String, String> labels) {
@@ -1784,17 +1860,19 @@ public class K8sApiClient {
             int idx = 0;
             for (MountSpec extra : info.additionalMounts()) {
                 String volName = "extra-data-" + idx;
-                boolean dataset = DATASET_STORAGE_TYPE.equals(extra.storageType());
-                String pvcName = dataset ? datasetPvcName(info.userId())
+                boolean dataset = isDatasetStorageType(extra.storageType());
+                String pvcName = DATASET_ROOT_STORAGE_TYPE.equals(extra.storageType()) ? datasetRootPvcName(info.userId())
+                    : dataset ? datasetPvcName(info.userId())
                     : extra.sharedFrom() != null
                     ? sharedPvcName(info.userId(), extra.sharedFrom())
                     : userPvcName(info.userId(), extra.storageType());
 
-                mounts.add(new VolumeMountBuilder()
+                var mountBuilder = new VolumeMountBuilder()
                     .withName(volName)
                     .withMountPath(extra.mountPath())
-                    .withReadOnly(dataset)
-                    .build());
+                    .withReadOnly(dataset);
+                if (extra.subPath() != null) mountBuilder.withSubPath(extra.subPath());
+                mounts.add(mountBuilder.build());
 
                 volumes.add(new VolumeBuilder().withName(volName)
                     .withNewPersistentVolumeClaim()
@@ -1885,6 +1963,7 @@ public class K8sApiClient {
                     .withRunAsUser(runAsUid)
                     .withRunAsGroup(runAsGid)
                     .withFsGroup(runAsGid)
+                    .withSupplementalGroups(datasetSupplementalGroups(info))
                     .withNewSeccompProfile().withType(plugin.seccompProfileType()).endSeccompProfile()
                 .endSecurityContext()
                 .withAffinity(buildNodeAffinity())

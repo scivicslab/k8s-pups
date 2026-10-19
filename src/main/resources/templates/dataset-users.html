@@ -1,0 +1,35 @@
+{#include dataset-base title='Users'}
+{#content}
+<h1>Users</h1>
+<form method="get" action="{basePath}/datasets/users">
+    <input name="q" value="{q}" placeholder="search by user name" id="search">
+    <button type="submit">Search</button>
+</form>
+<p class="note">{result.total} users with access. Open a user to grant or revoke.</p>
+<table id="user-rows">
+    <tr><th>User</th><th>Datasets</th><th>Files granted one by one</th></tr>
+    {#for r in rows}
+    <tr><td><a href="{basePath}/datasets/u/{r.user}">{r.user}</a></td><td>{r.datasetCount}</td><td>{r.fileCount}</td></tr>
+    {/for}
+</table>
+<div class="pager">
+    Page {result.page + 1} of {result.pages}
+    {#if result.hasPrevious}<a href="{basePath}/datasets/users?q={qEnc}&page={prev}" id="prev">&larr; previous</a>{/if}
+    {#if result.hasNext}<a href="{basePath}/datasets/users?q={qEnc}&page={next}" id="next">next &rarr;</a>{/if}
+</div>
+
+<h2>Open a user</h2>
+<form onsubmit="location = '{basePath}/datasets/u/' + encodeURIComponent(this.user.value); return false;" id="open-user">
+    <input name="user" placeholder="user name" required><button type="submit">Open</button>
+</form>
+
+<h2>Import access</h2>
+<p class="note">One line per access: <code>user,dataset</code> or <code>user,dataset,YYYY-MM-DD</code> (valid through that day,
+    UTC). Datasets must be in the catalog. Choose a file or paste lines.</p>
+<form method="post" action="{basePath}/datasets/import/access" enctype="multipart/form-data" id="import-access">
+    <p><input type="file" name="file"></p>
+    <p><textarea name="text" rows="6" cols="60" placeholder="alice,JGAD000001&#10;bob,JGAD000002,2030-12-31"></textarea></p>
+    <button type="submit">Import access</button>
+</form>
+{/content}
+{/include}

@@ -1,0 +1,48 @@
+{#include dataset-base title=name}
+{#content}
+<h1>Dataset <span id="dataset-name">{name}</span></h1>
+<form class="inline" method="post" action="{basePath}/datasets/d/{name}/delete"
+      onsubmit="return confirm('Delete this dataset, its files and every access to it?')">
+    <button type="submit">Delete dataset</button>
+</form>
+
+<h2>Users with access</h2>
+<table id="dataset-access">
+    <tr><th>User</th><th>Granted by</th><th>Expires</th><th></th></tr>
+    {#for a in access}
+    <tr>
+        <td><a href="{basePath}/datasets/u/{a.user}">{a.user}</a></td><td>{a.grantedBy}</td>
+        <td>{#if a.expiresAt}{a.expiresAt}{#else}never{/if}</td>
+        <td>
+            <form class="inline" method="post" action="{basePath}/datasets/d/{name}/revoke">
+                <input type="hidden" name="user" value="{a.user}"><button type="submit">Revoke</button>
+            </form>
+        </td>
+    </tr>
+    {/for}
+</table>
+<form method="post" action="{basePath}/datasets/d/{name}/grant" id="grant-dataset">
+    <p>
+        <input name="user" placeholder="user name" required>
+        <input name="expiresOn" type="date" title="Valid through this day (UTC); empty = no expiry">
+        <button type="submit">Grant access to the whole dataset</button>
+    </p>
+</form>
+
+<h2>Files</h2>
+<form method="get" action="{basePath}/datasets/d/{name}">
+    <input name="q" value="{q}" placeholder="filter by path" id="search">
+    <button type="submit">Filter</button>
+</form>
+<p class="note">{result.total} files.</p>
+<table id="dataset-files">
+    <tr><th>Path</th></tr>
+    {#for f in files}<tr><td>{f}</td></tr>{/for}
+</table>
+<div class="pager">
+    Page {result.page + 1} of {result.pages}
+    {#if result.hasPrevious}<a href="{basePath}/datasets/d/{name}?q={qEnc}&page={prev}" id="prev">&larr; previous</a>{/if}
+    {#if result.hasNext}<a href="{basePath}/datasets/d/{name}?q={qEnc}&page={next}" id="next">next &rarr;</a>{/if}
+</div>
+{/content}
+{/include}

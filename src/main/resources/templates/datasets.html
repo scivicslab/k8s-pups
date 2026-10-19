@@ -1,81 +1,34 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Datasets - entitlement list</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #1E293B; margin: 0; padding: 24px 32px; }
-        h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 28px; }
-        table { border-collapse: collapse; background: #fff; width: 100%; }
-        th, td { border: 1px solid #E2E8F0; padding: 6px 10px; text-align: left; font-size: .9rem; }
-        th { background: #FFF7ED; }
-        form.inline { display: inline; }
-        input, select, button { font-size: .9rem; padding: 4px 8px; }
-        .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; }
-        .note { color: #64748B; font-size: .85rem; }
-    </style>
-</head>
-<body>
-<p><a href="{basePath}/dashboard">&larr; Dashboard</a></p>
-<h1>Datasets: files and grants</h1>
-{#if error}<div class="error" id="dataset-error">Error: {error}</div>{/if}
+{#include dataset-base title='Datasets'}
+{#content}
+<h1>Datasets</h1>
 {#if !available}
-<div class="error">The entitlement database is not available in this instance.</div>
+<div class="msg">The entitlement database is not available in this instance.</div>
 {#else}
-<p class="note">A grant gives one user read-only access to one file. A change rebuilds that user's view at once; a revoked file disappears from running tools.</p>
-
-<h2>Files</h2>
-<table id="dataset-files">
-    <tr><th>Dataset</th><th>Path (relative to the original directory)</th><th></th></tr>
-    {#for f in files}
-    <tr>
-        <td>{f.dataset}</td><td>{f.path}</td>
-        <td>
-            <form class="inline" method="post" action="{basePath}/datasets/file/delete"
-                  onsubmit="return confirm('Delete this file and every grant on it?')">
-                <input type="hidden" name="fileId" value="{f.id}">
-                <button type="submit">Delete</button>
-            </form>
-        </td>
-    </tr>
-    {/for}
-</table>
-<form method="post" action="{basePath}/datasets/file" id="add-file">
-    <p>
-        <input name="dataset" placeholder="JGAD000001" required>
-        <input name="path" placeholder="JGAD000001/sample1.bam" size="40" required>
-        <button type="submit">Register file</button>
-    </p>
+<form method="get" action="{basePath}/datasets">
+    <input name="q" value="{q}" placeholder="search by dataset name" id="search">
+    <button type="submit">Search</button>
 </form>
-
-<h2>Grants</h2>
-<table id="dataset-grants">
-    <tr><th>User</th><th>Dataset</th><th>Path</th><th>Granted by</th><th>Expires</th><th></th></tr>
-    {#for g in grants}
-    <tr>
-        <td>{g.user}</td><td>{g.dataset}</td><td>{g.path}</td><td>{g.grantedBy}</td>
-        <td>{#if g.expiresAt}{g.expiresAt}{#else}never{/if}</td>
-        <td>
-            <form class="inline" method="post" action="{basePath}/datasets/grant/revoke">
-                <input type="hidden" name="user" value="{g.user}">
-                <input type="hidden" name="fileId" value="{g.fileId}">
-                <button type="submit">Revoke</button>
-            </form>
-        </td>
-    </tr>
+<p class="note">{result.total} datasets. Open a dataset to see its files and who may read it.</p>
+<table id="dataset-rows">
+    <tr><th>Dataset</th><th>Files</th><th>Users with access</th></tr>
+    {#for r in rows}
+    <tr><td><a href="{basePath}/datasets/d/{r.name}">{r.name}</a></td><td>{r.fileCount}</td><td>{r.userCount}</td></tr>
     {/for}
 </table>
-<form method="post" action="{basePath}/datasets/grant" id="add-grant">
-    <p>
-        <input name="user" placeholder="user name" required>
-        <select name="fileId" required>
-            {#for f in files}<option value="{f.id}">{f.path}</option>{/for}
-        </select>
-        <input name="expiresOn" type="date" title="Valid through this day (UTC); empty = no expiry">
-        <button type="submit">Grant</button>
-    </p>
+<div class="pager">
+    Page {result.page + 1} of {result.pages}
+    {#if result.hasPrevious}<a href="{basePath}/datasets?q={qEnc}&page={prev}" id="prev">&larr; previous</a>{/if}
+    {#if result.hasNext}<a href="{basePath}/datasets?q={qEnc}&page={next}" id="next">next &rarr;</a>{/if}
+</div>
+
+<h2>Import the catalog</h2>
+<p class="note">A CSV file with one file per line: <code>dataset,path</code> or just <code>path</code> (the dataset is the first
+    path segment). The path is relative to the original directory. Lines starting with # are ignored. Datasets are created
+    as needed.</p>
+<form method="post" action="{basePath}/datasets/import/catalog" enctype="multipart/form-data" id="import-catalog">
+    <input type="file" name="file" required>
+    <button type="submit">Import catalog</button>
 </form>
 {/if}
-</body>
-</html>
+{/content}
+{/include}
