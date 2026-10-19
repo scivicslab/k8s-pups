@@ -32,11 +32,14 @@ import java.util.logging.Logger;
 
 /**
  * CDI singleton that initializes and owns the POJO-actor ActorSystem.
- * Creates SessionManagerActor and schedules idle timeout checks.
+ * Creates SessionManager and schedules idle timeout checks.
  */
 @ApplicationScoped
 @Startup
 public class K8sPupsActorSystem {
+
+    /** Name the session manager is registered under in the actor system. */
+    static final String SESSION_MANAGER_NAME = "session-manager";
 
     private static final Logger LOG = Logger.getLogger(K8sPupsActorSystem.class.getName());
 
@@ -159,7 +162,6 @@ public class K8sPupsActorSystem {
     private List<com.scivicslab.k8spups.plugin.SharedService> sharedServices = List.of();
 
     private ActorSystem actorSystem;
-    private ActorRef<SessionManagerActor> sessionManager;
     private Scheduler scheduler;
     private K8sApiClient k8sClient;
 
@@ -244,16 +246,20 @@ public class K8sPupsActorSystem {
         actorSystem.actorOf(com.scivicslab.k8spups.settings.SettingsService.ACTOR_NAME,
             new com.scivicslab.k8spups.settings.SettingsService(k8sClient, controllerNamespace));
 
-        // Create SessionManagerActor
-        SessionManagerActor manager = new SessionManagerActor(
+        // Shared services: one actor serializes Launch and Stop
+        actorSystem.actorOf(com.scivicslab.k8spups.k8s.SharedServiceControl.ACTOR_NAME,
+            new com.scivicslab.k8spups.k8s.SharedServiceControl(k8sClient));
+
+        // Create SessionManager
+        SessionManager manager = new SessionManager(
             k8sClient, plugins, controllerNamespace, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
             maxLifetimeMinutes, unlimitedUsers, ldapClient);
-        sessionManager = actorSystem.actorOf("session-manager", manager);
+        ActorRef<SessionManager> sessionManager = actorSystem.actorOf(SESSION_MANAGER_NAME, manager);
 
         // Schedule idle timeout checks
         scheduler = new Scheduler();
         scheduler.scheduleAtFixedRate("idle-check", sessionManager,
-            SessionManagerActor::checkIdleSessions, 60, 60, TimeUnit.SECONDS);
+            sm -> sm.checkIdleSessions(sessionManager), 60, 60, TimeUnit.SECONDS);
 
         // Clean up any orphaned resources left from a previous controller instance
         reconcileOrphanedResources();
@@ -316,6 +322,7 @@ public class K8sPupsActorSystem {
                     && "Running".equals(pod.getStatus().getPhase());
                 if (running) {
                     // Restore this session
+                    ActorRef<SessionManager> sessionManager = getSessionManager();
                     sessionManager.tell(sm -> sm.restoreSession(sessionManager, sessionId, userId, toolName, pod));
                     restored++;
                 } else {
@@ -364,6 +371,11 @@ public class K8sPupsActorSystem {
         }
     }
 
+    /** The shared-service-control actor, looked up by name in the actor system. */
+    public ActorRef<com.scivicslab.k8spups.k8s.SharedServiceControl> getSharedServiceControl() {
+        return actorSystem.getActor(com.scivicslab.k8spups.k8s.SharedServiceControl.ACTOR_NAME);
+    }
+
     /** The settings-manager actor, looked up by name in the actor system. */
     public ActorRef<com.scivicslab.k8spups.settings.SettingsService> getSettingsManager() {
         return actorSystem.getActor(com.scivicslab.k8spups.settings.SettingsService.ACTOR_NAME);
@@ -374,8 +386,8 @@ public class K8sPupsActorSystem {
         return actorSystem.getActor(com.scivicslab.k8spups.dataset.DatasetService.ACTOR_NAME);
     }
 
-    public ActorRef<SessionManagerActor> getSessionManager() {
-        return sessionManager;
+    public ActorRef<SessionManager> getSessionManager() {
+        return actorSystem.getActor(SESSION_MANAGER_NAME);
     }
 
     public List<String> getStorageSizeOptions() {

@@ -2,7 +2,7 @@ package com.scivicslab.k8spups.resource;
 
 import com.scivicslab.k8spups.k8s.SessionPath;
 import com.scivicslab.k8spups.actor.K8sPupsActorSystem;
-import com.scivicslab.k8spups.actor.SessionManagerActor;
+import com.scivicslab.k8spups.actor.SessionManager;
 import com.scivicslab.k8spups.actor.SessionStatus;
 import com.scivicslab.k8spups.actor.SessionSummary;
 import com.scivicslab.k8spups.k8s.MountSpec;
@@ -203,13 +203,13 @@ public class DashboardResource {
     public String showDashboard() {
         String userId = getCurrentUsername();
         List<String> userRoles = getCurrentUserRoles();
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
 
         // Fire all independent ask() calls in parallel
-        var toolsFuture = sm.ask(SessionManagerActor::listAvailableTools);
+        var toolsFuture = sm.ask(SessionManager::listAvailableTools);
         var dynamicToolsFuture = sm.ask(mgr -> mgr.listDynamicToolsForRoles(userRoles));
-        var sessionsFuture = sm.ask(mgr -> mgr.getUserSessions(userId));
-        var summaryFuture = sm.ask(SessionManagerActor::getSessionSummary);
+        var sessionsFuture = sm.ask(mgr -> mgr.getUserSessions(sm, userId));
+        var summaryFuture = sm.ask(mgr -> mgr.getSessionSummary(sm));
         var storageInfoFuture = sm.ask(mgr -> mgr.getUserStorageInfo(userId));
         var allPvcInfoFuture = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId));
         var sharedPvcsFuture = sm.ask(mgr -> mgr.listSharedPvcs(userId));
@@ -298,7 +298,7 @@ public class DashboardResource {
                                   @FormParam("userParam_1") String userParam1,
                                   @FormParam("userParam_2") String userParam2) {
         String userId = getCurrentUsername();
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
 
         // Resolve user-provided parameters to env var name -> value map
         Map<String, String> userParams = resolveUserParams(
@@ -333,8 +333,8 @@ public class DashboardResource {
         if (sessionId == null || sessionId.isBlank()) {
             return Response.seeOther(URI.create("/dashboard?error=missing_session_id")).build();
         }
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
-        sm.tell(mgr -> mgr.destroySession(sessionId));
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
+        sm.tell(mgr -> mgr.destroySession(sm, sessionId));
         return Response.seeOther(URI.create("/dashboard")).build();
     }
 
@@ -347,8 +347,8 @@ public class DashboardResource {
         if (sessionId == null || sessionId.isBlank()) {
             return Response.seeOther(URI.create("/dashboard")).build();
         }
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
-        sm.tell(mgr -> mgr.updateMemo(sessionId, memo != null ? memo.strip() : ""));
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
+        sm.tell(mgr -> mgr.updateMemo(sm, sessionId, memo != null ? memo.strip() : ""));
         return Response.seeOther(URI.create("/dashboard")).build();
     }
 
@@ -358,14 +358,14 @@ public class DashboardResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response getSessionStatus() {
         String userId = getCurrentUsername();
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
 
         try {
-            List<SessionStatus> statuses = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
+            List<SessionStatus> statuses = sm.ask(mgr -> mgr.getUserSessions(sm, userId)).get();
             if (statuses == null || statuses.isEmpty()) {
                 return Response.status(Response.Status.NOT_FOUND).build();
             }
-            sm.tell(mgr -> mgr.touchUserSessions(userId));
+            sm.tell(mgr -> mgr.touchUserSessions(sm, userId));
             return Response.ok(statuses).build();
         } catch (Exception e) {
             return Response.serverError().build();
@@ -380,13 +380,13 @@ public class DashboardResource {
             @PathParam("sessionId") String sessionId,
             @QueryParam("lines") @DefaultValue("200") int lines) {
         String userId = getCurrentUsername();
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         try {
-            List<SessionStatus> statuses = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
+            List<SessionStatus> statuses = sm.ask(mgr -> mgr.getUserSessions(sm, userId)).get();
             boolean owned = statuses != null && statuses.stream()
                 .anyMatch(s -> s.sessionId().equals(sessionId));
             if (!owned) return Response.status(Response.Status.FORBIDDEN).build();
-            String logs = sm.ask(mgr -> mgr.getSessionLogs(sessionId, lines)).get();
+            String logs = sm.ask(mgr -> mgr.getSessionLogs(sm, sessionId, lines)).get();
             return Response.ok(Map.of("logs", logs == null ? "" : logs)).build();
         } catch (Exception e) {
             return Response.ok(Map.of("logs", "")).build();
@@ -528,12 +528,12 @@ public class DashboardResource {
                                    byte[] body, HttpHeaders inHeaders,
                                    jakarta.ws.rs.core.UriInfo uriInfo) {
         String userId = getCurrentUsername();
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
 
         // Ownership check
         List<SessionStatus> userSessions;
         try {
-            userSessions = sm.ask(mgr -> mgr.getUserSessions(userId)).get();
+            userSessions = sm.ask(mgr -> mgr.getUserSessions(sm, userId)).get();
         } catch (Exception e) {
             LOG.severe("Failed to look up sessions for proxy: " + e.getMessage());
             return Response.serverError().build();
@@ -547,7 +547,7 @@ public class DashboardResource {
             // named {sessionId}-{toolName}-{port} by SubToolResource.
             SubTool subTool = SubTool.parse(sessionId, userSessions);
             if (subTool != null) {
-                sm.tell(mgr -> mgr.touchSession(subTool.sessionId()));
+                sm.tell(mgr -> mgr.touchSession(sm, subTool.sessionId()));
                 String rawQuery = uriInfo.getRequestUri().getRawQuery();
                 String targetUrl = "http://" + subTool.serviceName() + "." + userPodsNamespace
                     + ".svc.cluster.local:" + subTool.port() + "/" + subPath
@@ -560,14 +560,14 @@ public class DashboardResource {
         }
 
         // Update idle timer
-        sm.tell(mgr -> mgr.touchSession(sessionId));
+        sm.tell(mgr -> mgr.touchSession(sm, sessionId));
 
         // Determine target path and port from the tool plugin's settings
         boolean passthrough = false;
         int containerPort = 8080;
         try {
             List<com.scivicslab.k8spups.plugin.ToolPlugin> tools =
-                sm.ask(SessionManagerActor::listAvailableTools).get();
+                sm.ask(SessionManager::listAvailableTools).get();
             java.util.Optional<com.scivicslab.k8spups.plugin.ToolPlugin> toolPlugin = tools.stream()
                 .filter(t -> t.displayName().equals(session.toolName()))
                 .findFirst();
@@ -733,7 +733,7 @@ public class DashboardResource {
                 .entity("Only an administrator may launch or stop a shared service").build();
         }
         try {
-            actorSystem.getK8sClient().scaleSharedService(svc.namespace(), svc.deployment(), replicas);
+            actorSystem.getSharedServiceControl().ask(c -> { c.scale(svc.namespace(), svc.deployment(), replicas); return null; }).get();
             LOG.info("Shared service " + name + " scaled to " + replicas + " by " + userId);
         } catch (Exception e) {
             LOG.severe("Shared service " + name + " scale failed: " + e.getMessage());
@@ -750,7 +750,7 @@ public class DashboardResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response getStorageInfo() {
         String userId = getCurrentUsername();
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
 
         // Fire all independent ask() calls in parallel
         var storageInfoFut = sm.ask(mgr -> mgr.getUserStorageInfo(userId));
@@ -758,7 +758,7 @@ public class DashboardResource {
         var sharableVolumesFut = sm.ask(mgr -> mgr.listSharableVolumes(userId));
         var mySharedPvcsFut = sm.ask(mgr -> mgr.listSharedPvcs(userId));
         var myShareSettingsFut = sm.ask(mgr -> mgr.getShareSettings(userId));
-        var sessionsFut = sm.ask(mgr -> mgr.getUserSessions(userId));
+        var sessionsFut = sm.ask(mgr -> mgr.getUserSessions(sm, userId));
 
         Map<String, String> storageInfo = Collections.emptyMap();
         Map<String, Object> allPvcInfo = Collections.emptyMap();
@@ -845,7 +845,7 @@ public class DashboardResource {
         if ("longhorn".equals(storageType) && (storageSize == null || storageSize.isBlank())) {
             storageSize = actorSystem.getDefaultStorageSize();
         }
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         try {
             String sz = storageSize;
             String error = sm.ask(mgr -> mgr.createUserPvc(userId, storageType, sz)).get();
@@ -873,7 +873,7 @@ public class DashboardResource {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(Map.of("error", "invalid_storage_size")).build();
         }
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         try {
             sm.tell(mgr -> mgr.expandUserPvc(userId, storageSize));
             return Response.ok(Map.of("status", "expanded", "storageSize", storageSize)).build();
@@ -901,7 +901,7 @@ public class DashboardResource {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(Map.of("error", "confirmation_required")).build();
         }
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         try {
             String error = sm.ask(mgr -> mgr.deleteUserPvc(userId, storageType)).get();
             if (error != null) {
@@ -924,7 +924,7 @@ public class DashboardResource {
                                           @FormParam("storageType") String storageType,
                                           @HeaderParam("Accept") String accept) {
         String userId = getCurrentUsername();
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         boolean wantJson = accept != null && accept.contains("application/json");
 
         if (storageSize == null || !actorSystem.getStorageSizeOptions().contains(storageSize)) {
@@ -966,10 +966,10 @@ public class DashboardResource {
      */
     private Map<String, String> resolveUserParams(String toolName,
                                                    String... values) {
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         List<ToolPlugin> tools;
         try {
-            tools = sm.ask(SessionManagerActor::listAvailableTools).get();
+            tools = sm.ask(SessionManager::listAvailableTools).get();
         } catch (Exception e) {
             return Collections.emptyMap();
         }
@@ -1006,7 +1006,7 @@ public class DashboardResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response getShareInfo() {
         String userId = getCurrentUsername();
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         try {
             // Fire all ask() calls in parallel
             var sharableVolumesFut = sm.ask(mgr -> mgr.listSharableVolumes(userId));
@@ -1040,7 +1040,7 @@ public class DashboardResource {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(Map.of("error", "sourceUserId is required")).build();
         }
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         try {
             String error = sm.ask(mgr -> mgr.createSharedNfsPvPvc(userId, sourceUserId)).get();
             if (error != null) {
@@ -1070,7 +1070,7 @@ public class DashboardResource {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(Map.of("error", "sourceUserId is required")).build();
         }
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         try {
             String error = sm.ask(mgr -> mgr.deleteSharedNfsPvPvc(userId, sourceUserId)).get();
             if (error != null) {
@@ -1106,7 +1106,7 @@ public class DashboardResource {
             mode = "ro";
         }
 
-        ActorRef<SessionManagerActor> sm = actorSystem.getSessionManager();
+        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
         try {
             String m = mode;
             sm.tell(mgr -> mgr.saveShareSettings(userId, enabled, allowList, m));

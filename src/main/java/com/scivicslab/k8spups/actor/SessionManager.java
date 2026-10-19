@@ -26,9 +26,9 @@ import java.util.logging.Logger;
  * Supports multiple sessions per user (up to maxSessionsPerUser).
  * A value of -1 for maxSessionsPerUser means unlimited.
  */
-public class SessionManagerActor {
+public class SessionManager {
 
-    private static final Logger LOG = Logger.getLogger(SessionManagerActor.class.getName());
+    private static final Logger LOG = Logger.getLogger(SessionManager.class.getName());
 
     private final K8sApiClient k8sClient;
     private final Map<String, ToolPlugin> plugins;
@@ -40,13 +40,10 @@ public class SessionManagerActor {
     private final Set<String> unlimitedUsers;
     private final LdapUserInfoClient ldapClient;
 
-    /** sessionId -> child ActorRef<SessionActor> */
-    private final Map<String, ActorRef<SessionActor>> sessions = new HashMap<>();
+    /** Every session is a child actor named {@code session-<sessionId>}; the library keeps the list of children. */
+    private static final String CHILD_PREFIX = "session-";
 
-    /** userId -> list of sessionIds owned by that user */
-    private final Map<String, List<String>> userSessions = new HashMap<>();
-
-    public SessionManagerActor(K8sApiClient k8sClient, Map<String, ToolPlugin> plugins,
+    public SessionManager(K8sApiClient k8sClient, Map<String, ToolPlugin> plugins,
                                String controllerNamespace,
                                int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
                                long maxLifetimeMinutes,
@@ -62,11 +59,47 @@ public class SessionManagerActor {
         this.ldapClient = ldapClient;
     }
 
+    /** All sessions: the children of this actor. */
+    private List<ActorRef<Session>> sessions(ActorRef<SessionManager> self) {
+        List<ActorRef<Session>> result = new ArrayList<>();
+        for (String name : self.getNamesOfChildren()) {
+            ActorRef<Session> ref = self.system().getActor(name);
+            if (ref != null) result.add(ref);
+        }
+        return result;
+    }
+
+    /** One session by id, or null when this actor has no such child. */
+    private ActorRef<Session> session(ActorRef<SessionManager> self, String sessionId) {
+        String name = CHILD_PREFIX + sessionId;
+        return self.getNamesOfChildren().contains(name) ? self.system().getActor(name) : null;   // null for a closed child
+    }
+
+    private static String sessionIdOf(ActorRef<Session> ref) {
+        return ref.getName().substring(CHILD_PREFIX.length());
+    }
+
+    /** The sessions of one user; each session is asked for its owner. */
+    private List<ActorRef<Session>> sessionsOfUser(ActorRef<SessionManager> self, String userId) {
+        List<ActorRef<Session>> all = sessions(self);
+        List<CompletableFuture<String>> owners = new ArrayList<>();
+        for (ActorRef<Session> ref : all) owners.add(ref.ask(Session::getUserId));
+        List<ActorRef<Session>> result = new ArrayList<>();
+        for (int i = 0; i < all.size(); i++) {
+            try {
+                if (userId.equals(owners.get(i).get())) result.add(all.get(i));
+            } catch (Exception e) {
+                LOG.warning("Failed to read the owner of " + all.get(i).getName() + ": " + e.getMessage());
+            }
+        }
+        return result;
+    }
+
     /**
      * Create a new session for the user.
      * Returns the SessionStatus, or null if creation was rejected.
      */
-    public SessionStatus createSession(ActorRef<SessionManagerActor> self,
+    public SessionStatus createSession(ActorRef<SessionManager> self,
                                        String userId, String toolName,
                                        List<String> allowedProjects, String labId,
                                        String resourceProfile,
@@ -77,7 +110,7 @@ public class SessionManagerActor {
     /**
      * Create a new session with storage type override (no additional mounts).
      */
-    public SessionStatus createSession(ActorRef<SessionManagerActor> self,
+    public SessionStatus createSession(ActorRef<SessionManager> self,
                                        String userId, String toolName,
                                        List<String> allowedProjects, String labId,
                                        String resourceProfile,
@@ -91,7 +124,7 @@ public class SessionManagerActor {
      * The environment the administrator's shared settings set for this tool, under the tool's own registry
      * config: a value in {@code toolConfigEnv} still wins. Without settings the deployment's values stay.
      */
-    private Map<String, String> withSharedSettings(ActorRef<SessionManagerActor> self, String toolName,
+    private Map<String, String> withSharedSettings(ActorRef<SessionManager> self, String toolName,
                                                    Map<String, String> toolConfigEnv) {
         Map<String, String> env = new HashMap<>();
         ActorRef<SettingsService> settings = self.system().getActor(SettingsService.ACTOR_NAME);
@@ -113,7 +146,7 @@ public class SessionManagerActor {
      * because a stale view could still list files whose grant was revoked. A mount of type
      * "dataset" requested by the user is dropped: only the controller adds it.
      */
-    private List<MountSpec> withDatasetMount(ActorRef<SessionManagerActor> self, String userId,
+    private List<MountSpec> withDatasetMount(ActorRef<SessionManager> self, String userId,
                                              List<MountSpec> requested) {
         List<MountSpec> mounts = new ArrayList<>();
         if (requested != null) {
@@ -137,7 +170,7 @@ public class SessionManagerActor {
      * Create a new session with optional storage type override and additional mounts.
      * Returns the SessionStatus, or null if creation was rejected.
      */
-    public SessionStatus createSession(ActorRef<SessionManagerActor> self,
+    public SessionStatus createSession(ActorRef<SessionManager> self,
                                        String userId, String toolName,
                                        List<String> allowedProjects, String labId,
                                        String resourceProfile,
@@ -145,12 +178,12 @@ public class SessionManagerActor {
                                        String overrideStorageType,
                                        List<MountSpec> additionalMounts) {
         // Check global limit
-        if (sessions.size() >= maxSessions) {
+        if (sessions(self).size() >= maxSessions) {
             LOG.warning("Max sessions reached: " + maxSessions);
             return null;
         }
         // Check per-user limit (-1 means unlimited, unlimitedUsers bypass the check)
-        int userCount = userSessions.getOrDefault(userId, List.of()).size();
+        int userCount = sessionsOfUser(self, userId).size();
         if (!unlimitedUsers.contains(userId) && maxSessionsPerUser >= 0 && userCount >= maxSessionsPerUser) {
             LOG.warning("User " + userId + " reached max sessions: " + maxSessionsPerUser);
             return null;
@@ -175,14 +208,10 @@ public class SessionManagerActor {
 
         // Reject duplicate if plugin is single-instance
         if (plugin.singleInstance()) {
-            List<String> userSessionIds = userSessions.getOrDefault(userId, List.of());
             // Fire ask() to all user sessions in parallel
             Map<String, CompletableFuture<String>> toolFutures = new HashMap<>();
-            for (String existingId : userSessionIds) {
-                ActorRef<SessionActor> existing = sessions.get(existingId);
-                if (existing != null) {
-                    toolFutures.put(existingId, existing.ask(SessionActor::getToolName));
-                }
+            for (ActorRef<Session> existing : sessionsOfUser(self, userId)) {
+                toolFutures.put(sessionIdOf(existing), existing.ask(Session::getToolName));
             }
             for (var entry : toolFutures.entrySet()) {
                 try {
@@ -216,12 +245,10 @@ public class SessionManagerActor {
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType, workspaceInfo,
             withDatasetMount(self, userId, additionalMounts),
             withSharedSettings(self, toolName, toolConfigEnv));
-        SessionActor actor = new SessionActor(info, k8sClient);
+        Session actor = new Session(info, k8sClient);
 
         // Create as child actor
-        ActorRef<SessionActor> childRef = self.createChild("session-" + sessionId, actor);
-        sessions.put(sessionId, childRef);
-        userSessions.computeIfAbsent(userId, k -> new ArrayList<>()).add(sessionId);
+        ActorRef<Session> childRef = self.createChild(CHILD_PREFIX + sessionId, actor);
 
         // Auto-populate memo from the first non-secret user parameter (e.g. project path)
         String autoMemo = "";
@@ -254,14 +281,14 @@ public class SessionManagerActor {
      * Restore a session from an existing Running Pod (used after controller restart).
      * Does NOT create Pod/Service/HTTPRoute — they already exist in k8s.
      */
-    public void restoreSession(ActorRef<SessionManagerActor> self,
+    public void restoreSession(ActorRef<SessionManager> self,
                                 String sessionId, String userId, String toolName, Pod pod) {
         ToolPlugin plugin = plugins.get(toolName);
         if (plugin == null) {
             LOG.warning("Cannot restore session " + sessionId + ": unknown tool '" + toolName + "'");
             return;
         }
-        if (sessions.containsKey(sessionId)) {
+        if (session(self, sessionId) != null) {
             LOG.info("Session already known, skipping restore: " + sessionId);
             return;
         }
@@ -293,11 +320,9 @@ public class SessionManagerActor {
 
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, null, null, null,
             Collections.emptyMap(), null, storageType, workspaceInfo);
-        SessionActor actor = new SessionActor(info, k8sClient);
+        Session actor = new Session(info, k8sClient);
 
-        ActorRef<SessionActor> childRef = self.createChild("session-" + sessionId, actor);
-        sessions.put(sessionId, childRef);
-        userSessions.computeIfAbsent(userId, k -> new ArrayList<>()).add(sessionId);
+        ActorRef<Session> childRef = self.createChild(CHILD_PREFIX + sessionId, actor);
 
         // Attach to existing Pod (async)
         childRef.tell(sa -> sa.attachToExisting(childRef, pod));
@@ -310,25 +335,18 @@ public class SessionManagerActor {
      * Sends stop() via tell() and waits for completion before closing the actor,
      * ensuring the k8s resource cleanup finishes before the actor thread terminates.
      */
-    public void destroySession(String sessionId) {
-        ActorRef<SessionActor> ref = sessions.remove(sessionId);
+    public void destroySession(ActorRef<SessionManager> self, String sessionId) {
+        ActorRef<Session> ref = session(self, sessionId);
         if (ref != null) {
-            // Remove from userSessions index
-            for (var entry : userSessions.entrySet()) {
-                if (entry.getValue().remove(sessionId)) {
-                    if (entry.getValue().isEmpty()) {
-                        userSessions.remove(entry.getKey());
-                    }
-                    break;
-                }
-            }
             try {
                 // Wait for stop() to complete before closing the actor
-                ref.tell(SessionActor::stop).get();
+                ref.tell(Session::stop).get();
             } catch (Exception e) {
                 LOG.warning("Error stopping session " + sessionId + ": " + e.getMessage());
             }
             ref.close();
+            // pojo-actor 3.0.0 does not take a closed child out of its parent's list; newer versions do, and this is then a no-op
+            self.getNamesOfChildren().remove(CHILD_PREFIX + sessionId);
             LOG.info("Session destroyed: " + sessionId);
         }
     }
@@ -337,15 +355,11 @@ public class SessionManagerActor {
      * Get the status of all sessions belonging to a user.
      * Fires ask() to all SessionActors in parallel, then collects results.
      */
-    public List<SessionStatus> getUserSessions(String userId) {
-        List<String> sessionIds = userSessions.getOrDefault(userId, List.of());
+    public List<SessionStatus> getUserSessions(ActorRef<SessionManager> self, String userId) {
         // Fire all ask() calls in parallel
         List<CompletableFuture<SessionStatus>> futures = new ArrayList<>();
-        for (String sessionId : sessionIds) {
-            ActorRef<SessionActor> ref = sessions.get(sessionId);
-            if (ref != null) {
-                futures.add(ref.ask(SessionActor::getStatus));
-            }
+        for (ActorRef<Session> ref : sessionsOfUser(self, userId)) {
+            futures.add(ref.ask(Session::getStatus));
         }
         // Collect results
         List<SessionStatus> result = new ArrayList<>();
@@ -365,15 +379,15 @@ public class SessionManagerActor {
     /**
      * Update the memo text for a session.
      */
-    public void updateMemo(String sessionId, String memo) {
-        ActorRef<SessionActor> ref = sessions.get(sessionId);
+    public void updateMemo(ActorRef<SessionManager> self, String sessionId, String memo) {
+        ActorRef<Session> ref = session(self, sessionId);
         if (ref != null) {
             ref.tell(sa -> sa.setMemo(memo));
         }
     }
 
-    public String getSessionLogs(String sessionId, int tailLines) {
-        ActorRef<SessionActor> ref = sessions.get(sessionId);
+    public String getSessionLogs(ActorRef<SessionManager> self, String sessionId, int tailLines) {
+        ActorRef<Session> ref = session(self, sessionId);
         if (ref == null) return "";
         return ref.ask(sa -> sa.getPodLogs(tailLines)).join();
     }
@@ -381,23 +395,19 @@ public class SessionManagerActor {
     /**
      * Touch a session to reset idle timer.
      */
-    public void touchSession(String sessionId) {
-        ActorRef<SessionActor> ref = sessions.get(sessionId);
+    public void touchSession(ActorRef<SessionManager> self, String sessionId) {
+        ActorRef<Session> ref = session(self, sessionId);
         if (ref != null) {
-            ref.tell(SessionActor::touch);
+            ref.tell(Session::touch);
         }
     }
 
     /**
      * Touch all sessions belonging to a user.
      */
-    public void touchUserSessions(String userId) {
-        List<String> sessionIds = userSessions.getOrDefault(userId, List.of());
-        for (String sessionId : sessionIds) {
-            ActorRef<SessionActor> ref = sessions.get(sessionId);
-            if (ref != null) {
-                ref.tell(SessionActor::touch);
-            }
+    public void touchUserSessions(ActorRef<SessionManager> self, String userId) {
+        for (ActorRef<Session> ref : sessionsOfUser(self, userId)) {
+            ref.tell(Session::touch);
         }
     }
 
@@ -406,12 +416,12 @@ public class SessionManagerActor {
      * Fires ask() to all SessionActors in parallel (non-blocking), then collects
      * results. Sessions that should stop are destroyed via destroySession().
      */
-    public void checkIdleSessions() {
-        // Fire all ask() calls in parallel — each ask is queued in its SessionActor's mailbox
+    public void checkIdleSessions(ActorRef<SessionManager> self) {
+        // Fire all ask() calls in parallel — each ask is queued in its Session's mailbox
         Map<String, CompletableFuture<Boolean>> futures = new HashMap<>();
-        for (var entry : sessions.entrySet()) {
-            futures.put(entry.getKey(),
-                entry.getValue().ask(sa -> sa.shouldStop(idleTimeoutMinutes, maxLifetimeMinutes)));
+        for (ActorRef<Session> ref : sessions(self)) {
+            futures.put(sessionIdOf(ref),
+                ref.ask(sa -> sa.shouldStop(idleTimeoutMinutes, maxLifetimeMinutes)));
         }
         // Collect results
         List<String> toRemove = new ArrayList<>();
@@ -425,7 +435,7 @@ public class SessionManagerActor {
             }
         }
         for (String sessionId : toRemove) {
-            destroySession(sessionId);
+            destroySession(self, sessionId);
         }
     }
 
@@ -465,20 +475,21 @@ public class SessionManagerActor {
     /**
      * Check if user has any active session.
      */
-    public boolean hasSession(String userId) {
-        return userSessions.containsKey(userId) && !userSessions.get(userId).isEmpty();
+    public boolean hasSession(ActorRef<SessionManager> self, String userId) {
+        return !sessionsOfUser(self, userId).isEmpty();
     }
 
     /**
      * Returns an aggregated summary of all sessions by state.
      * Fires ask() to all SessionActors in parallel, then aggregates.
      */
-    public SessionSummary getSessionSummary() {
-        int total = sessions.size();
+    public SessionSummary getSessionSummary(ActorRef<SessionManager> self) {
+        List<ActorRef<Session>> all = sessions(self);
+        int total = all.size();
         // Fire all ask() calls in parallel
         List<CompletableFuture<SessionState>> futures = new ArrayList<>();
-        for (ActorRef<SessionActor> ref : sessions.values()) {
-            futures.add(ref.ask(SessionActor::getState));
+        for (ActorRef<Session> ref : all) {
+            futures.add(ref.ask(Session::getState));
         }
         // Collect results
         int ready = 0;
@@ -504,8 +515,10 @@ public class SessionManagerActor {
      * Returns the set of sessionIds currently managed by this actor.
      * Used by startup reconciliation to identify orphaned k8s resources.
      */
-    public Set<String> getSessionIds() {
-        return new HashSet<>(sessions.keySet());
+    public Set<String> getSessionIds(ActorRef<SessionManager> self) {
+        Set<String> ids = new HashSet<>();
+        for (ActorRef<Session> ref : sessions(self)) ids.add(sessionIdOf(ref));
+        return ids;
     }
 
     /** Returns information about a user's PVC for a specific storage type. */

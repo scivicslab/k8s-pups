@@ -1681,9 +1681,9 @@ public class K8sApiClient {
         //   nfs-home  -> workspace NFS PVC (LDAP home directory), run as LDAP UID
         //   longhorn  -> Longhorn PVC (RWO block storage)
         //   nfs-k8s   -> NFS k8s-dedicated PVC (RWX)
-        // SessionActor resolves the storage type and writes it into SessionInfo before
+        // Session resolves the storage type and writes it into SessionInfo before
         // creating the Pod. This fallback only covers callers that build a Pod without
-        // going through SessionActor, and must agree with SessionActor.resolveStorageType():
+        // going through Session, and must agree with Session.resolveStorageType():
         // a hardcoded "longhorn" here mounted a PVC that was never provisioned.
         String storageType = info.userStorageType() != null && !info.userStorageType().isBlank()
             ? info.userStorageType()

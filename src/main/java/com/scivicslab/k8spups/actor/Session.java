@@ -22,9 +22,9 @@ import java.util.logging.Logger;
  * Manages the lifecycle of a single user session Pod.
  * One instance per user session, driven by POJO-actor tell/ask messages.
  */
-public class SessionActor {
+public class Session {
 
-    private static final Logger LOG = Logger.getLogger(SessionActor.class.getName());
+    private static final Logger LOG = Logger.getLogger(Session.class.getName());
 
     // Not final: start() resolves the effective storage type once and writes it back,
     // so Pod building uses the same value instead of resolving it a second time.
@@ -37,7 +37,7 @@ public class SessionActor {
     private Watch podWatch;
     private String memo = "";
 
-    public SessionActor(SessionInfo info, K8sApiClient k8sClient) {
+    public Session(SessionInfo info, K8sApiClient k8sClient) {
         this.info = info;
         this.k8sClient = k8sClient;
     }
@@ -46,7 +46,7 @@ public class SessionActor {
      * Start the session: create Pod, Service, HTTPRoute, then watch Pod status.
      * Takes self reference so pod watch events are routed through the actor message queue.
      */
-    public void start(ActorRef<SessionActor> self) {
+    public void start(ActorRef<Session> self) {
         LOG.info("Starting session: user=" + info.userId()
             + ", tool=" + info.toolPlugin().name()
             + ", session=" + info.sessionId());
@@ -169,7 +169,7 @@ public class SessionActor {
      * Attach to an existing Running Pod (used for session restoration on controller restart).
      * Re-creates Service and HTTPRoute if they are missing (e.g. after controller restart).
      */
-    public void attachToExisting(ActorRef<SessionActor> self, Pod pod) {
+    public void attachToExisting(ActorRef<Session> self, Pod pod) {
         LOG.info("Restoring session: user=" + info.userId()
             + ", tool=" + info.toolPlugin().name()
             + ", session=" + info.sessionId());
@@ -252,7 +252,7 @@ public class SessionActor {
     /**
      * Check if session should be stopped due to idle timeout or max lifetime.
      * Returns true if the session should be stopped.
-     * Does NOT call stop() — the caller (SessionManagerActor) is responsible
+     * Does NOT call stop() — the caller (SessionManager) is responsible
      * for sending a separate tell(stop) message to maintain actor model semantics.
      */
     public boolean shouldStop(long idleTimeoutMinutes, long maxLifetimeMinutes) {

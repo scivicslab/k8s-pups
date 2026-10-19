@@ -81,7 +81,7 @@ public record SessionInfo(
     }
 
     /**
-     * Returns a copy with the storage type resolved. SessionActor resolves the
+     * Returns a copy with the storage type resolved. Session resolves the
      * effective type once (user preference, else the configured default) and writes
      * it back here, so Pod building reads the same value instead of resolving again.
      */
