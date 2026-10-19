@@ -1,0 +1,129 @@
+package com.scivicslab.k8spups.resource;
+
+import com.scivicslab.k8spups.actor.K8sPupsActorSystem;
+import com.scivicslab.k8spups.settings.SettingsService;
+import com.scivicslab.k8spups.settings.SystemSettings;
+import com.scivicslab.k8spups.tool.JwtRoleExtractor;
+
+import io.quarkus.oidc.IdToken;
+import io.quarkus.qute.Template;
+import io.quarkus.security.Authenticated;
+import io.quarkus.security.identity.SecurityIdentity;
+import io.smallrye.common.annotation.Blocking;
+
+import jakarta.inject.Inject;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.jwt.JsonWebToken;
+
+import java.net.URI;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.logging.Logger;
+
+/**
+ * Administrator page for the settings shared by the tools (GPU broker URL, default model). A saved value reaches the
+ * tools that start afterwards; running sessions keep the values they started with.
+ */
+@Path("/settings")
+@Blocking
+public class SettingsAdminResource {
+
+    private static final Logger LOG = Logger.getLogger(SettingsAdminResource.class.getName());
+
+    @Inject
+    K8sPupsActorSystem actorSystem;
+
+    @Inject
+    @IdToken
+    JsonWebToken idToken;
+
+    @Inject
+    SecurityIdentity identity;
+
+    @Inject
+    Template settings;
+
+    @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/pups")
+    String basePath;
+
+    @GET
+    @Authenticated
+    @Produces(MediaType.TEXT_HTML)
+    public Response page(@QueryParam("error") String error, @QueryParam("saved") String saved) {
+        Response denied = requireAdmin();
+        if (denied != null) return denied;
+        SystemSettings current = call(SettingsService::load);
+        Map<String, Object> data = new HashMap<>();
+        data.put("basePath", basePath);
+        data.put("error", error);
+        data.put("saved", saved != null);
+        data.put("gpuBrokerUrl", current.gpuBrokerUrl());
+        data.put("defaultModel", current.defaultModel());
+        return Response.ok(settings.data(data).render()).build();
+    }
+
+    @POST
+    @Authenticated
+    public Response save(@FormParam("gpuBrokerUrl") String gpuBrokerUrl, @FormParam("defaultModel") String defaultModel) {
+        Response denied = requireAdmin();
+        if (denied != null) return denied;
+        if (!SystemSettings.isValidUrl(gpuBrokerUrl)) return back("invalid_url", false);
+        if (!SystemSettings.isValidModel(defaultModel)) return back("invalid_model", false);
+        SystemSettings next = new SystemSettings(gpuBrokerUrl, defaultModel);
+        call(s -> { s.save(next); return null; });
+        LOG.info("Shared settings saved by " + currentUser() + ": gpuBrokerUrl=" + next.gpuBrokerUrl()
+            + " defaultModel=" + next.defaultModel());
+        return back(null, true);
+    }
+
+    private <T> T call(Function<SettingsService, T> operation) {
+        try {
+            return actorSystem.getSettingsManager().ask(operation::apply).get();
+        } catch (Exception e) {
+            throw new IllegalStateException("Settings operation failed: " + e.getMessage(), e);
+        }
+    }
+
+    private Response back(String error, boolean saved) {
+        String query = error != null ? "?error=" + error : saved ? "?saved=1" : "";
+        return Response.seeOther(URI.create("/settings" + query)).build();
+    }
+
+    /** Checked on every request, not only hidden in the page: a request without the link is still a request. */
+    private Response requireAdmin() {
+        if (!actorSystem.isAdmin(currentUser(), roles())) {
+            LOG.warning("Settings refused for user " + currentUser());
+            return Response.status(Response.Status.FORBIDDEN).entity("Administrators only").build();
+        }
+        return null;
+    }
+
+    private String currentUser() {
+        try {
+            if (idToken != null) {
+                String username = idToken.getClaim("preferred_username");
+                if (username != null) return username;
+            }
+        } catch (Exception e) {
+            // Fall back to the security identity.
+        }
+        return identity != null && !identity.isAnonymous() ? identity.getPrincipal().getName() : null;
+    }
+
+    private List<String> roles() {
+        try {
+            if (idToken == null) return List.of();
+            Map<String, Object> realmAccess = idToken.getClaim("realm_access");
+            Map<String, Object> resourceAccess = idToken.getClaim("resource_access");
+            return JwtRoleExtractor.extractRoles(realmAccess, resourceAccess);
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+}

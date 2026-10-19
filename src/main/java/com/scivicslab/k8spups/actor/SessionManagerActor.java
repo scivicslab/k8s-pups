@@ -3,6 +3,9 @@ package com.scivicslab.k8spups.actor;
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.k8s.LdapUserInfoClient;
 import com.scivicslab.k8spups.dataset.DatasetService;
+import com.scivicslab.k8spups.settings.SettingsEnv;
+import com.scivicslab.k8spups.settings.SettingsService;
+import com.scivicslab.k8spups.settings.SystemSettings;
 import com.scivicslab.k8spups.k8s.MountSpec;
 import com.scivicslab.k8spups.k8s.SessionInfo;
 import com.scivicslab.k8spups.k8s.WorkspaceInfo;
@@ -38,6 +41,8 @@ public class SessionManagerActor {
     private final LdapUserInfoClient ldapClient;
     /** The dataset-manager actor; builds the user's dataset view before a session starts. */
     private final ActorRef<DatasetService> datasets;
+    /** The settings-manager actor; the shared settings are read when a session is created. */
+    private final ActorRef<SettingsService> settings;
 
     /** sessionId -> child ActorRef<SessionActor> */
     private final Map<String, ActorRef<SessionActor>> sessions = new HashMap<>();
@@ -50,7 +55,7 @@ public class SessionManagerActor {
                                int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
                                long maxLifetimeMinutes,
                                Set<String> unlimitedUsers, LdapUserInfoClient ldapClient,
-                               ActorRef<DatasetService> datasets) {
+                               ActorRef<DatasetService> datasets, ActorRef<SettingsService> settings) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
         this.controllerNamespace = controllerNamespace;
@@ -61,6 +66,7 @@ public class SessionManagerActor {
         this.unlimitedUsers = unlimitedUsers;
         this.ldapClient = ldapClient;
         this.datasets = datasets;
+        this.settings = settings;
     }
 
     /**
@@ -86,6 +92,24 @@ public class SessionManagerActor {
                                        String overrideStorageType) {
         return createSession(self, userId, toolName, allowedProjects, labId, resourceProfile,
             userParams, overrideStorageType, Collections.emptyList());
+    }
+
+    /**
+     * The environment the administrator's shared settings set for this tool, under the tool's own registry
+     * config: a value in {@code toolConfigEnv} still wins. Without settings the deployment's values stay.
+     */
+    private Map<String, String> withSharedSettings(String toolName, Map<String, String> toolConfigEnv) {
+        Map<String, String> env = new HashMap<>();
+        if (settings != null) {
+            try {
+                SystemSettings s = settings.ask(SettingsService::load).get();
+                env.putAll(SettingsEnv.forTool(toolName, s));
+            } catch (Exception e) {
+                LOG.warning("Shared settings not read for " + toolName + ": " + e.getMessage());
+            }
+        }
+        if (toolConfigEnv != null) env.putAll(toolConfigEnv);
+        return env;
     }
 
     /**
@@ -194,7 +218,7 @@ public class SessionManagerActor {
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType, workspaceInfo,
             withDatasetMount(userId, additionalMounts),
-            toolConfigEnv);
+            withSharedSettings(toolName, toolConfigEnv));
         SessionActor actor = new SessionActor(info, k8sClient);
 
         // Create as child actor

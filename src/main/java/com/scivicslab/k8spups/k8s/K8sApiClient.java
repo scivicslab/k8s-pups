@@ -2326,6 +2326,32 @@ public class K8sApiClient {
         return result;
     }
 
+    /** Reads the data of a ConfigMap; empty when it does not exist or cannot be read. */
+    public Map<String, String> readConfigMapData(String namespace, String name) {
+        try {
+            var cm = client.configMaps().inNamespace(namespace).withName(name).get();
+            return cm != null && cm.getData() != null ? new HashMap<>(cm.getData()) : new HashMap<>();
+        } catch (Exception e) {
+            LOG.warning("Failed to read ConfigMap " + namespace + "/" + name + ": " + e.getMessage());
+            return new HashMap<>();
+        }
+    }
+
+    /** Creates the ConfigMap, or replaces its whole data, so that a key left out is removed. */
+    public void replaceConfigMapData(String namespace, String name, Map<String, String> data) {
+        var existing = client.configMaps().inNamespace(namespace).withName(name).get();
+        if (existing != null) {
+            existing.setData(new HashMap<>(data));
+            client.configMaps().inNamespace(namespace).resource(existing).update();
+        } else {
+            var cm = new ConfigMapBuilder()
+                .withNewMetadata().withName(name).withNamespace(namespace)
+                .addToLabels("managed-by", "k8s-pups").endMetadata()
+                .withData(new HashMap<>(data)).build();
+            client.configMaps().inNamespace(namespace).resource(cm).create();
+        }
+    }
+
     private void upsertConfigMap(String namespace, String name, Map<String, String> data) {
         var existing = client.configMaps().inNamespace(namespace).withName(name).get();
         if (existing != null && existing.getData() != null) {
