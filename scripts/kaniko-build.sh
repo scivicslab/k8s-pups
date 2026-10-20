@@ -123,7 +123,9 @@ echo "Job name:       ${JOB_NAME}"
 echo ""
 
 # --- Build Kaniko args ---
-KANIKO_ARGS='["--dockerfile=Dockerfile", "--context=/workspace", "--destination='"${DESTINATION}"'", "--build-arg", "IMAGE_TAG='"${TAG}"'", "--insecure"'
+# The apt mirror in the cluster (namespace apt-mirror) serves the packages; set APT_MIRROR_URL to "" to use the internet.
+APT_MIRROR_URL="${APT_MIRROR_URL-http://apt-mirror-web.apt-mirror.svc.cluster.local:8080}"
+KANIKO_ARGS='["--dockerfile=Dockerfile", "--context=/workspace", "--destination='"${DESTINATION}"'", "--build-arg", "IMAGE_TAG='"${TAG}"'", "--build-arg", "APT_MIRROR_URL='"${APT_MIRROR_URL}"'", "--insecure"'
 if [ "$NO_CACHE" = true ]; then
     KANIKO_ARGS="${KANIKO_ARGS}"', "--cache=false"'
 fi
@@ -157,10 +159,10 @@ spec:
         resources:
           requests:
             cpu: "2"
-            memory: "4Gi"
+            memory: "8Gi"
           limits:
             cpu: "4"
-            memory: "8Gi"
+            memory: "48Gi"
         volumeMounts:
         - name: build-context
           mountPath: /workspace
