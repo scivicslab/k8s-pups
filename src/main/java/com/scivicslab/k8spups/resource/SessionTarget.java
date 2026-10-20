@@ -32,6 +32,18 @@ final class SessionTarget {
     }
 
     /**
+     * The JAX-RS path parameter drops the trailing slash of the request, but a tool whose screen loads its files by
+     * relative paths (the code editor at {@code editor/}) needs it: without it the files are looked up one directory up.
+     *
+     * @param subPath  the path after the session id, as the path parameter gave it
+     * @param rawPath  the path of the request as it was sent
+     */
+    static String keepTrailingSlash(String subPath, String rawPath) {
+        return rawPath != null && rawPath.endsWith("/") && !subPath.isEmpty() && !subPath.endsWith("/")
+            ? subPath + "/" : subPath;
+    }
+
+    /**
      * @param first          the first segment after {@code /session/}: a session id, or {@code {sessionId}-{tool}-{port}}
      * @param subPath        the rest of the path, without the leading slash
      * @param rawQuery       the query string as sent, or null

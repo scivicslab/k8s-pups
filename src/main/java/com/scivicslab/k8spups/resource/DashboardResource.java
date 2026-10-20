@@ -548,7 +548,8 @@ public class DashboardResource {
             return Response.serverError().build();
         }
         SessionTarget.Resolution target = SessionTarget.resolve(
-            sessionId, subPath, uriInfo.getRequestUri().getRawQuery(), "http",
+            sessionId, SessionTarget.keepTrailingSlash(subPath, uriInfo.getRequestUri().getRawPath()),
+            uriInfo.getRequestUri().getRawQuery(), "http",
             userSessions, toolLookup(sm, sessionId), userPodsNamespace);
         if (target.kind() == SessionTarget.Kind.FORBIDDEN) {
             LOG.warning("Unauthorized session access: user=" + userId + " sessionId=" + sessionId);

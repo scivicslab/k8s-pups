@@ -55,6 +55,9 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
     /** The largest single frame the browser or the tool may send. Vert.x closes the connection (1009) above this. */
     private static final int MAX_FRAME_BYTES = 8 * 1024 * 1024;
 
+    /** How long to wait for the tool to accept the connection; the browser gets a 502 after this, not a minute later. */
+    private static final int CONNECT_TIMEOUT_MS = 10_000;
+
     /** The session's idle timer is touched this often while a connection stays open. */
     private static final long TOUCH_INTERVAL_MS = 60_000;
 
@@ -192,6 +195,7 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
                 c = client;
                 if (c == null) {
                     c = vertx.createWebSocketClient(new WebSocketClientOptions()
+                        .setConnectTimeout(CONNECT_TIMEOUT_MS)
                         .setMaxFrameSize(MAX_FRAME_BYTES)
                         .setMaxMessageSize(4 * MAX_FRAME_BYTES));
                     client = c;

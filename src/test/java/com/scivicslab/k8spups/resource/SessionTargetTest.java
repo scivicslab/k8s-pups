@@ -96,4 +96,23 @@ class SessionTargetTest {
             List.of(session("abc-123", "AI Chat")), lookup(), NS);
         assertEquals(SessionTarget.Kind.FORBIDDEN, r.kind());
     }
+
+    @Test
+    void theTrailingSlashOfTheRequestIsKept() {
+        assertEquals("editor/", SessionTarget.keepTrailingSlash("editor", "/pups-with-audit/session/abc/editor/"));
+        assertEquals("a/b/", SessionTarget.keepTrailingSlash("a/b", "/pups-with-audit/session/abc/a/b/"));
+    }
+
+    @Test
+    void aPathWithoutTheTrailingSlashStaysWithout() {
+        assertEquals("editor", SessionTarget.keepTrailingSlash("editor", "/pups-with-audit/session/abc/editor"));
+        assertEquals("x.js", SessionTarget.keepTrailingSlash("x.js", "/pups-with-audit/session/abc/x.js"));
+    }
+
+    @Test
+    void theRootOfTheSessionAndAnAlreadyEndingSlashAreNotChanged() {
+        assertEquals("", SessionTarget.keepTrailingSlash("", "/pups-with-audit/session/abc/"));
+        assertEquals("a/", SessionTarget.keepTrailingSlash("a/", "/pups-with-audit/session/abc/a/"));
+        assertEquals("a", SessionTarget.keepTrailingSlash("a", null));
+    }
 }
