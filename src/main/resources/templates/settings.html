@@ -23,7 +23,7 @@
 <form method="post" action="{basePath}/settings" id="settings-form">
     <label for="gpuBrokerUrl">GPU Broker URL</label>
     <input id="gpuBrokerUrl" name="gpuBrokerUrl" value="{gpuBrokerUrl}" placeholder="{defaultBrokerUrl}">
-    <div class="note">Without a trailing /v1. Used by AI Chat, Jupyter AI, Chat UI with Audit Trail and Code Raptor.
+    <div class="note">Without a trailing /v1. Used by AI Chat, Jupyter AI, Chat UI with Audit Trail and Program Search &amp; Edit.
         Empty uses the GPU broker of this deployment{#if defaultBrokerUrl}: <code id="default-broker-url">{defaultBrokerUrl}</code>{/if}.
         The model list below is read from the broker; save to read it from a changed URL.</div>
     <label for="defaultModel">Default model</label>

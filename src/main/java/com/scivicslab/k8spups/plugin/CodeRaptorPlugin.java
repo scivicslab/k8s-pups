@@ -26,7 +26,7 @@ public class CodeRaptorPlugin implements ToolPlugin {
 
     @Override
     public String displayName() {
-        return "Code Raptor";
+        return "Program Search & Edit";
     }
 
     @Override
