@@ -608,6 +608,13 @@ public class DashboardResource {
                 }
             });
 
+            // HOP_BY_HOP drops Host, so the tool would build absolute URLs (Gradio's config root, redirects) from the
+            // Pod's service name, which the browser cannot reach. Hand the browser-facing host on instead.
+            String browserHost = inHeaders.getHeaderString("Host");
+            if (browserHost != null && !inHeaders.getRequestHeaders().containsKey("X-Forwarded-Host")) {
+                rb.header("X-Forwarded-Host", browserHost);
+            }
+
             // Stream the response body via StreamingOutput with explicit flush() on each chunk.
             // Returning InputStream directly risks Vert.x write-buffer batching, which delays
             // Guacamole's nop keepalives (every ~3s) until the buffer fills — Apache/the browser
