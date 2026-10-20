@@ -14,8 +14,9 @@ import java.util.Map;
  * public source carries no internal address. The gateway removes the session path prefix; the portal uses
  * relative URLs, so it works under that prefix.
  *
- * <p>The links to the code editor (code-server on port 8080 of the host) point at a host that is not part of
- * the Pod, so they do not open here.
+ * <p>The Pod also runs the code editor (code-server). nginx in the Pod serves it at {@code editor/} under the session
+ * path, next to code-raptor, so the links of the search results open the editor of the same session; the controller
+ * relays the editor's WebSocket.
  */
 public class CodeRaptorPlugin implements ToolPlugin {
 
@@ -31,7 +32,7 @@ public class CodeRaptorPlugin implements ToolPlugin {
 
     @Override
     public String description() {
-        return "Search your projects: symbols, full text and Javadoc, with an AI chat that answers from those searches.";
+        return "Search your programs (symbols, full text and Javadoc) and open the results in a code editor, with an AI chat that answers from those searches.";
     }
 
     @Override
@@ -73,7 +74,7 @@ public class CodeRaptorPlugin implements ToolPlugin {
 
     @Override
     public Map<String, String> resourceRequests() {
-        return Map.of("cpu", "250m", "memory", "1Gi");
+        return Map.of("cpu", "500m", "memory", "2Gi");
     }
 
     @Override
