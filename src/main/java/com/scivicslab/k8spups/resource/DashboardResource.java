@@ -453,6 +453,15 @@ public class DashboardResource {
         "content-length"
     );
 
+    /** First bytes of every proxied event stream: a comment line, which EventSource ignores. */
+    private static final byte[] SSE_OPEN_COMMENT = ": open\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+    /** True when {@code contentType} is a Server-Sent Events stream (parameters such as charset are ignored). */
+    static boolean isEventStream(String contentType) {
+        return contentType != null
+            && contentType.trim().toLowerCase(Locale.ROOT).startsWith("text/event-stream");
+    }
+
     private static final HttpClient SESSION_HTTP_CLIENT = HttpClient.newBuilder()
         .version(HttpClient.Version.HTTP_1_1)
         .build();
@@ -631,10 +640,18 @@ public class DashboardResource {
             });
 
             InputStream bodyStream = resp.body();
+            boolean eventStream = isEventStream(resp.headers().firstValue("content-type").orElse(""));
             StreamingOutput so = (OutputStream output) -> {
                 byte[] buf = new byte[8192];
                 int n;
                 try {
+                    if (eventStream) {
+                        // The response headers go out with the first bytes of the body. A stream that stays silent until
+                        // something happens (the Chat UI's) would leave the browser without headers, so its EventSource
+                        // never opens and the screen shows "disconnected". An SSE comment line is ignored by EventSource.
+                        output.write(SSE_OPEN_COMMENT);
+                        output.flush();
+                    }
                     while ((n = bodyStream.read(buf)) != -1) {
                         output.write(buf, 0, n);
                         output.flush();
