@@ -547,54 +547,34 @@ public class DashboardResource {
             LOG.severe("Failed to look up sessions for proxy: " + e.getMessage());
             return Response.serverError().build();
         }
-        SessionStatus session = userSessions.stream()
-            .filter(s -> s.sessionId().equals(sessionId))
-            .findFirst()
-            .orElse(null);
-        if (session == null) {
-            // Not a session id: perhaps a tool started inside one of this user's session Pods,
-            // named {sessionId}-{toolName}-{port} by SubToolResource.
-            SubTool subTool = SubTool.parse(sessionId, userSessions);
-            if (subTool != null) {
-                sm.tell(mgr -> mgr.touchSession(sm, subTool.sessionId()));
-                String rawQuery = uriInfo.getRequestUri().getRawQuery();
-                String targetUrl = "http://" + subTool.serviceName() + "." + userPodsNamespace
-                    + ".svc.cluster.local:" + subTool.port() + "/" + subPath
-                    + (rawQuery != null && !rawQuery.isEmpty() ? "?" + rawQuery : "");
-                return forward(targetUrl, method, body, inHeaders, "sub-tool " + sessionId);
-            }
+        SessionTarget.Resolution target = SessionTarget.resolve(
+            sessionId, subPath, uriInfo.getRequestUri().getRawQuery(), "http",
+            userSessions, toolLookup(sm, sessionId), userPodsNamespace);
+        if (target.kind() == SessionTarget.Kind.FORBIDDEN) {
             LOG.warning("Unauthorized session access: user=" + userId + " sessionId=" + sessionId);
             return Response.status(Response.Status.FORBIDDEN)
                 .entity("You do not own this session").build();
         }
 
         // Update idle timer
-        sm.tell(mgr -> mgr.touchSession(sm, sessionId));
+        sm.tell(mgr -> mgr.touchSession(sm, target.sessionId()));
 
-        // Determine target path and port from the tool plugin's settings
-        boolean passthrough = false;
-        int containerPort = 8080;
-        try {
-            List<com.scivicslab.k8spups.plugin.ToolPlugin> tools =
-                sm.ask(SessionManager::listAvailableTools).get();
-            java.util.Optional<com.scivicslab.k8spups.plugin.ToolPlugin> toolPlugin = tools.stream()
-                .filter(t -> t.displayName().equals(session.toolName()))
-                .findFirst();
-            passthrough    = toolPlugin.map(com.scivicslab.k8spups.plugin.ToolPlugin::passthroughPath).orElse(false);
-            containerPort  = toolPlugin.map(com.scivicslab.k8spups.plugin.ToolPlugin::containerPort).orElse(8080);
-        } catch (Exception e) {
-            LOG.warning("Could not determine tool settings for " + sessionId + ": " + e.getMessage());
-        }
+        return forward(target.url(), method, body, inHeaders, target.what());
+    }
 
-        String targetPath = passthrough
-            ? SessionPath.of(sessionId) + "/" + subPath
-            : "/" + subPath;
-        String rawQuery = uriInfo.getRequestUri().getRawQuery();
-        String targetUrl = "http://pups-svc-" + sessionId + "." + userPodsNamespace + ".svc.cluster.local:" + containerPort
-            + targetPath
-            + (rawQuery != null && !rawQuery.isEmpty() ? "?" + rawQuery : "");
-
-        return forward(targetUrl, method, body, inHeaders, "session " + sessionId);
+    /** Finds a tool plugin by display name; a lookup that fails answers null, which means the default settings. */
+    private java.util.function.Function<String, ToolPlugin> toolLookup(ActorRef<SessionManager> sm, String sessionId) {
+        return toolName -> {
+            try {
+                return sm.ask(SessionManager::listAvailableTools).get().stream()
+                    .filter(t -> t.displayName().equals(toolName))
+                    .findFirst()
+                    .orElse(null);
+            } catch (Exception e) {
+                LOG.warning("Could not determine tool settings for " + sessionId + ": " + e.getMessage());
+                return null;
+            }
+        };
     }
 
     /**
