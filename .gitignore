@@ -20,3 +20,6 @@ docker/code-raptor/jars/
 
 # The Quarkus application of ga4gh-visa-issuer is copied here by hand for the image build (docker/ga4gh-visa-issuer/Dockerfile).
 docker/ga4gh-visa-issuer/quarkus-app/
+
+# The jar of keycloak-ga4gh-passport-mapper is copied here by hand for the image build (docker/keycloak-with-audit-passport/Dockerfile).
+docker/keycloak-with-audit-passport/jars/

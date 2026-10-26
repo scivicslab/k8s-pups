@@ -58,6 +58,16 @@ public class DatasetService {
         this.s3 = s3;
     }
 
+    /** Whether the Visas of users come from their UserInfo response, so the caller must supply them. */
+    public boolean wantsSuppliedVisas() {
+        return passport.map(PassportGrants::acceptsSuppliedVisas).orElse(false);
+    }
+
+    /** Takes the Visas of a user from the UserInfo response of the user's login (see {@link PassportGrants#supply}). */
+    public void supplyVisas(String user, List<String> visas) {
+        passport.ifPresent(p -> p.supply(user, visas));
+    }
+
     /** The S3 access, for the endpoints that publish the keys of its tokens. */
     public Optional<S3Access> s3Access() {
         return s3;

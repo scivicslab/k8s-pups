@@ -141,6 +141,23 @@ public class SessionManager {
     }
 
     /**
+     * Hands the Visas of a user, taken from the UserInfo response of the user's login, to the dataset service; they decide
+     * which datasets the next sessions of the user get. Returns whether the Passport support wants the Visas supplied.
+     */
+    public boolean supplyVisas(ActorRef<SessionManager> self, String userId, List<String> visas) {
+        ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
+        if (datasets == null) return false;
+        try {
+            if (!datasets.ask(DatasetService::wantsSuppliedVisas).get()) return false;
+            datasets.ask(d -> { d.supplyVisas(userId, visas); return null; }).get();
+            return true;
+        } catch (Exception e) {
+            LOG.warning("Visas of " + userId + " could not be supplied: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Adds to the environment the credentials of the S3 server for the datasets that the user's Visas grant, when the
      * S3 access is on. A Pod that gets them is stopped when the user loses one of these datasets, like a Pod that
      * mounts a dataset.

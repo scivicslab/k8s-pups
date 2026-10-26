@@ -30,24 +30,29 @@ public final class PassportConfig {
         if (!cfg.getOptionalValue("k8spups.passport.enabled", Boolean.class).orElse(false)) {
             return Optional.empty();
         }
+        Set<String> sources = set(value(cfg, "k8spups.passport.sources"), "issuer");
+        boolean fromIssuer = sources.contains("issuer");
+        boolean fromUserInfo = sources.contains("userinfo");
         String passportUrl = value(cfg, "k8spups.passport.passport-url");
         String issuer = value(cfg, "k8spups.passport.trusted-issuer");
         String jwksUri = value(cfg, "k8spups.passport.jwks-uri");
         String prefix = value(cfg, "k8spups.passport.dataset-prefix");
-        if (passportUrl.isEmpty() || issuer.isEmpty() || jwksUri.isEmpty() || prefix.isEmpty()) {
-            LOG.warning("k8spups.passport.enabled is true but passport-url, trusted-issuer, jwks-uri or dataset-prefix is "
-                    + "missing; the Passport support stays off");
+        if ((!fromIssuer && !fromUserInfo) || (fromIssuer && passportUrl.isEmpty()) || issuer.isEmpty() || jwksUri.isEmpty()
+                || prefix.isEmpty()) {
+            LOG.warning("k8spups.passport.enabled is true but sources (issuer, userinfo), trusted-issuer, jwks-uri or dataset-prefix "
+                    + "is missing, or passport-url is missing for the source issuer; the Passport support stays off");
             return Optional.empty();
         }
         Set<String> acceptedBy = set(value(cfg, "k8spups.passport.accepted-by"), "dac");
         Set<String> trustedSources = set(value(cfg, "k8spups.passport.trusted-sources"), null);
         long cacheSeconds = cfg.getOptionalValue("k8spups.passport.cache-seconds", Long.class).orElse(30L);
 
+        // The same HTTP client fetches the Passport from the Visa issuer and the key set of the issuer's Visas.
         HttpPassportSource http = new HttpPassportSource(passportUrl);
         VisaCheck check = new VisaCheck(Map.of(issuer, jwksUri), acceptedBy, trustedSources,
                 new CachedJwks(http, 60, Clock.systemUTC()), Clock.systemUTC());
-        LOG.info("Passport support on: Visas of " + issuer + " grant datasets under " + prefix);
-        return Optional.of(new PassportGrants(http, check, prefix, cacheSeconds, Clock.systemUTC()));
+        LOG.info("Passport support on (sources: " + sources + "): Visas of " + issuer + " grant datasets under " + prefix);
+        return Optional.of(new PassportGrants(fromIssuer ? http : null, fromUserInfo, check, prefix, cacheSeconds, Clock.systemUTC()));
     }
 
     /**

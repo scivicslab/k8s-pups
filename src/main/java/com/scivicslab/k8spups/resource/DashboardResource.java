@@ -311,6 +311,10 @@ public class DashboardResource {
             extraType0, extraPath0, extraType1, extraPath1, extraType2, extraPath2);
 
         try {
+            // Visas in the UserInfo response of the login (claim ga4gh_passport_v1), when the Passport support takes them from there.
+            // Read on the request thread: the identity is not available on the thread of the actor.
+            List<String> visas = currentVisas();
+            sm.ask(mgr -> mgr.supplyVisas(sm, userId, visas)).get();
             SessionStatus status = sm.ask(mgr ->
                 mgr.createSession(sm, userId, toolName, Collections.emptyList(), null, profile, userParams, storageType, additionalMounts)
             ).get();
@@ -1147,6 +1151,26 @@ public class DashboardResource {
             }
         }
         return mounts;
+    }
+
+    /**
+     * The Visas that the UserInfo response of the user's login carries in the claim ga4gh_passport_v1: an array of Visa
+     * JWTs. Empty when the response has no such claim or the login has no UserInfo (quarkus.oidc.authentication.user-info-required).
+     * The Visas are not trusted here; the Passport support checks the signature of each.
+     */
+    private List<String> currentVisas() {
+        List<String> visas = new ArrayList<>();
+        try {
+            if (identity != null && identity.getAttribute("userinfo") instanceof io.quarkus.oidc.UserInfo userInfo
+                    && userInfo.getArray("ga4gh_passport_v1") != null) {
+                userInfo.getArray("ga4gh_passport_v1").forEach(v -> {
+                    if (v instanceof jakarta.json.JsonString s) visas.add(s.getString());
+                });
+            }
+        } catch (Exception e) {
+            LOG.warning("The Visas of the UserInfo response could not be read: " + e.getMessage());
+        }
+        return visas;
     }
 
     private String getCurrentUsername() {
