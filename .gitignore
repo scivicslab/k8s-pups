@@ -17,3 +17,6 @@ search-embedding/
 
 # The jar of code-raptor is copied here by hand for the image build (docker/code-raptor/Dockerfile).
 docker/code-raptor/jars/
+
+# The Quarkus application of ga4gh-visa-issuer is copied here by hand for the image build (docker/ga4gh-visa-issuer/Dockerfile).
+docker/ga4gh-visa-issuer/quarkus-app/
