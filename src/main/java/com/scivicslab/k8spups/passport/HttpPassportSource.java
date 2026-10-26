@@ -30,9 +30,15 @@ public final class HttpPassportSource implements PassportGrants.PassportSource, 
         this.passportUrlTemplate = passportUrlTemplate;
     }
 
+    /** The Passport URL of a user: the template with {sub} replaced by the user name, encoded for a URL path. */
+    static String urlFor(String template, String user) {
+        // URLEncoder writes a space as "+", which is a space only in a query string; in a path it must be %20.
+        return template.replace("{sub}", URLEncoder.encode(user, StandardCharsets.UTF_8).replace("+", "%20"));
+    }
+
     @Override
     public List<String> visas(String user) throws Exception {
-        String body = get(passportUrlTemplate.replace("{sub}", URLEncoder.encode(user, StandardCharsets.UTF_8)));
+        String body = get(urlFor(passportUrlTemplate, user));
         Map<String, Object> claim = JSON.readValue(body, new TypeReference<>() {
         });
         Object visas = claim.get("ga4gh_passport_v1");
