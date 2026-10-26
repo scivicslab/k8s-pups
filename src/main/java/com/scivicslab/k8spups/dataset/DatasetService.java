@@ -1,10 +1,12 @@
 package com.scivicslab.k8spups.dataset;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
+import com.scivicslab.k8spups.passport.PassportGrants;
 
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -35,10 +37,17 @@ public class DatasetService {
 
     private final DatasetRepository repository;
     private final K8sApiClient k8sClient;
+    private final Optional<PassportGrants> passport;
 
     public DatasetService(DatasetRepository repository, K8sApiClient k8sClient) {
+        this(repository, k8sClient, Optional.empty());
+    }
+
+    /** @param passport datasets granted by the Visas of a user's Passport, added to the datasets of the database */
+    public DatasetService(DatasetRepository repository, K8sApiClient k8sClient, Optional<PassportGrants> passport) {
         this.repository = repository;
         this.k8sClient = k8sClient;
+        this.passport = passport;
     }
 
     /** True when the entitlement database is configured and reachable in this instance. */
@@ -150,9 +159,22 @@ public class DatasetService {
         return true;
     }
 
-    /** The datasets the user may read now (access that has not expired). */
+    /**
+     * The datasets the user may read now: the access in the database that has not expired, and, when the Passport
+     * support is on, the datasets of the catalog that the user's Visas grant.
+     */
     public List<String> activeDatasets(String user) {
-        return repository.activeDatasets(user);
+        List<String> fromDatabase = repository.activeDatasets(user);
+        if (passport.isEmpty()) return fromDatabase;
+        Set<String> granted = passport.get().datasets(user);
+        return union(fromDatabase, granted.stream().filter(repository::datasetExists).toList());
+    }
+
+    /** The two lists without duplicates, in order: the first list, then the new names of the second. */
+    static List<String> union(List<String> first, List<String> second) {
+        Set<String> all = new LinkedHashSet<>(first);
+        all.addAll(second);
+        return List.copyOf(all);
     }
 
     // ── audit trail ────────────────────────────────────────────────────────────
@@ -200,7 +222,7 @@ public class DatasetService {
     public Mounts prepareMounts(String userId) {
         if (!isAvailable()) return Mounts.NONE;
         try {
-            List<String> datasets = repository.activeDatasets(userId);
+            List<String> datasets = activeDatasets(userId);
             List<String> paths = repository.activePaths(userId);
             if (datasets.isEmpty() && paths.isEmpty()) return Mounts.NONE;
             if (!datasets.isEmpty()) k8sClient.ensureDatasetRootPvPvc(userId);

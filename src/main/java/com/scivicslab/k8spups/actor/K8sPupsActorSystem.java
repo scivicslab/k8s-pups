@@ -240,7 +240,9 @@ public class K8sPupsActorSystem {
 
         // Dataset entitlement: one actor serializes list changes and view rebuilds
         actorSystem.actorOf(com.scivicslab.k8spups.dataset.DatasetService.ACTOR_NAME,
-            new com.scivicslab.k8spups.dataset.DatasetService(datasetRepository, k8sClient));
+            new com.scivicslab.k8spups.dataset.DatasetService(datasetRepository, k8sClient,
+                com.scivicslab.k8spups.passport.PassportConfig.fromConfig(
+                    org.eclipse.microprofile.config.ConfigProvider.getConfig())));
 
         // Shared settings: one actor serializes saves and the reads of starting sessions
         actorSystem.actorOf(com.scivicslab.k8spups.settings.SettingsService.ACTOR_NAME,
