@@ -141,6 +141,26 @@ public class SessionManager {
     }
 
     /**
+     * Adds to the environment the credentials of the S3 server for the datasets that the user's Visas grant, when the
+     * S3 access is on. A Pod that gets them is stopped when the user loses one of these datasets, like a Pod that
+     * mounts a dataset.
+     */
+    private Map<String, String> withS3Access(ActorRef<SessionManager> self, String userId, Map<String, String> env) {
+        ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
+        if (datasets == null) return env;
+        try {
+            Map<String, String> s3Env = datasets.ask(d -> d.s3Env(userId)).get();
+            if (s3Env.isEmpty()) return env;
+            Map<String, String> merged = new HashMap<>(env);
+            merged.putAll(s3Env);
+            return merged;
+        } catch (Exception e) {
+            LOG.warning("S3 access failed for " + userId + ": " + e.getMessage());
+            return env;
+        }
+    }
+
+    /**
      * Returns the user's additional mounts plus the read-only dataset mounts: every dataset the user may read as a
      * subPath mount, and the file-level view when files are granted one by one. Mounts of the dataset types requested
      * by the user are dropped: only the controller adds them.
@@ -249,7 +269,7 @@ public class SessionManager {
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType, workspaceInfo,
             withDatasetMount(self, userId, additionalMounts),
-            withSharedSettings(self, toolName, toolConfigEnv));
+            withS3Access(self, userId, withSharedSettings(self, toolName, toolConfigEnv)));
         Session actor = new Session(info, k8sClient);
 
         // Create as child actor
@@ -494,7 +514,7 @@ public class SessionManager {
                 if (mounted.isEmpty()) continue;
                 Set<String> active = activeByUser.get(user);
                 if (active == null) {
-                    active = new HashSet<>(datasets.ask(d -> d.activeDatasets(user)).get());
+                    active = new HashSet<>(datasets.ask(d -> d.accessibleDatasets(user)).get());
                     activeByUser.put(user, active);
                 }
                 if (!active.containsAll(mounted)) revokedUsers.add(user);

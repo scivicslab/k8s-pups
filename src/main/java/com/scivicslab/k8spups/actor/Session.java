@@ -335,6 +335,11 @@ public class Session {
                 if (K8sApiClient.DATASET_ROOT_STORAGE_TYPE.equals(m.storageType()) && m.subPath() != null) names.add(m.subPath());
             }
         }
+        // Datasets of an S3 server: the Pod holds credentials made for them, listed in its environment.
+        String s3 = info.toolConfigEnv() == null ? null : info.toolConfigEnv().get(com.scivicslab.k8spups.passport.S3Access.DATASETS_ENV);
+        if (s3 != null && !s3.isBlank()) {
+            for (String d : s3.split(",")) if (!d.isBlank() && !names.contains(d)) names.add(d);
+        }
         return names;
     }
 

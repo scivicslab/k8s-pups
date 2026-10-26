@@ -2,10 +2,12 @@ package com.scivicslab.k8spups.dataset;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.passport.PassportGrants;
+import com.scivicslab.k8spups.passport.S3Access;
 
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.logging.Logger;
@@ -38,16 +40,27 @@ public class DatasetService {
     private final DatasetRepository repository;
     private final K8sApiClient k8sClient;
     private final Optional<PassportGrants> passport;
+    private final Optional<S3Access> s3;
 
     public DatasetService(DatasetRepository repository, K8sApiClient k8sClient) {
-        this(repository, k8sClient, Optional.empty());
+        this(repository, k8sClient, Optional.empty(), Optional.empty());
     }
 
-    /** @param passport datasets granted by the Visas of a user's Passport, added to the datasets of the database */
-    public DatasetService(DatasetRepository repository, K8sApiClient k8sClient, Optional<PassportGrants> passport) {
+    /**
+     * @param passport datasets granted by the Visas of a user's Passport, added to the datasets of the database
+     * @param s3       when present, the datasets that Visas grant are also given to the Pod as access to an S3 server
+     */
+    public DatasetService(DatasetRepository repository, K8sApiClient k8sClient, Optional<PassportGrants> passport,
+            Optional<S3Access> s3) {
         this.repository = repository;
         this.k8sClient = k8sClient;
         this.passport = passport;
+        this.s3 = s3;
+    }
+
+    /** The S3 access, for the endpoints that publish the keys of its tokens. */
+    public Optional<S3Access> s3Access() {
+        return s3;
     }
 
     /** True when the entitlement database is configured and reachable in this instance. */
@@ -168,6 +181,31 @@ public class DatasetService {
         if (passport.isEmpty()) return fromDatabase;
         Set<String> granted = passport.get().datasets(user);
         return union(fromDatabase, granted.stream().filter(repository::datasetExists).toList());
+    }
+
+    /** The datasets that the Visas of the user grant, whether or not they are in the catalog (empty without Passport support). */
+    private Set<String> visaDatasets(String user) {
+        return passport.map(p -> p.datasets(user)).orElse(Set.of());
+    }
+
+    /**
+     * Every dataset the user may read now, wherever it is read: the datasets mounted from NFS, and, when the S3 access
+     * is on, the datasets of Visas that the S3 server holds. A running session is stopped when it holds a dataset
+     * that is not in this list any more.
+     */
+    public List<String> accessibleDatasets(String user) {
+        List<String> nfs = activeDatasets(user);
+        return s3.isEmpty() ? nfs : union(nfs, List.copyOf(visaDatasets(user)));
+    }
+
+    /**
+     * The environment that gives a tool Pod of the user access to the S3 datasets that the user's Visas grant: the
+     * temporary credentials of the S3 server and the list of datasets they were made for. Empty when the S3 access is
+     * off or no Visa grants a dataset.
+     */
+    public Map<String, String> s3Env(String user) {
+        if (s3.isEmpty()) return Map.of();
+        return s3.get().env(user, visaDatasets(user));
     }
 
     /** The two lists without duplicates, in order: the first list, then the new names of the second. */

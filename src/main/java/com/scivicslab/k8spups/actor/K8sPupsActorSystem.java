@@ -43,6 +43,13 @@ public class K8sPupsActorSystem {
 
     private static final Logger LOG = Logger.getLogger(K8sPupsActorSystem.class.getName());
 
+    /** The S3 access for datasets granted by Visas; empty unless k8spups.passport.s3.enabled is true. */
+    private Optional<com.scivicslab.k8spups.passport.S3Access> s3Access = Optional.empty();
+
+    public Optional<com.scivicslab.k8spups.passport.S3Access> s3Access() {
+        return s3Access;
+    }
+
     @ConfigProperty(name = "k8spups.user-pods-namespace", defaultValue = "user-pods")
     String userPodsNamespace;
 
@@ -239,10 +246,13 @@ public class K8sPupsActorSystem {
         }
 
         // Dataset entitlement: one actor serializes list changes and view rebuilds
+        this.s3Access = com.scivicslab.k8spups.passport.PassportConfig.s3FromConfig(
+            org.eclipse.microprofile.config.ConfigProvider.getConfig());
         actorSystem.actorOf(com.scivicslab.k8spups.dataset.DatasetService.ACTOR_NAME,
             new com.scivicslab.k8spups.dataset.DatasetService(datasetRepository, k8sClient,
                 com.scivicslab.k8spups.passport.PassportConfig.fromConfig(
-                    org.eclipse.microprofile.config.ConfigProvider.getConfig())));
+                    org.eclipse.microprofile.config.ConfigProvider.getConfig()),
+                s3Access));
 
         // Shared settings: one actor serializes saves and the reads of starting sessions
         actorSystem.actorOf(com.scivicslab.k8spups.settings.SettingsService.ACTOR_NAME,

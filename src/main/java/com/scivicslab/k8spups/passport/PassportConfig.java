@@ -1,5 +1,7 @@
 package com.scivicslab.k8spups.passport;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.util.Arrays;
 import java.util.Map;
@@ -46,6 +48,41 @@ public final class PassportConfig {
                 new CachedJwks(http, 60, Clock.systemUTC()), Clock.systemUTC());
         LOG.info("Passport support on: Visas of " + issuer + " grant datasets under " + prefix);
         return Optional.of(new PassportGrants(http, check, prefix, cacheSeconds, Clock.systemUTC()));
+    }
+
+    /**
+     * The S3 access, when {@code k8spups.passport.s3.enabled=true}: the datasets that Visas grant are read from an S3
+     * server with temporary credentials that the controller gets for the user (see {@link S3Access}).
+     */
+    public static Optional<S3Access> s3FromConfig(Config cfg) {
+        if (!cfg.getOptionalValue("k8spups.passport.enabled", Boolean.class).orElse(false)
+                || !cfg.getOptionalValue("k8spups.passport.s3.enabled", Boolean.class).orElse(false)) {
+            return Optional.empty();
+        }
+        String endpoint = value(cfg, "k8spups.passport.s3.endpoint");
+        String bucket = value(cfg, "k8spups.passport.s3.bucket");
+        String issuer = value(cfg, "k8spups.passport.s3.issuer");
+        if (endpoint.isEmpty() || bucket.isEmpty() || issuer.isEmpty()) {
+            LOG.warning("k8spups.passport.s3.enabled is true but endpoint, bucket or issuer is missing; the S3 access stays off");
+            return Optional.empty();
+        }
+        String audience = cfg.getOptionalValue("k8spups.passport.s3.audience", String.class).filter(s -> !s.isBlank()).orElse("k8s-pups");
+        String policyPrefix = cfg.getOptionalValue("k8spups.passport.s3.policy-prefix", String.class).filter(s -> !s.isBlank()).orElse("jga-read-");
+        int duration = cfg.getOptionalValue("k8spups.passport.s3.duration-seconds", Integer.class).orElse(900);
+        String privateKeyFile = value(cfg, "k8spups.passport.s3.signing-key-file");
+        String publicKeyFile = value(cfg, "k8spups.passport.s3.public-key-file");
+        S3Tokens tokens;
+        try {
+            tokens = privateKeyFile.isEmpty() || publicKeyFile.isEmpty()
+                    ? S3Tokens.generate(issuer, audience, duration, Clock.systemUTC())
+                    : S3Tokens.fromPem(Files.readString(Path.of(privateKeyFile)), Files.readString(Path.of(publicKeyFile)),
+                            issuer, audience, duration, Clock.systemUTC());
+        } catch (Exception e) {
+            LOG.warning("The signing key of the S3 tokens could not be read; the S3 access stays off: " + e);
+            return Optional.empty();
+        }
+        LOG.info("S3 access on: datasets that Visas grant are read from bucket " + bucket + " at " + endpoint);
+        return Optional.of(new S3Access(tokens, new S3Sts(endpoint, S3Sts.http()), endpoint, bucket, policyPrefix, duration));
     }
 
     private static String value(Config cfg, String key) {
