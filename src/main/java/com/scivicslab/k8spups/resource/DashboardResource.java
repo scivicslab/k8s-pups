@@ -256,6 +256,8 @@ public class DashboardResource {
         data.put("userId", userId);
         data.put("userRoles", userRoles);
         data.put("tools", tools);
+        data.put("cardOrder", ToolCardOrder.ranks());
+        data.put("otherCardOrder", ToolCardOrder.OTHER);
         data.put("dynamicTools", dynamicTools);
         data.put("sessions", userSessions);
         data.put("summary", summary);

@@ -401,7 +401,7 @@
     {#else}
     <div class="tools-grid">
         {#for tool in tools}
-        <div class="tool-card">
+        <div class="tool-card" style="order: {cardOrder.get(tool.displayName) ?: otherCardOrder}">
             <div class="tool-icon"><img src="{tool.icon}" alt="{tool.displayName}"></div>
             <div class="tool-name">{tool.displayName}</div>
             <div class="tool-desc">{tool.description}</div>
@@ -446,7 +446,7 @@
         </div>
         {/for}
         {#for ss in sharedServices}
-        <div class="tool-card shared-card">
+        <div class="tool-card shared-card" style="order: {otherCardOrder}">
             <div class="tool-icon"><img src="icons/{ss.service.name}.png" alt="{ss.service.displayName}" onerror="this.style.display='none'"></div>
             <div class="tool-name">{ss.service.displayName} <span class="badge badge-{ss.badge}">{ss.state}</span></div>
             <div class="tool-desc">{ss.service.description}<br>
@@ -472,7 +472,7 @@
         </div>
         {/for}
         {#for dt in dynamicTools}
-        <div class="tool-card">
+        <div class="tool-card" style="order: {otherCardOrder}">
             <div class="tool-icon"><img src="icons/default-tool.png" alt="{dt.name}" onerror="this.style.display='none'"></div>
             <div class="tool-name">{dt.name}</div>
             <div class="tool-desc">{#if dt.descriptor != null}{dt.descriptor.description}{/if}</div>
@@ -483,13 +483,13 @@
         </div>
         {/for}
         {#if isAdmin}
-        <div class="tool-card" id="admin-datasets-card">
+        <div class="tool-card" id="admin-datasets-card" style="order: {cardOrder.get('Datasets') ?: otherCardOrder}">
             <div class="tool-icon"><img src="icons/datasets.png" alt="Datasets"></div>
             <div class="tool-name">Datasets</div>
             <div class="tool-desc">JGA/AGD: register files and grant users read access to them. Administrators only.</div>
             <a class="btn btn-primary" href="datasets" target="_blank" rel="noopener">Open</a>
         </div>
-        <div class="tool-card" id="admin-settings-card">
+        <div class="tool-card" id="admin-settings-card" style="order: {otherCardOrder}">
             <div class="tool-icon"><img src="icons/settings.png" alt="Settings"></div>
             <div class="tool-name">Settings</div>
             <div class="tool-desc">GPU Broker URL and the default model shared by the AI tools. Administrators only.</div>
