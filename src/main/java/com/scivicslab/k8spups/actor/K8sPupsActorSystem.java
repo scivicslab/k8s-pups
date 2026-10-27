@@ -327,7 +327,8 @@ public class K8sPupsActorSystem {
                 Map<String, String> labels = pod.getMetadata().getLabels();
                 String sessionId = labels.get("session");
                 String toolName = labels.get("tool");
-                String userId = labels.get("user");
+                String userLabel = labels.get("user");
+                String userId = userLabel == null ? null : com.scivicslab.k8spups.k8s.UserKey.decode(userLabel);
                 if (sessionId == null || toolName == null || userId == null) {
                     LOG.warning("Pod missing required labels, deleting: " + pod.getMetadata().getName());
                     try { k8sClient.deleteOrphanedPodBySession(sessionId != null ? sessionId : "unknown"); }

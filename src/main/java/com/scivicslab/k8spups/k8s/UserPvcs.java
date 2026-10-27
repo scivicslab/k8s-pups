@@ -30,7 +30,7 @@ public final class UserPvcs {
                 .withNamespace(namespace)
                 .addToLabels("app", "k8s-pups-user")
                 .addToLabels("managed-by", "k8s-pups")
-                .addToLabels("user", userId)
+                .addToLabels("user", UserKey.encode(userId))
                 .addToLabels("storage-type", storageType)
             .endMetadata()
             .withNewSpec()

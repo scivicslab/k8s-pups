@@ -73,6 +73,9 @@ public class K8sApiClient {
     private final String datasetBasePath;
     private final String longhornStorageClass;
     private final String lustreCsiStorageClass;
+    /** User ID and group ID that replace the plugin's user ID in the tool Pods (see ToolPodIds). Null = not configured. */
+    private final Long toolPodUid;
+    private final Long toolPodGid;
     private final String datasetOriginalDir;
     private final String datasetViewDir;
     private final String datasetMountPath;
@@ -125,6 +128,11 @@ public class K8sApiClient {
             .filter(v -> !v.isBlank()).orElse("longhorn-single");
         this.lustreCsiStorageClass = cfg.getOptionalValue("k8spups.lustre-csi.storage-class", String.class)
             .filter(v -> !v.isBlank()).orElse("lustre-csi");
+        this.toolPodUid = cfg.getOptionalValue("k8spups.tool-pod.uid", String.class)
+            .filter(v -> !v.isBlank()).map(Long::valueOf).orElse(null);
+        this.toolPodGid = cfg.getOptionalValue("k8spups.tool-pod.gid", String.class)
+            .filter(v -> !v.isBlank()).map(Long::valueOf).orElse(null);
+        ToolPodIds.resolve(1000L, toolPodUid, toolPodGid);   // refuse to start when only one of the two is set
         this.datasetOriginalDir = cfg.getOptionalValue("k8spups.dataset.original-dir", String.class).orElse("original");
         this.datasetViewDir = cfg.getOptionalValue("k8spups.dataset.view-dir", String.class).orElse("view");
         this.datasetMountPath = cfg.getOptionalValue("k8spups.dataset.mount-path", String.class).orElse("/datasets");
@@ -255,7 +263,7 @@ public class K8sApiClient {
                 .withLabels(Map.of(
                     "app", "k8s-pups-user",
                     "session", info.sessionId(),
-                    "user", info.userId()
+                    "user", UserKey.encode(info.userId())
                 ))
             .endMetadata()
             .withNewSpec()
@@ -728,10 +736,11 @@ public class K8sApiClient {
     // -- PVC operations --
 
     /**
-     * Returns the sanitized userId for use in k8s resource names.
+     * Returns the key of the user for use in k8s resource names and NFS directory names.
+     * The mapping is injective (see {@link UserKey}), so two users never share a resource.
      */
     private String sanitizeUserId(String userId) {
-        return userId.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+        return UserKey.encode(userId);
     }
 
     /**
@@ -775,7 +784,7 @@ public class K8sApiClient {
                     .withName(pvName)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", ownerUserId)
+                    .addToLabels("user", UserKey.encode(ownerUserId))
                     .addToLabels("storage-type", "nfs-k8s-shared")
                     .addToLabels("shared-from", sanitizeUserId(sourceUserId))
                 .endMetadata()
@@ -805,7 +814,7 @@ public class K8sApiClient {
                     .withNamespace(userPodsNamespace)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", ownerUserId)
+                    .addToLabels("user", UserKey.encode(ownerUserId))
                     .addToLabels("storage-type", "nfs-k8s-shared")
                     .addToLabels("shared-from", sanitizeUserId(sourceUserId))
                 .endMetadata()
@@ -841,7 +850,7 @@ public class K8sApiClient {
         List<Map<String, String>> result = new ArrayList<>();
         var pvcs = client.persistentVolumeClaims().inNamespace(userPodsNamespace)
             .withLabel("managed-by", "k8s-pups")
-            .withLabel("user", ownerUserId)
+            .withLabel("user", UserKey.encode(ownerUserId))
             .withLabel("storage-type", "nfs-k8s-shared")
             .list().getItems();
         for (var pvc : pvcs) {
@@ -907,10 +916,10 @@ public class K8sApiClient {
         for (var cm : configMaps) {
             if (cm.getData() == null) continue;
             if (!"true".equals(cm.getData().get("share.enabled"))) continue;
-            // Extract userId from ConfigMap name (pups-prefs-{userId})
+            // Extract userId from ConfigMap name (pups-prefs-{UserKey.encode(userId)})
             String cmName = cm.getMetadata().getName();
             if (!cmName.startsWith("pups-prefs-")) continue;
-            String sourceUserId = cmName.substring("pups-prefs-".length());
+            String sourceUserId = UserKey.decode(cmName.substring("pups-prefs-".length()));
             if (sourceUserId.equals(requestingUserId)) continue; // skip self
             // Check if requester is allowed
             if (!isShareAllowed(sourceUserId, requestingUserId)) continue;
@@ -1012,7 +1021,7 @@ public class K8sApiClient {
                     .withName(pvName)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                     .addToLabels("storage-type", "nfs-k8s")
                 .endMetadata()
                 .withNewSpec()
@@ -1043,7 +1052,7 @@ public class K8sApiClient {
                     .withNamespace(userPodsNamespace)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                     .addToLabels("storage-type", "nfs-k8s")
                 .endMetadata()
                 .withNewSpec()
@@ -1174,7 +1183,7 @@ public class K8sApiClient {
             PersistentVolume pv = new PersistentVolumeBuilder()
                 .withNewMetadata().withName(pvName)
                     .addToLabels("app", "k8s-pups-user").addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId).addToLabels("storage-type", "dataset-root")
+                    .addToLabels("user", UserKey.encode(userId)).addToLabels("storage-type", "dataset-root")
                 .endMetadata()
                 .withNewSpec()
                     .withCapacity(Map.of("storage", new Quantity("1Ti")))
@@ -1193,7 +1202,7 @@ public class K8sApiClient {
             PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
                 .withNewMetadata().withName(pvcName).withNamespace(userPodsNamespace)
                     .addToLabels("app", "k8s-pups-user").addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId).addToLabels("storage-type", "dataset-root")
+                    .addToLabels("user", UserKey.encode(userId)).addToLabels("storage-type", "dataset-root")
                 .endMetadata()
                 .withNewSpec().withAccessModes("ReadOnlyMany").withStorageClassName("").withVolumeName(pvName)
                     .withNewResources().addToRequests("storage", new Quantity("1Ti")).endResources()
@@ -1248,7 +1257,7 @@ public class K8sApiClient {
                     .withName(pvName)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                     .addToLabels("storage-type", "dataset")
                 .endMetadata()
                 .withNewSpec()
@@ -1277,7 +1286,7 @@ public class K8sApiClient {
                     .withNamespace(userPodsNamespace)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                     .addToLabels("storage-type", "dataset")
                 .endMetadata()
                 .withNewSpec()
@@ -1315,7 +1324,7 @@ public class K8sApiClient {
                     .withName(pvName)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                     .addToLabels("storage-type", "nfs-home")
                 .endMetadata()
                 .withNewSpec()
@@ -1346,7 +1355,7 @@ public class K8sApiClient {
                     .withNamespace(userPodsNamespace)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                     .addToLabels("storage-type", "nfs-home")
                 .endMetadata()
                 .withNewSpec()
@@ -1555,7 +1564,7 @@ public class K8sApiClient {
                     .withNamespace(userPodsNamespace)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                 .endMetadata()
                 .addToData("storageSize", storageSize)
                 .addToData("storageType", storageType)
@@ -1591,7 +1600,7 @@ public class K8sApiClient {
                     .withNamespace(userPodsNamespace)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                 .endMetadata()
                 .addToData(key, value)
                 .build();
@@ -1600,7 +1609,7 @@ public class K8sApiClient {
     }
 
     private String userPrefsConfigMapName(String userId) {
-        return "pups-prefs-" + userId.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+        return "pups-prefs-" + sanitizeUserId(userId);
     }
 
     /**
@@ -1620,7 +1629,7 @@ public class K8sApiClient {
      * Returns the workspace PVC name for a given userId.
      */
     private String workspacePvcName(String userId) {
-        return "pups-workspace-" + userId.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+        return "pups-workspace-" + sanitizeUserId(userId);
     }
 
     /**
@@ -1647,7 +1656,7 @@ public class K8sApiClient {
                     .withName(pvName)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                 .endMetadata()
                 .withNewSpec()
                     .withCapacity(Map.of("storage", new Quantity("1Ti")))
@@ -1679,7 +1688,7 @@ public class K8sApiClient {
                     .withNamespace(userPodsNamespace)
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", userId)
+                    .addToLabels("user", UserKey.encode(userId))
                 .endMetadata()
                 .withNewSpec()
                     .withAccessModes("ReadWriteMany")
@@ -1775,7 +1784,7 @@ public class K8sApiClient {
             "managed-by", "k8s-pups",
             "tool", plugin.name(),
             "session", info.sessionId(),
-            "user", info.userId(),
+            "user", UserKey.encode(info.userId()),
             "storage-type", storageType
         );
 
@@ -1920,15 +1929,16 @@ public class K8sApiClient {
         // When nfs-home is selected, run as LDAP UID so it can read/write NFS files.
         // Also disable readOnlyRootFilesystem so the entrypoint can add the UID
         // to /etc/passwd (required by Python's pwd module, dbus, etc.).
-        Long runAsUid = plugin.runAsUser();
-        Long runAsGid = plugin.runAsUser();
+        ToolPodIds ids = ToolPodIds.resolve(plugin.runAsUser(), toolPodUid, toolPodGid);
+        Long runAsUid = ids.uid();
+        Long runAsGid = ids.gid();
         boolean readOnlyRoot = plugin.readOnlyRootFilesystem();
         if (useNfsHome && info.workspaceInfo() != null) {
             runAsUid = info.workspaceInfo().uid();
             runAsGid = info.workspaceInfo().gid();
             readOnlyRoot = false;
             LOG.info("Pod " + info.podName() + " nfs-home mode: running as UID "
-                + runAsUid + " (LDAP) instead of " + plugin.runAsUser() + " (image default)");
+                + runAsUid + " (LDAP) instead of " + ids.uid() + " (tool Pod default)");
         }
 
         // Init container: seed PVC with /etc/skel if empty.
