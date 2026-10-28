@@ -47,24 +47,33 @@
         .brand-logo { font-size: 26px; line-height: 1; }
         .brand-name { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
         .brand-tag  { font-size: 14px; font-weight: 500; }
+        /* User menu: the user name opens a menu of the account's pages and Logout. */
+        .user-menu { position: relative; }
         .user-chip {
-            display: flex; align-items: center; gap: 8px;
+            display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none;
             color: rgba(255,255,255,.92); font-size: 14px; font-weight: 500;
+            padding: 3px 10px 3px 3px; border-radius: 20px;
         }
+        .user-chip::-webkit-details-marker { display: none; }
+        .user-chip::after { content: "\25BE"; font-size: 12px; opacity: .8; }
+        .user-chip:hover, .user-menu[open] .user-chip { background: rgba(255,255,255,.15); }
+        .user-menu-items {
+            position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px;
+            background: white; border-radius: 8px; padding: 6px 0;
+            box-shadow: 0 6px 20px rgba(0,0,0,.18);
+        }
+        .user-menu-items a {
+            display: block; padding: 8px 16px; color: #1E293B; text-decoration: none;
+            font-size: 14px; font-weight: 500;
+        }
+        .user-menu-items a:hover { background: #F1F5F9; }
+        .user-menu-items hr { border: none; border-top: 1px solid #E2E8F0; margin: 6px 0; }
         .user-avatar {
             width: 30px; height: 30px; border-radius: 50%;
             background: rgba(255,255,255,.25);
             display: flex; align-items: center; justify-content: center;
             font-size: 15px;
         }
-        .btn-logout {
-            margin-left: 6px; padding: 5px 14px; border-radius: 7px;
-            font-size: 13px; font-weight: 600; color: rgba(255,255,255,.9);
-            background: rgba(255,255,255,.15); text-decoration: none;
-            border: 1px solid rgba(255,255,255,.3);
-            transition: all .15s ease;
-        }
-        .btn-logout:hover { background: rgba(255,255,255,.28); color: white; }
 
         /* ── Main ────────────────────────────────────── */
         main { max-width: 1000px; margin: 0 auto; padding: 36px 24px 60px; }
@@ -270,12 +279,17 @@
         <span class="brand-sep"></span>
         <span class="brand-tag">K8s Per-User Pod Service</span>
     </a>
-    <div class="user-chip">
-        <div class="user-avatar">👤</div>
-        <span>{userId}</span>
-        <a href="security" class="btn-logout" id="security-link">Sign-in methods</a>
-        <a href="logout" class="btn-logout">Logout</a>
-    </div>
+    <details class="user-menu" id="user-menu">
+        <summary class="user-chip" id="user-menu-button">
+            <div class="user-avatar">👤</div>
+            <span>{userId}</span>
+        </summary>
+        <div class="user-menu-items">
+            <a href="security" id="security-link">Sign-in methods</a>
+            <hr>
+            <a href="logout" id="logout-link">Logout</a>
+        </div>
+    </details>
 </header>
 
 <main>
@@ -503,6 +517,14 @@
 </main>
 
 <script>
+    // The user menu closes on a click outside it and on Escape.
+    document.addEventListener('click', e => {
+        const menu = document.getElementById('user-menu');
+        if (menu.open && !menu.contains(e.target)) menu.open = false;
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') document.getElementById('user-menu').open = false;
+    });
     if (new URLSearchParams(location.search).get('error')) {
         document.getElementById('error-banner').style.display = 'block';
     }

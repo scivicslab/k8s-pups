@@ -37,13 +37,15 @@ class K8sPupsLoginLogoutE2E extends K8sPupsE2EBase {
     }
 
     private void verifyLogout() {
-        LOG.info("=== Logout: click .btn-logout -> landing page -> /dashboard requires re-auth ===");
+        LOG.info("=== Logout: open the user menu, click Logout -> landing page -> /dashboard requires re-auth ===");
 
         // Log cookies before logout for diagnosis.
         context.cookies().forEach(c ->
             LOG.info("Cookie before logout: name=" + c.name + " domain=" + c.domain + " path=" + c.path));
 
-        page.locator("a.btn-logout").first().click();
+        // Logout is in the menu that the user name opens.
+        page.click("#user-menu-button");
+        page.click("#logout-link");
 
         // Keycloak end-session -> redirects to post_logout_redirect_uri (landing page).
         page.waitForURL(
