@@ -18,7 +18,6 @@ public record SessionInfo(
     Map<String, String> userParams,
     String userStoragePreference,
     String userStorageType,
-    WorkspaceInfo workspaceInfo,
     List<MountSpec> additionalMounts,
     Map<String, String> toolConfigEnv
 ) {
@@ -28,9 +27,9 @@ public record SessionInfo(
     public SessionInfo(String sessionId, String userId, ToolPlugin toolPlugin,
                        List<String> allowedProjects, String labId, String resourceProfile,
                        Map<String, String> userParams, String userStoragePreference,
-                       String userStorageType, WorkspaceInfo workspaceInfo) {
+                       String userStorageType) {
         this(sessionId, userId, toolPlugin, allowedProjects, labId, resourceProfile,
-            userParams, userStoragePreference, userStorageType, workspaceInfo,
+            userParams, userStoragePreference, userStorageType,
             Collections.emptyList(), Collections.emptyMap());
     }
 
@@ -40,10 +39,9 @@ public record SessionInfo(
     public SessionInfo(String sessionId, String userId, ToolPlugin toolPlugin,
                        List<String> allowedProjects, String labId, String resourceProfile,
                        Map<String, String> userParams, String userStoragePreference,
-                       String userStorageType, WorkspaceInfo workspaceInfo,
-                       List<MountSpec> additionalMounts) {
+                       String userStorageType, List<MountSpec> additionalMounts) {
         this(sessionId, userId, toolPlugin, allowedProjects, labId, resourceProfile,
-            userParams, userStoragePreference, userStorageType, workspaceInfo,
+            userParams, userStoragePreference, userStorageType,
             additionalMounts, Collections.emptyMap());
     }
 
@@ -52,21 +50,9 @@ public record SessionInfo(
      */
     public SessionInfo(String sessionId, String userId, ToolPlugin toolPlugin,
                        List<String> allowedProjects, String labId, String resourceProfile,
-                       Map<String, String> userParams, String userStoragePreference,
-                       WorkspaceInfo workspaceInfo) {
-        this(sessionId, userId, toolPlugin, allowedProjects, labId, resourceProfile,
-            userParams, userStoragePreference, null, workspaceInfo,
-            Collections.emptyList(), Collections.emptyMap());
-    }
-
-    /**
-     * Backward-compatible constructor (no workspace info).
-     */
-    public SessionInfo(String sessionId, String userId, ToolPlugin toolPlugin,
-                       List<String> allowedProjects, String labId, String resourceProfile,
                        Map<String, String> userParams, String userStoragePreference) {
         this(sessionId, userId, toolPlugin, allowedProjects, labId, resourceProfile,
-            userParams, userStoragePreference, null, null,
+            userParams, userStoragePreference, null,
             Collections.emptyList(), Collections.emptyMap());
     }
 
@@ -76,7 +62,7 @@ public record SessionInfo(
     public SessionInfo(String sessionId, String userId, ToolPlugin toolPlugin,
                        List<String> allowedProjects, String labId, String resourceProfile) {
         this(sessionId, userId, toolPlugin, allowedProjects, labId, resourceProfile,
-            Collections.emptyMap(), null, null, null,
+            Collections.emptyMap(), null, null,
             Collections.emptyList(), Collections.emptyMap());
     }
 
@@ -88,7 +74,7 @@ public record SessionInfo(
     public SessionInfo withUserStorageType(String resolvedStorageType) {
         return new SessionInfo(sessionId, userId, toolPlugin, allowedProjects, labId,
             resourceProfile, userParams, userStoragePreference, resolvedStorageType,
-            workspaceInfo, additionalMounts, toolConfigEnv);
+            additionalMounts, toolConfigEnv);
     }
 
     public String podName() {

@@ -29,7 +29,7 @@ class SessionManagerChildrenTest {
     void start() {
         system = new ActorSystem("session-manager-children-test");
         self = system.actorOf("session-manager",
-            new SessionManager(null, Map.of(), "ns", 10, 2, 60, 600, Set.of(), null));
+            new SessionManager(null, Map.of(), "ns", 10, 2, 60, 600, Set.of()));
     }
 
     @AfterEach
@@ -49,7 +49,7 @@ class SessionManagerChildrenTest {
 
     private void addSession(String sessionId, String userId) {
         SessionInfo info = new SessionInfo(sessionId, userId, plugin(), List.of(), null, null,
-            Collections.emptyMap(), null, null, null);
+            Collections.emptyMap(), null, null);
         self.createChild("session-" + sessionId, new Session(info, null));
     }
 

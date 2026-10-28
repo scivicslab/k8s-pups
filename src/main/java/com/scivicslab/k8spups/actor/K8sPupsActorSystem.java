@@ -2,7 +2,6 @@ package com.scivicslab.k8spups.actor;
 
 import java.util.Optional;
 import com.scivicslab.k8spups.k8s.K8sApiClient;
-import com.scivicslab.k8spups.k8s.LdapUserInfoClient;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.pojoactor.core.ActorSystem;
@@ -80,7 +79,7 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.default-storage-size", defaultValue = "100Gi")
     String defaultStorageSize;
 
-    @ConfigProperty(name = "k8spups.storage-type-options", defaultValue = "nfs-k8s,longhorn,nfs-home")
+    @ConfigProperty(name = "k8spups.storage-type-options", defaultValue = "nfs-k8s,longhorn")
     List<String> storageTypeOptions;
 
     @ConfigProperty(name = "k8spups.default-storage-type", defaultValue = "nfs-k8s")
@@ -107,25 +106,6 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.session-oidc.redirect-base-url", defaultValue = "https://10.0.0.25")
     String sessionOidcRedirectBaseUrl;
 
-    // Workspace (LDAP + NFS) config
-    @ConfigProperty(name = "k8spups.workspace.ldap.url", defaultValue = "")
-    String workspaceLdapUrl;
-
-    @ConfigProperty(name = "k8spups.workspace.ldap.base-dn", defaultValue = "")
-    String workspaceLdapBaseDn;
-
-    @ConfigProperty(name = "k8spups.workspace.ldap.bind-dn", defaultValue = "")
-    String workspaceLdapBindDn;
-
-    @ConfigProperty(name = "k8spups.workspace.ldap.bind-password", defaultValue = "")
-    String workspaceLdapBindPassword;
-
-    @ConfigProperty(name = "k8spups.workspace.nfs.server", defaultValue = "")
-    String workspaceNfsServer;
-
-    @ConfigProperty(name = "k8spups.workspace.nfs.base-path", defaultValue = "/Public/Users")
-    String workspaceNfsBasePath;
-
     // NFS k8s-dedicated storage config
     @Inject
     com.scivicslab.k8spups.dataset.DatasetRepository datasetRepository;
@@ -133,15 +113,8 @@ public class K8sPupsActorSystem {
     @Inject
     com.scivicslab.k8spups.storage.StorageAllocationRepository storageAllocationRepository;
 
-    // Base of the users an administrator can give storage to (e.g. ou=personal_genome,ou=accounts,dc=nig,dc=ac,dc=jp);
-    // empty = the workspace LDAP base
-    // Empty (unset) is allowed: Quarkus refuses an empty value for a String, so these are Optional
-    @ConfigProperty(name = "k8spups.users.ldap-base-dn")
-    Optional<String> usersLdapBaseDn;
-
-    private LdapUserInfoClient ldapClient;
-
     // The allocation a user gets at the first login, <type>:<size> (e.g. lustre-csi:50Gi); empty = none
+    // Empty (unset) is allowed: Quarkus refuses an empty value for a String, so this is Optional
     @ConfigProperty(name = "k8spups.storage.default-allocation")
     Optional<String> defaultAllocation;
 
@@ -237,21 +210,10 @@ public class K8sPupsActorSystem {
             sessionOidcIssuer, sessionOidcAuthorizationEndpoint, sessionOidcTokenEndpoint,
             sessionOidcClientId, sessionOidcSecretName, sessionOidcJwksUri,
             sessionOidcRedirectBaseUrl,
-            workspaceNfsServer, workspaceNfsBasePath,
             nfsK8sServer, nfsK8sBasePath,
             allowedNodes,
             basePath,
             controllerUrl);
-
-        // Create LdapUserInfoClient for workspace mounting (null if not configured)
-        ldapClient = null;
-        if (!workspaceLdapUrl.isBlank() && !workspaceLdapBindPassword.isBlank()) {
-            ldapClient = new LdapUserInfoClient(
-                workspaceLdapUrl, workspaceLdapBaseDn, workspaceLdapBindDn, workspaceLdapBindPassword);
-            LOG.info("Workspace LDAP client configured: " + workspaceLdapUrl);
-        } else {
-            LOG.info("Workspace LDAP not configured; workspace mounting disabled");
-        }
 
         // Parse unlimited users list
         Set<String> unlimitedUsers = new HashSet<>();
@@ -288,7 +250,7 @@ public class K8sPupsActorSystem {
         // Create SessionManager
         SessionManager manager = new SessionManager(
             k8sClient, plugins, controllerNamespace, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
-            maxLifetimeMinutes, unlimitedUsers, ldapClient);
+            maxLifetimeMinutes, unlimitedUsers);
         ActorRef<SessionManager> sessionManager = actorSystem.actorOf(SESSION_MANAGER_NAME, manager);
 
         // Schedule idle timeout checks
@@ -438,15 +400,6 @@ public class K8sPupsActorSystem {
 
     public String getDefaultStorageSize() {
         return defaultStorageSize;
-    }
-
-    /**
-     * The users an administrator can give storage to: the posixAccounts under {@code k8spups.users.ldap-base-dn}.
-     * Empty when no LDAP is configured.
-     */
-    public List<String> listUsers() {
-        if (ldapClient == null) return List.of();
-        return ldapClient.listUserNames(usersLdapBaseDn.filter(dn -> !dn.isBlank()).orElse(ldapClient.baseDn()));
     }
 
     /** The actor that holds the storage administrators give to users. */

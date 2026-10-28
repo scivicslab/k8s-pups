@@ -2,14 +2,12 @@ package com.scivicslab.k8spups.actor;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.storage.StorageAllocationService;
-import com.scivicslab.k8spups.k8s.LdapUserInfoClient;
 import com.scivicslab.k8spups.dataset.DatasetService;
 import com.scivicslab.k8spups.settings.SettingsEnv;
 import com.scivicslab.k8spups.settings.SettingsService;
 import com.scivicslab.k8spups.settings.SystemSettings;
 import com.scivicslab.k8spups.k8s.MountSpec;
 import com.scivicslab.k8spups.k8s.SessionInfo;
-import com.scivicslab.k8spups.k8s.WorkspaceInfo;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
 import com.scivicslab.k8spups.tool.DynamicToolPlugin;
 import com.scivicslab.k8spups.tool.ToolMetadata;
@@ -39,7 +37,6 @@ public class SessionManager {
     private final long idleTimeoutMinutes;
     private final long maxLifetimeMinutes;
     private final Set<String> unlimitedUsers;
-    private final LdapUserInfoClient ldapClient;
 
     /** Every session is a child actor named {@code session-<sessionId>}; the library keeps the list of children. */
     private static final String CHILD_PREFIX = "session-";
@@ -48,7 +45,7 @@ public class SessionManager {
                                String controllerNamespace,
                                int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
                                long maxLifetimeMinutes,
-                               Set<String> unlimitedUsers, LdapUserInfoClient ldapClient) {
+                               Set<String> unlimitedUsers) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
         this.controllerNamespace = controllerNamespace;
@@ -57,7 +54,6 @@ public class SessionManager {
         this.idleTimeoutMinutes = idleTimeoutMinutes;
         this.maxLifetimeMinutes = maxLifetimeMinutes;
         this.unlimitedUsers = unlimitedUsers;
-        this.ldapClient = ldapClient;
     }
 
     /** All sessions: the children of this actor. */
@@ -358,19 +354,13 @@ public class SessionManager {
             }
         }
 
-        // Look up POSIX account for workspace mounting (silently skip if not found)
-        WorkspaceInfo workspaceInfo = null;
-        if (plugin.workspaceEnabled() && ldapClient != null) {
-            workspaceInfo = ldapClient.lookup(userId).orElse(null);
-        }
-
         List<MountSpec> mounts = resolveMounts(self, userId, additionalMounts);
         if (mounts == null) {
             LOG.warning("Rejected " + toolName + " for " + userId + ": a chosen mount is not allowed");
             return null;
         }
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
-            userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType, workspaceInfo,
+            userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType,
             mounts,
             withS3Access(self, userId, withSharedSettings(self, toolName, toolConfigEnv)));
         Session actor = new Session(info, k8sClient);
@@ -422,12 +412,6 @@ public class SessionManager {
             return;
         }
 
-        // Look up POSIX account for workspace mounting (silently skip if not found)
-        WorkspaceInfo workspaceInfo = null;
-        if (plugin.workspaceEnabled() && ldapClient != null) {
-            workspaceInfo = ldapClient.lookup(userId).orElse(null);
-        }
-
         // Restore storage type from Pod label (set during Pod creation)
         String storageType = null;
         if (pod.getMetadata().getLabels() != null) {
@@ -442,14 +426,13 @@ public class SessionManager {
                         if (claim.endsWith("-lustre-csi")) { storageType = "lustre-csi"; break; }
                         if (claim.endsWith("-longhorn")) { storageType = "longhorn"; break; }
                         if (claim.endsWith("-nfs-k8s")) { storageType = "nfs-k8s"; break; }
-                        if (claim.startsWith("pups-workspace-")) { storageType = "nfs-home"; break; }
                     }
                 }
             }
         }
 
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, null, null, null,
-            Collections.emptyMap(), null, storageType, workspaceInfo);
+            Collections.emptyMap(), null, storageType);
         Session actor = new Session(info, k8sClient);
 
         ActorRef<Session> childRef = self.createChild(CHILD_PREFIX + sessionId, actor);

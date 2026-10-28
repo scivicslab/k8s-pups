@@ -84,9 +84,9 @@ public class StorageAdminResource {
         String error = null;
         TreeSet<String> users = new TreeSet<>();
         try {
-            users.addAll(actorSystem.listUsers());
+            users.addAll(call(StorageAllocationService::knownUsers));
         } catch (Exception e) {
-            error = "The user list could not be read from LDAP: " + e.getMessage();
+            error = "The user list could not be read from the database: " + e.getMessage();
         }
         List<StorageAllocationRepository.Allocation> active = call(StorageAllocationService::allActive);
         for (var a : active) users.add(a.user());

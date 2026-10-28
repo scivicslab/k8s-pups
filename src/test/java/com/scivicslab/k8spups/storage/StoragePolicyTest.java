@@ -27,7 +27,7 @@ class StoragePolicyTest {
     void onlyOfferedTypesWithAPvcCanBeAllocated() {
         assertTrue(StoragePolicy.allocatable("lustre-csi", A007));
         assertFalse(StoragePolicy.allocatable("nfs-k8s", A007));          // not offered on this cluster
-        assertFalse(StoragePolicy.allocatable("nfs-home", List.of("nfs-home")));   // no PVC of its own to allocate
+        assertFalse(StoragePolicy.allocatable("ceph-rbd", List.of("ceph-rbd")));   // offered, but no PVC the controller can create
     }
 
     @Test

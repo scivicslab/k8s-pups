@@ -58,23 +58,6 @@ public class AiWorkspacePlugin implements ToolPlugin {
     }
 
     @Override
-    public boolean workspaceEnabled() {
-        // Mount user's NFS ~/works into the container.
-        return true;
-    }
-
-    @Override
-    public String workspaceMountPath() {
-        return "/home/devteam/works";
-    }
-
-    @Override
-    public String workspaceSubPath() {
-        // Mount only the "works" sub-directory of the user's NFS home.
-        return "works";
-    }
-
-    @Override
     public String readinessProbePath() {
         return "/api/status";
     }

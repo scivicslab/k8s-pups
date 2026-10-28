@@ -52,21 +52,9 @@ class AiWorkspacePluginTest {
     }
 
     @Test
-    @DisplayName("workspaceEnabled is true")
-    void workspaceEnabled() {
-        assertTrue(plugin.workspaceEnabled());
-    }
-
-    @Test
-    @DisplayName("workspaceMountPath is /home/devteam/works")
-    void workspaceMountPath() {
-        assertEquals("/home/devteam/works", plugin.workspaceMountPath());
-    }
-
-    @Test
-    @DisplayName("workspaceSubPath is works (mount only ~/works, not entire home)")
-    void workspaceSubPath() {
-        assertEquals("works", plugin.workspaceSubPath());
+    @DisplayName("userDataMountPath is /home/devteam/works (the user's allocated PVC)")
+    void userDataMountPath() {
+        assertEquals("/home/devteam/works", plugin.userDataMountPath());
     }
 
     @Test
@@ -93,12 +81,6 @@ class AiWorkspacePluginTest {
     @DisplayName("resourceProfiles is non-empty")
     void resourceProfiles() {
         assertFalse(plugin.resourceProfiles().isEmpty());
-    }
-
-    @Test
-    @DisplayName("workspaceSidecar is null (single-container mode)")
-    void workspaceSidecarIsNull() {
-        assertNull(plugin.workspaceSidecar());
     }
 
     @Test

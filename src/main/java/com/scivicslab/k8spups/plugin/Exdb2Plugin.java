@@ -50,11 +50,6 @@ public class Exdb2Plugin implements ToolPlugin {
     }
 
     @Override
-    public boolean workspaceEnabled() {
-        return true;
-    }
-
-    @Override
     public boolean readOnlyRootFilesystem() {
         return false;
     }

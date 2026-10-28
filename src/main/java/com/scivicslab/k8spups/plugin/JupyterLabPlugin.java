@@ -97,12 +97,6 @@ public class JupyterLabPlugin implements ToolPlugin {
     }
 
     @Override
-    public boolean workspaceEnabled() {
-        // Mount user's NFS $HOME at /home/jovyan when POSIX account exists.
-        return true;
-    }
-
-    @Override
     public boolean passthroughPath() {
         // JupyterLab generates absolute URLs based on its base_url.
         // Pass /session/{id}/* through without rewriting so assets resolve correctly.

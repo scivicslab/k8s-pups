@@ -93,21 +93,6 @@ public class CodeRaptorPlugin implements ToolPlugin {
     }
 
     @Override
-    public boolean workspaceEnabled() {
-        return true;
-    }
-
-    @Override
-    public String workspaceMountPath() {
-        return "/home/devteam/works";
-    }
-
-    @Override
-    public String workspaceSubPath() {
-        return "works";
-    }
-
-    @Override
     public boolean readOnlyRootFilesystem() {
         return false;
     }

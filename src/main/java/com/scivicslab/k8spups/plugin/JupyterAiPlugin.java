@@ -101,11 +101,6 @@ public class JupyterAiPlugin implements ToolPlugin {
     }
 
     @Override
-    public boolean workspaceEnabled() {
-        return true;
-    }
-
-    @Override
     public boolean passthroughPath() {
         // JupyterLab builds absolute URLs from its base_url; entrypoint.sh sets it from PUPS_SESSION_PATH.
         return true;

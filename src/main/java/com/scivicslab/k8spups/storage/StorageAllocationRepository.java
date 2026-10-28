@@ -175,6 +175,15 @@ public class StorageAllocationRepository {
                 instant(rs.getTimestamp(5)), instant(rs.getTimestamp(6))));
     }
 
+    /**
+     * Every user name k8s-pups knows: the users who opened the dashboard, who have or had an allocation, and who are
+     * members of a group; sorted, each once.
+     */
+    public List<String> knownUsers() {
+        return query("SELECT user_name FROM user_login UNION SELECT user_name FROM storage_allocation "
+            + "UNION SELECT user_name FROM storage_group_member ORDER BY user_name", ps -> {}, rs -> rs.getString(1));
+    }
+
     /** Records that the user opened the dashboard now. */
     public void recordLogin(String user) {
         execute("INSERT INTO user_login (user_name) VALUES (?) "

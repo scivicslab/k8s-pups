@@ -95,22 +95,6 @@ public class ChatUiAuditTrailLocalLlmPlugin implements ToolPlugin {
     }
 
     @Override
-    public boolean workspaceEnabled() {
-        return true;
-    }
-
-    @Override
-    public String workspaceMountPath() {
-        return "/home/devteam/works";
-    }
-
-    @Override
-    public String workspaceSubPath() {
-        // Mount only the "works" sub-directory of the user's NFS home, as AI Workspace does.
-        return "works";
-    }
-
-    @Override
     public boolean readOnlyRootFilesystem() {
         return false;
     }

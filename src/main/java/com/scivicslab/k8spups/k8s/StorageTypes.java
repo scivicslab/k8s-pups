@@ -8,8 +8,8 @@ import java.util.Map;
  * Names and one-line descriptions shown to users for the storage types a deployment offers
  * ({@code k8spups.storage-type-options}).
  *
- * The storage types differ between clusters: W206 offers {@code nfs-k8s} (NFS server stonefly520), {@code longhorn}
- * and {@code nfs-home}; the personal genome k0s cluster offers {@code lustre-csi} (Lustre CSI driver on
+ * The storage types differ between clusters: W206 offers {@code nfs-k8s} (NFS server stonefly520) and
+ * {@code longhorn}; the personal genome k0s cluster offers {@code lustre-csi} (Lustre CSI driver on
  * {@code lustre12}) and {@code longhorn}. Users choose storage by what it does, not by the product behind it, so the
  * names say what the storage is for: {@code nfs-k8s} and {@code lustre-csi} are both shared file storage on their
  * cluster. The deployment chooses only which keys it offers. The dashboard and the Storage Settings tool show these
@@ -20,15 +20,13 @@ public final class StorageTypes {
     private static final Map<String, String> NAMES = Map.of(
             "lustre-csi", "Shared file storage",
             "nfs-k8s", "Shared file storage",
-            "longhorn", "Block storage",
-            "nfs-home", "Home directory");
+            "longhorn", "Block storage");
 
     private static final String SHARED = "Files that several of your tools can use at the same time.";
     private static final Map<String, String> DESCRIPTIONS = Map.of(
             "lustre-csi", SHARED,
             "nfs-k8s", SHARED,
-            "longhorn", "Faster storage that one tool at a time can use.",
-            "nfs-home", "Your home directory on the physical computers, used as the tool's storage.");
+            "longhorn", "Faster storage that one tool at a time can use.");
 
     private StorageTypes() {}
 

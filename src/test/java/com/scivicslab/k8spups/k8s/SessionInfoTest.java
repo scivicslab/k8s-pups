@@ -34,7 +34,7 @@ class SessionInfoTest {
         ToolPlugin plugin = stubPlugin("jupyter-lab");
         SessionInfo info = new SessionInfo(
             "abc123", "alice", plugin, Collections.emptyList(),
-            null, null, Collections.emptyMap(), null, null, null
+            null, null, Collections.emptyMap(), null, null
         );
 
         assertEquals("pups-jupyter-lab-abc123", info.podName());
@@ -46,7 +46,7 @@ class SessionInfoTest {
         ToolPlugin plugin = stubPlugin("chat-ui");
         SessionInfo info = new SessionInfo(
             "xyz789", "bob", plugin, Collections.emptyList(),
-            null, null, Collections.emptyMap(), null, null, null
+            null, null, Collections.emptyMap(), null, null
         );
 
         assertEquals("pups-svc-xyz789", info.serviceName());
@@ -58,7 +58,7 @@ class SessionInfoTest {
         ToolPlugin plugin = stubPlugin("guacamole");
         SessionInfo info = new SessionInfo(
             "s1", "user1", plugin, Collections.emptyList(),
-            null, null, Collections.emptyMap(), "20Gi", null
+            null, null, Collections.emptyMap(), "20Gi"
         );
 
         assertNull(info.userStorageType());
@@ -70,7 +70,7 @@ class SessionInfoTest {
         ToolPlugin plugin = stubPlugin("ai-toolkit");
         SessionInfo info = new SessionInfo(
             "s2", "user2", plugin, Collections.emptyList(),
-            null, null, Collections.emptyMap(), null, null, null
+            null, null, Collections.emptyMap(), null, null
         );
 
         assertNotNull(info.additionalMounts());
@@ -84,7 +84,7 @@ class SessionInfoTest {
         List<MountSpec> mounts = List.of(new MountSpec("nfs-k8s", "/data", null));
         SessionInfo info = new SessionInfo(
             "s3", "user3", plugin, Collections.emptyList(),
-            null, "standard", Collections.emptyMap(), "100Gi", "longhorn", null, mounts
+            null, "standard", Collections.emptyMap(), "100Gi", "longhorn", mounts
         );
 
         assertEquals(1, info.additionalMounts().size());
@@ -114,7 +114,7 @@ class SessionInfoTest {
         SessionInfo info = new SessionInfo(
             "s5", "user5", plugin, Collections.emptyList(),
             null, "default", Collections.emptyMap(),
-            null, null, null, Collections.emptyList(), toolEnv
+            null, null, Collections.emptyList(), toolEnv
         );
 
         assertEquals("http://10.0.0.17:8013", info.toolConfigEnv().get("OCR_SERVER_URL"));
@@ -127,7 +127,7 @@ class SessionInfoTest {
         ToolPlugin plugin = stubPlugin("guacamole");
         SessionInfo info = new SessionInfo(
             "s6", "user6", plugin, Collections.emptyList(),
-            null, null, Collections.emptyMap(), null, null, null,
+            null, null, Collections.emptyMap(), null, null,
             Collections.emptyList()
         );
 

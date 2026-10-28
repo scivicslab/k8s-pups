@@ -7,8 +7,9 @@ package com.scivicslab.k8spups.k8s;
  * usually 1000). A cluster can replace that number with a user ID and group ID of its own
  * ({@code k8spups.tool-pod.uid} and {@code k8spups.tool-pod.gid}). This is needed where the storage of the
  * home PVCs records owners by number and those numbers are also accounts of the physical computers: on the
- * k0s cluster of the personal genome section, 1000 is an existing account in the LDAP of the computers, so
- * the tool Pods run as an account issued for k8s-pups instead. The StorageClass of the home PVCs must
+ * k0s cluster of the personal genome section, 1000 is an existing account of the physical computers, so the
+ * tool Pods run as numbers issued for k8s-pups instead. k8s-pups does not look up those accounts; the numbers
+ * come only from the configuration. The StorageClass of the home PVCs must
  * create the PV directory owned by the same numbers.
  *
  * <p>A plugin that returns {@code null} (run as the image default, for tools that manage services as

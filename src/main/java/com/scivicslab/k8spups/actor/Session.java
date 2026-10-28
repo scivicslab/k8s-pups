@@ -68,21 +68,12 @@ public class Session {
             info = info.withUserStorageType(storageType);
 
             // Storage type determines what gets mounted at userDataMountPath:
-            //   nfs-home  -> workspace NFS home directory (LDAP POSIX account)
             //   longhorn  -> Longhorn PVC (RWO block storage)
             //   lustre-csi -> Lustre CSI PVC (RWX)
             //   nfs-k8s   -> NFS k8s-dedicated PVC (RWX)
-            boolean useNfsHome = "nfs-home".equals(storageType)
-                && plugin.workspaceEnabled() && info.workspaceInfo() != null;
-
-            // Create workspace NFS PV/PVC if nfs-home is selected
-            if (useNfsHome) {
-                k8sClient.createWorkspacePvPvcIfAbsent(info.userId(), info.workspaceInfo());
-            }
-
             // The PVC exists only for an administrator's allocation; SessionManager checked the allocation and created
             // the PVC before this session. A missing PVC therefore means the storage was taken away in between.
-            if (plugin.userDataMountPath() != null && !useNfsHome) {
+            if (plugin.userDataMountPath() != null) {
                 String pvcName = k8sClient.userPvcName(info.userId(), storageType);
                 Map<String, String> pvcInfo = k8sClient.getUserPvcInfo(info.userId(), storageType);
                 if (!"true".equals(pvcInfo.get("exists"))) {

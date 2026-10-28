@@ -89,6 +89,14 @@ public class StorageAllocationService {
         return repository.allActive();
     }
 
+    /**
+     * The users an administrator can give storage to: every user name in the controller's database (logged in, had
+     * an allocation, or member of a group), sorted.
+     */
+    public List<String> knownUsers() {
+        return repository.knownUsers();
+    }
+
     /** Every allocation of the user, active and revoked, newest first. */
     public List<StorageAllocationRepository.Allocation> history(String user) {
         return repository.history(user);

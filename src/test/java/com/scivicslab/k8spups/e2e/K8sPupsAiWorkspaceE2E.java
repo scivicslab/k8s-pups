@@ -7,7 +7,7 @@ import com.microsoft.playwright.Page;
  * Run via K8sPupsE2ERunner.
  *
  * ai-workspace is singleInstance=true, so any existing session is stopped first.
- * The NFS workspace (~/works) is mounted only when the user has a POSIX account in LDAP.
+ * ~/works is the user's allocated storage.
  */
 class K8sPupsAiWorkspaceE2E extends K8sPupsE2EBase {
 

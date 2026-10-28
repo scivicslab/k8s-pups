@@ -42,7 +42,7 @@ class PodSpecEnvInjectionTest {
         };
         return new SessionInfo("sess-001", "user1", plugin,
             List.of(), null, "default",
-            Collections.emptyMap(), null, null, null,
+            Collections.emptyMap(), null, null,
             Collections.emptyList(), toolConfigEnv);
     }
 

@@ -68,11 +68,6 @@ public class EnglishToolkitPlugin implements ToolPlugin {
     }
 
     @Override
-    public boolean workspaceEnabled() {
-        return true;
-    }
-
-    @Override
     public boolean readOnlyRootFilesystem() {
         // The H2 database and the imported material are written under the user's home.
         return false;

@@ -11,10 +11,7 @@ import java.util.Map;
  *   - guacd (Guacamole protocol daemon) + Tomcat (Guacamole web app)
  *   - MATE desktop environment + TigerVNC server
  *
- * In standalone mode (no workspace), all services run in a single container as UID 1000.
- * In workspace mode (NFS home mounted), the Pod splits into two sidecar containers:
- *   - "tool" (Guacamole): guacd + Tomcat, UID 1000 (image default, lightweight)
- *   - "desktop" (VNC + MATE): runs as LDAP UID for correct NFS ownership
+ * All services run in a single container as UID 1000.
  *
  * Guacamole listens on port 8080 (Tomcat).
  */
@@ -92,12 +89,6 @@ public class GuacamolePlugin implements ToolPlugin {
     }
 
     @Override
-    public boolean workspaceEnabled() {
-        // Mount user's NFS $HOME at /home/user when POSIX account exists.
-        return true;
-    }
-
-    @Override
     public boolean readOnlyRootFilesystem() {
         // Desktop environment writes to /var/log, /run, /var/lib etc. at startup.
         return false;
@@ -139,19 +130,5 @@ public class GuacamolePlugin implements ToolPlugin {
     @Override
     public int readinessProbePeriod() {
         return 2;
-    }
-
-    @Override
-    public SidecarSpec workspaceSidecar() {
-        // In workspace mode, split into two containers:
-        // - "tool": Guacamole gateway (guacd + Tomcat) as UID 1000 (lightweight)
-        // - "desktop": VNC + MATE as LDAP UID with NFS mounted (gets profile resources)
-        return new SidecarSpec(
-            List.of("/usr/local/bin/entrypoint-guacamole.sh"),
-            Map.of("cpu", "100m", "memory", "128Mi"),
-            Map.of("cpu", "500m", "memory", "512Mi"),
-            List.of("/usr/local/bin/entrypoint-desktop.sh"),
-            Map.of("HOME", "/home/user", "DISPLAY", ":1")
-        );
     }
 }

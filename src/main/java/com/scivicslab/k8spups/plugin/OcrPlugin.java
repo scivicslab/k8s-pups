@@ -64,11 +64,6 @@ public class OcrPlugin implements ToolPlugin {
     }
 
     @Override
-    public boolean workspaceEnabled() {
-        return false;
-    }
-
-    @Override
     public boolean readOnlyRootFilesystem() {
         return false;
     }

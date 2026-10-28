@@ -39,7 +39,7 @@ class SessionInfoToolEnvTest {
         SessionInfo info = new SessionInfo(
             "sess-001", "testuser", STUB_PLUGIN,
             List.of(), null, "default",
-            Collections.emptyMap(), null, null, null,
+            Collections.emptyMap(), null, null,
             Collections.emptyList(), toolConfigEnv);
 
         assertEquals("http://10.0.0.17:8013", info.toolConfigEnv().get("OCR_SERVER_URL"));
@@ -52,7 +52,7 @@ class SessionInfoToolEnvTest {
         SessionInfo info = new SessionInfo(
             "sess-002", "testuser", STUB_PLUGIN,
             List.of(), null, "default",
-            Collections.emptyMap(), null, null, null,
+            Collections.emptyMap(), null, null,
             Collections.emptyList());
 
         assertNotNull(info.toolConfigEnv());

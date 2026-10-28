@@ -174,51 +174,6 @@ public interface ToolPlugin {
     }
 
     /**
-     * Whether this tool supports workspace (NFS home directory) mounting.
-     * When true and the user has a POSIX account in LDAP, the user's home directory
-     * is mounted via NFS. If false or the user has no POSIX account, the standard
-     * per-user PVC (userDataMountPath) is used instead.
-     */
-    default boolean workspaceEnabled() {
-        return false;
-    }
-
-    /**
-     * Mount path for the workspace (NFS home directory) inside the container.
-     * Only used when workspaceEnabled() is true.
-     * If null, defaults to userDataMountPath() — workspace replaces the per-user PVC.
-     */
-    default String workspaceMountPath() {
-        return null;
-    }
-
-    /**
-     * Sub-path within the user's NFS home directory to mount.
-     * Only used when workspaceEnabled() is true.
-     * If null, the entire home directory is mounted.
-     * E.g. "works" to mount only ~/works at workspaceMountPath().
-     */
-    default String workspaceSubPath() {
-        return null;
-    }
-
-    /**
-     * Sidecar specification for workspace mode.
-     * When workspace is active and this returns non-null, the Pod is created with
-     * two containers instead of one:
-     * - "tool": runs the service (containerPort), keeps the plugin's default UID
-     * - "desktop": runs the user workspace as the LDAP UID with NFS mounted
-     *
-     * This allows services like Guacamole (which require UID 1000 for Tomcat) to
-     * coexist with a desktop running as the NFS-owning LDAP UID.
-     *
-     * Return null (default) to use single-container mode.
-     */
-    default SidecarSpec workspaceSidecar() {
-        return null;
-    }
-
-    /**
      * Whether only one instance per user is allowed.
      * When true, creating a second session for the same user and tool is rejected.
      * Default false (multiple instances allowed).

@@ -12,9 +12,9 @@ import com.microsoft.playwright.options.LoadState;
  * which creates a dedicated Service + HTTPRoute. The browser reaches each sub-tool
  * directly via Envoy Gateway — ai-workspace does NOT proxy sub-tool traffic.
  *
- * html-saurus requires a workspace directory with Docusaurus projects (doc_* dirs).
- * When the NFS workspace is not mounted (e.g. admin has no LDAP account),
- * the html-saurus scenario is skipped with a warning rather than failing.
+ * html-saurus requires a directory with Docusaurus projects (doc_* dirs).
+ * When the test user's storage at ~/works holds none, the html-saurus scenario is
+ * skipped with a warning rather than failing.
  *
  * Run via K8sPupsE2ERunner or standalone main().
  */
@@ -57,14 +57,14 @@ class K8sPupsAiWorkspaceToolsE2E extends K8sPupsE2EBase {
     // --- sub-tool test scenarios ---
 
     /**
-     * html-saurus requires Docusaurus projects (doc_* dirs) in the workspace.
-     * Skipped with a warning when the NFS workspace is not mounted for the test user.
+     * html-saurus requires Docusaurus projects (doc_* dirs) under ~/works.
+     * Skipped with a warning when the test user's storage holds none.
      */
     private void tryTestHtmlSaurus() {
         LOG.info("=== html-saurus ===");
         try {
             navigateToPortal();
-            // Use the NFS workspace path; html-saurus needs Docusaurus projects under it.
+            // ~/works is the user's storage; html-saurus needs Docusaurus projects under it.
             page.fill("#param-html-saurus-dir", "/home/devteam/works");
             page.click("#tool-tile-html-saurus button.btn-launch");
             page.waitForLoadState(LoadState.NETWORKIDLE,
@@ -86,7 +86,7 @@ class K8sPupsAiWorkspaceToolsE2E extends K8sPupsE2EBase {
             LOG.info("html-saurus: STOPPED");
         } catch (AssertionError e) {
             LOG.warning("html-saurus SKIPPED: " + e.getMessage()
-                    + " (NFS workspace likely not mounted for this user)");
+                    + " (the user's storage likely holds no Docusaurus projects)");
             // Navigate back to portal so subsequent tests start from a clean state.
             navigateToPortal();
         }

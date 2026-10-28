@@ -24,7 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * (an application-initiated action), and Keycloak returns to the portal when the action is done.
  *
  * Only the methods the login flow asks for are listed: the authenticator app as the second factor, and the passkey,
- * which signs in alone. The password belongs to the LDAP directory and is not changed here; a security key as a
+ * which signs in alone. The password belongs to the Keycloak account and is not changed here; a security key as a
  * second factor ("webauthn") is offered by Keycloak but never asked for, so registering one would mislead the user.
  */
 public final class SignInMethods {

@@ -96,18 +96,6 @@ class ToolPluginDefaultsTest {
     }
 
     @Test
-    @DisplayName("Default workspaceEnabled is false")
-    void defaultWorkspaceEnabledIsFalse() {
-        assertFalse(minimalPlugin().workspaceEnabled());
-    }
-
-    @Test
-    @DisplayName("Default workspaceSidecar is null")
-    void defaultWorkspaceSidecarIsNull() {
-        assertNull(minimalPlugin().workspaceSidecar());
-    }
-
-    @Test
     @DisplayName("Default singleInstance is false")
     void defaultSingleInstanceIsFalse() {
         assertFalse(minimalPlugin().singleInstance());

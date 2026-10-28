@@ -15,7 +15,7 @@ class StorageTypesTest {
         assertEquals(List.of("lustre-csi", "longhorn"), List.copyOf(names.keySet()));
         assertEquals("Shared file storage", names.get("lustre-csi"));
         assertEquals("Block storage", names.get("longhorn"));
-        assertFalse(names.containsKey("nfs-home"));   // not offered, so not shown
+        assertFalse(names.containsKey("nfs-k8s"));   // not offered, so not shown
     }
 
     @Test

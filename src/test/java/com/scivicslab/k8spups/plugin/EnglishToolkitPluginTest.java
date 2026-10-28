@@ -43,7 +43,6 @@ class EnglishToolkitPluginTest {
 
     @Test
     void writesGoToTheUsersOwnWorkspace() {
-        assertTrue(plugin.workspaceEnabled());
         assertEquals("/home/ubuntu", plugin.userDataMountPath());
         assertFalse(plugin.readOnlyRootFilesystem());
         assertEquals(1000L, plugin.runAsUser());
