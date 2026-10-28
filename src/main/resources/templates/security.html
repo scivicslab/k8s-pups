@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign-in methods</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #1E293B; margin: 0; padding: 24px 32px; max-width: 760px; }
+        h1 { font-size: 1.4rem; }
+        h2 { font-size: 1.1rem; margin: 0 0 8px; }
+        .method { background: white; border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px 20px; margin-top: 16px; }
+        table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: .95rem; }
+        td { padding: 6px 8px; border-top: 1px solid #F1F5F9; }
+        .none { color: #64748B; font-size: .9rem; }
+        a.btn { display: inline-block; font-size: .9rem; padding: 5px 14px; border-radius: 6px; text-decoration: none; }
+        a.add { background: #EA580C; color: white; }
+        a.del { color: #B91C1C; border: 1px solid #FCA5A5; }
+        .note { color: #64748B; font-size: .85rem; margin-top: 4px; }
+        .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; }
+        .saved { background: #DCFCE7; border: 1px solid #86EFAC; padding: 8px 12px; margin: 12px 0; }
+    </style>
+</head>
+<body>
+<p><a href="{basePath}/dashboard">&larr; Dashboard</a></p>
+<h1>Sign-in methods</h1>
+<div class="saved" id="action-success" hidden>Done.</div>
+<div class="error" id="action-failed" hidden>Keycloak could not complete the change.</div>
+{#if error}<div class="error" id="security-error">{error}</div>{/if}
+<p class="note">Registering and deleting take place on the sign-in pages of Keycloak, which then return here.
+    The password is managed by the account service and is not changed here.</p>
+{#for m in methods}
+<div class="method" id="method-{m.type}">
+    <h2>{m.name}</h2>
+    {#if m.credentials.isEmpty}
+    <p class="none">None registered.</p>
+    {#else}
+    <table>
+        {#for c in m.credentials}
+        <tr><td>{c.label}</td><td>{c.created}</td>
+            <td style="text-align:right">{#if m.removable}<a class="btn del" href="{basePath}/security/delete?id={c.id}">Delete</a>{/if}</td></tr>
+        {/for}
+    </table>
+    {/if}
+    {#if m.createAction}<a class="btn add" href="{basePath}/security/add?type={m.type}">Register</a>{/if}
+    {#if m.type == 'webauthn-passwordless'}
+    <p class="note">A passkey signs you in with a security key, Touch ID or Windows Hello, without the password and the
+        authenticator code.</p>
+    {/if}
+</div>
+{/for}
+<script>
+    // Keycloak returns the result of the action in the fragment, which the server never sees.
+    const result = new URLSearchParams(location.hash.slice(1)).get('kc_action_status');
+    if (result === 'success') document.getElementById('action-success').hidden = false;
+    if (result === 'error') document.getElementById('action-failed').hidden = false;
+    if (location.hash) history.replaceState(null, '', location.pathname);
+</script>
+</body>
+</html>
