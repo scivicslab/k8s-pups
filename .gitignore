@@ -23,3 +23,6 @@ docker/ga4gh-visa-issuer/quarkus-app/
 
 # The jar of keycloak-ga4gh-passport-mapper is copied here by hand for the image build (docker/keycloak-with-audit-passport/Dockerfile).
 docker/keycloak-with-audit-passport/jars/
+
+# The login theme is copied here by hand for the image build (docker/keycloak-with-audit-passport/Dockerfile).
+docker/keycloak-with-audit-passport/theme/

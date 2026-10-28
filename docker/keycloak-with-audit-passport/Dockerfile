@@ -7,6 +7,10 @@ FROM ${BASE}
 
 COPY jars/ga4gh-passport-mapper.jar /opt/keycloak/providers/ga4gh-passport-mapper.jar
 
+# The login theme pups-with-audit, copied by hand into theme/ from keycloak-image/templates of the private overlays
+# before the build, replaces the copy in the base image, so a theme change does not need the base image rebuilt.
+COPY theme/ /opt/keycloak/themes/pups-with-audit/login/
+
 RUN /opt/keycloak/bin/kc.sh build \
     --db=postgres \
     --http-relative-path=/pups-with-audit-auth \
