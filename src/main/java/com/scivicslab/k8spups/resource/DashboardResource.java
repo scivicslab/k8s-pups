@@ -6,6 +6,7 @@ import com.scivicslab.k8spups.actor.SessionManager;
 import com.scivicslab.k8spups.actor.SessionStatus;
 import com.scivicslab.k8spups.actor.SessionSummary;
 import com.scivicslab.k8spups.k8s.MountSpec;
+import com.scivicslab.k8spups.k8s.StorageTypes;
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.plugin.SharedService;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
@@ -264,6 +265,7 @@ public class DashboardResource {
         data.put("clusterResources", clusterResources);
         data.put("storageSizeOptions", actorSystem.getStorageSizeOptions());
         data.put("storageTypeOptions", actorSystem.getStorageTypeOptions());
+        data.put("storageTypeNames", StorageTypes.names(actorSystem.getStorageTypeOptions()));
         data.put("currentStorageSize", storageInfo.getOrDefault("longhorn.size",
             storageInfo.getOrDefault("storageSize", actorSystem.getDefaultStorageSize())));
         data.put("pvcInfo", allPvcInfo);
@@ -830,6 +832,7 @@ public class DashboardResource {
         result.put("userId", userId);
         result.put("storageSizeOptions", actorSystem.getStorageSizeOptions());
         result.put("storageTypeOptions", actorSystem.getStorageTypeOptions());
+        result.put("storageTypeNames", StorageTypes.names(actorSystem.getStorageTypeOptions()));
         result.put("currentStorageSize", storageInfo.getOrDefault("longhorn.size",
             storageInfo.getOrDefault("storageSize", actorSystem.getDefaultStorageSize())));
         result.put("pvcInfo", allPvcInfo);

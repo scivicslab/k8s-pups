@@ -442,7 +442,7 @@
                     {#for type in storageTypeOptions}
                     {#let info=pvcInfo.get(type)}
                     {#if info != null && info.get('exists') == 'true'}
-                    <option value="{type}">{type}{#if info.get('size') != null} ({info.get('size')}){/if}{#if info.get('inUse') == 'true'} [in use]{/if}</option>
+                    <option value="{type}">{storageTypeNames.get(type)}{#if info.get('size') != null} ({info.get('size')}){/if}{#if info.get('inUse') == 'true'} [in use]{/if}</option>
                     {/if}
                     {/let}
                     {/for}

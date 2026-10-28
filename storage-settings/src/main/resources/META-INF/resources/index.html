@@ -246,8 +246,22 @@
             <div id="overview-body"></div>
         </div>
 
+        <!-- Storage type sections: only the types the deployment offers are shown (render()). -->
+        <!-- Lustre CSI PVC -->
+        <div class="section storage-type-section" id="sec-lustre-csi" hidden>
+            <div class="section-title">
+                Lustre (k8s)
+                <span class="badge badge-blue" style="font-size:10px;">RWX / Shared</span>
+            </div>
+            <div class="section-desc">
+                A directory on the supercomputer's Lustre file system, created for you by the Lustre CSI driver.
+                Multi-Pod shared access (ReadWriteMany).
+            </div>
+            <div id="lustre-csi-body"></div>
+        </div>
+
         <!-- 1. Longhorn PVC -->
-        <div class="section" id="sec-longhorn">
+        <div class="section storage-type-section" id="sec-longhorn" hidden>
             <div class="section-title">
                 Longhorn (Block Storage)
                 <span class="badge badge-green" style="font-size:10px;">RWO / Fast</span>
@@ -259,7 +273,7 @@
         </div>
 
         <!-- 3. NFS k8s PVC -->
-        <div class="section" id="sec-nfs-k8s">
+        <div class="section storage-type-section" id="sec-nfs-k8s" hidden>
             <div class="section-title">
                 NFS (k8s Dedicated)
                 <span class="badge badge-blue" style="font-size:10px;">RWX / Shared</span>
@@ -271,7 +285,7 @@
         </div>
 
         <!-- 4. NFS Home PVC -->
-        <div class="section" id="sec-nfs-home">
+        <div class="section storage-type-section" id="sec-nfs-home" hidden>
             <div class="section-title">
                 NFS (Home Directory)
                 <span class="badge badge-blue" style="font-size:10px;">RWX / Shared</span>
@@ -295,7 +309,7 @@
         </div>
 
         <!-- 6. My Share Settings -->
-        <div class="section" id="sec-my-share">
+        <div class="section nfs-share-section" id="sec-my-share" hidden>
             <div class="section-title">
                 My Share Settings
                 <span class="badge badge-orange" style="font-size:10px;">NFS Sharing</span>
@@ -307,7 +321,7 @@
         </div>
 
         <!-- 7. Available Shared Volumes -->
-        <div class="section" id="sec-available-shares">
+        <div class="section nfs-share-section" id="sec-available-shares" hidden>
             <div class="section-title">
                 Available Shared Volumes
                 <span class="badge badge-blue" style="font-size:10px;">From Others</span>
@@ -319,7 +333,7 @@
         </div>
 
         <!-- 8. My Mounted Shares -->
-        <div class="section" id="sec-mounted-shares">
+        <div class="section nfs-share-section" id="sec-mounted-shares" hidden>
             <div class="section-title">
                 My Mounted Shares
                 <span class="badge badge-green" style="font-size:10px;">Active</span>
@@ -357,11 +371,14 @@ fetch('config').then(function(r) { return r.json(); }).then(function(c) {
     loadSettings();
 }).catch(function() { loadSettings(); });
 
+// Names of the storage types; replaced by the controller's storageTypeNames, which lists only the offered types.
 var TYPE_LABELS = {
+    'lustre-csi': 'Lustre (k8s)',
     'longhorn': 'Longhorn',
     'nfs-k8s': 'NFS (k8s)',
     'nfs-home': 'NFS (Home)'
 };
+var OFFERED_TYPES = ['longhorn', 'nfs-k8s', 'nfs-home'];   // a controller without storageTypeNames offers these
 
 function showToast(msg, type) {
     var t = document.getElementById('toast');
@@ -392,18 +409,33 @@ function render(data) {
     var sizeOpts = data.storageSizeOptions || [];
     var currentSize = data.currentStorageSize || '100Gi';
 
+    if (data.storageTypeNames) {
+        OFFERED_TYPES = Object.keys(data.storageTypeNames);
+        OFFERED_TYPES.forEach(function(t) { TYPE_LABELS[t] = data.storageTypeNames[t]; });
+    }
+
     // Overview (storage + sessions)
     renderOverview(pvc, data.activeSessions || []);
 
-    // Per-type sections
-    renderLonghorn(pvc.longhorn || {}, sizeOpts, currentSize);
-    renderNfsSection('nfs-k8s', pvc['nfs-k8s'] || {});
-    renderNfsSection('nfs-home', pvc['nfs-home'] || {});
+    // Per-type sections, for the offered types only
+    document.querySelectorAll('.storage-type-section').forEach(function(sec) { sec.hidden = true; });
+    OFFERED_TYPES.forEach(function(t) {
+        var sec = document.getElementById('sec-' + t);
+        if (!sec) return;
+        sec.hidden = false;
+        if (t === 'longhorn') renderLonghorn(pvc.longhorn || {}, sizeOpts, currentSize);
+        else if (t === 'lustre-csi') renderLustreCsi(pvc['lustre-csi'] || {}, sizeOpts, currentSize);
+        else renderNfsSection(t, pvc[t] || {});
+    });
 
-    // Share sections
-    renderMyShareSettings(data.myShareSettings || {});
-    renderAvailableShares(data.sharableVolumes || []);
-    renderMountedShares(data.mySharedPvcs || []);
+    // Share sections: sharing is a feature of the NFS (k8s) volume
+    var sharing = OFFERED_TYPES.indexOf('nfs-k8s') >= 0;
+    document.querySelectorAll('.nfs-share-section').forEach(function(sec) { sec.hidden = !sharing; });
+    if (sharing) {
+        renderMyShareSettings(data.myShareSettings || {});
+        renderAvailableShares(data.sharableVolumes || []);
+        renderMountedShares(data.mySharedPvcs || []);
+    }
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
@@ -419,8 +451,7 @@ function renderOverview(pvc, sessions) {
     html += '<th>Type</th><th>Status</th><th>Size</th><th>State</th>';
     html += '</tr></thead><tbody>';
 
-    var types = ['longhorn', 'nfs-k8s', 'nfs-home'];
-    types.forEach(function(t) {
+    OFFERED_TYPES.forEach(function(t) {
         var info = pvc[t] || {};
         var exists = info.exists === 'true';
         var inUse = info.inUse === 'true';
@@ -513,6 +544,42 @@ function renderLonghorn(info, sizeOpts, currentSize) {
     body.innerHTML = html;
 }
 
+// Lustre (k8s): created with a size; the StorageClass keeps the directory when the PVC is removed (Retain).
+function renderLustreCsi(info, sizeOpts, currentSize) {
+    var body = document.getElementById('lustre-csi-body');
+    var exists = info.exists === 'true';
+    var inUse = info.inUse === 'true';
+
+    if (!exists) {
+        var html = '<div class="size-row"><label>Size:</label><select id="lustre-csi-size" class="size-select">';
+        sizeOpts.forEach(function(s) {
+            html += '<option value="' + s + '"' + (s === currentSize ? ' selected' : '') + '>' + s + '</option>';
+        });
+        html += '</select></div>';
+        html += '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'lustre-csi\')">Create ' +
+            TYPE_LABELS['lustre-csi'] + ' PVC</button></div>';
+        body.innerHTML = html;
+        return;
+    }
+
+    var usedBy = info.usedBy || '';
+    var html = '<div class="pvc-status"><div class="pvc-detail">' +
+        '<strong>Size:</strong> ' + (info.size || '-') +
+        ' &nbsp; <strong>Status:</strong> ' + (info.phase || '-') +
+        '</div>' +
+        (inUse ? '<span class="badge badge-red">In Use</span>' : '') +
+        '</div>';
+    if (inUse && usedBy) {
+        html += '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Pod: <code>' +
+            usedBy.split(',').join('</code>, <code>') + '</code></div>';
+    }
+    html += '<div class="btn-row">';
+    html += '<button class="btn btn-delete" ' + (inUse ? 'disabled title="Cannot remove while in use"' : '') +
+        ' onclick="openDeleteModal(\'lustre-csi\')">Remove PVC</button>';
+    html += '</div>';
+    body.innerHTML = html;
+}
+
 function renderNfsSection(type, info) {
     var body = document.getElementById(type + '-body');
     var exists = info.exists === 'true';
@@ -547,8 +614,8 @@ function renderNfsSection(type, info) {
 
 function createPvc(type) {
     var body = { storageType: type };
-    if (type === 'longhorn') {
-        var sel = document.getElementById('longhorn-size');
+    if (type === 'longhorn' || type === 'lustre-csi') {
+        var sel = document.getElementById(type + '-size');
         body.storageSize = sel ? sel.value : '100Gi';
     }
     fetch(API_BASE + '/storage/pvc/create', {
@@ -587,6 +654,9 @@ function openDeleteModal(type) {
     var msg = 'This will permanently delete the <strong>' + TYPE_LABELS[type] + '</strong> PVC';
     if (type === 'nfs-home') {
         msg += '. <br><em>Note: Only the PV/PVC objects are removed. NFS files remain.</em>';
+    } else if (type === 'lustre-csi') {
+        msg += '. <br><em>Your tools can no longer reach its files. They stay on Lustre until an administrator removes them;' +
+            ' a new PVC gets a new, empty directory.</em>';
     } else {
         msg += ' and <strong>all data will be lost</strong>.';
     }
