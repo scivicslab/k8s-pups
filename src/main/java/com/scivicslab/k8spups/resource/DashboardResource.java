@@ -270,6 +270,10 @@ public class DashboardResource {
         data.put("sharedPvcs", sharedPvcs);
         data.put("basePath", basePath);
         data.put("displayName", displayName);
+        // Keycloak account console, where users register passkeys and reset TOTP themselves. The referrer
+        // parameters make the console show a link back to this dashboard.
+        data.put("accountUrl", oidcIssuer + "/account/?referrer=k8s-pups&referrer_uri="
+            + URLEncoder.encode(oidcRedirectBaseUrl + basePath + "/dashboard", StandardCharsets.UTF_8));
 
         // Shared services: state read now, Launch / Stop only for administrators.
         List<SharedServiceView> sharedServices = new ArrayList<>();
