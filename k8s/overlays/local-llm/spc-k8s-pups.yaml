@@ -12,9 +12,6 @@ spec:
       - objectName: "oidc-client-secret"
         secretPath: "k8s-pups-local-llm/data/oidc-client"
         secretKey: "client-secret"
-      - objectName: "ldap-bind-password"
-        secretPath: "k8s-pups-local-llm/data/ldap"
-        secretKey: "bind-password"
   secretObjects:
   - secretName: k8s-pups-oidc-secret
     type: Opaque

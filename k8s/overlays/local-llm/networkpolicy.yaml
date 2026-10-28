@@ -48,26 +48,6 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-egress-ldap
-  namespace: k8s-pups-local-llm
-spec:
-  podSelector:
-    matchLabels:
-      app: k8s-pups-controller
-  policyTypes:
-    - Egress
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: sc-account
-      ports:
-        - protocol: TCP
-          port: 389
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
   name: allow-ingress-envoy
   namespace: k8s-pups-local-llm
 spec:

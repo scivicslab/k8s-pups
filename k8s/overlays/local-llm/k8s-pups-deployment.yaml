@@ -43,10 +43,8 @@ spec:
         - |
           echo "Waiting for vault secrets..."
           while [ ! -f /vault/secrets/oidc-client-secret ]; do sleep 1; done
-          while [ ! -f /vault/secrets/ldap-bind-password ]; do sleep 1; done
           echo "Vault secrets available"
           export K8S_PUPS_OIDC_SECRET=$(cat /vault/secrets/oidc-client-secret)
-          export K8SPUPS_WORKSPACE_LDAP_BIND_PASSWORD=$(cat /vault/secrets/ldap-bind-password)
           exec java -Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -jar /deployments/quarkus-run.jar
         volumeMounts:
         - name: vault-secrets
@@ -76,10 +74,6 @@ spec:
           value: "k8s-pups-local-llm"
         - name: K8SPUPS_GATEWAY_NAMES
           value: "k8s-pups-local-llm-gateway"
-        - name: K8SPUPS_WORKSPACE_LDAP_URL
-          value: "ldap://ldap.example.internal.svc:389"
-        - name: K8SPUPS_WORKSPACE_LDAP_BASE_DN
-          value: "dc=example,dc=com"
         - name: K8SPUPS_USER_PODS_NAMESPACE
           value: "user-pods-local-llm"
         - name: K8SPUPS_CONTROLLER_NAMESPACE

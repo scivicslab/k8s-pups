@@ -1,10 +1,10 @@
 #!/bin/bash
 # Sidecar entrypoint: Desktop only (VNC + MATE).
-# Runs as LDAP UID with NFS home directory mounted.
+# Runs as the tool Pod ID set by the controller.
 
 # Ensure current UID/GID exist in /etc/passwd and /etc/group.
 # Required for dbus-launch and MATE, which resolve the current user via NSS.
-# In sidecar mode the container runs as a LDAP UID (e.g. 1002) that does not
+# The container runs as the tool Pod ID (e.g. 1000), which may not
 # exist in the image's /etc/passwd.
 CURRENT_UID=$(id -u)
 CURRENT_GID=$(id -g)

@@ -11,7 +11,7 @@ k8s-pups gives each authenticated user their own short-lived Pod running a selec
 - **Per-user isolation** — each session runs in its own Pod with dedicated storage
 - **Plugin-based tools** — `ToolPlugin` SPI for adding new tool types via `ServiceLoader`
 - **Gateway API routing** — automatic `HTTPRoute` + Envoy Gateway `SecurityPolicy` per session
-- **NFS workspace mounting** — users with POSIX accounts (LDAP) get their home directory mounted via NFS
+- **Per-user storage** — each user's data lives on a PVC allocated by k8s-pups; the controller keeps its users in its own database and has no relation to the accounts of the physical compute nodes
 - **Resource profiles** — selectable tiers (Light / Standard) with different CPU, memory, and storage limits
 - **Idle timeout** — automatic cleanup of sessions after configurable inactivity period
 - **Orphan reconciliation** — detects and cleans up leaked resources on controller restart
@@ -48,24 +48,13 @@ CREATING → STARTING → READY → STOPPING → STOPPED
 1. User selects a tool and clicks **Launch** on the dashboard
 2. `SessionManager` enforces global/per-user session limits, creates a `Session`
 3. `Session.start()` creates Kubernetes resources:
-   - PVC (per-user persistent storage) or NFS workspace PV/PVC
+   - PVC (per-user persistent storage)
    - Pod (tool container with security context, volumes, probes)
    - Service (ClusterIP in `user-pods` namespace)
    - HTTPRoute (routes `/session/{id}/*` through Envoy Gateway)
 4. Pod watch detects container readiness → state transitions to `READY`
 5. User accesses the tool via browser; idle timer resets on each access
 6. After idle timeout (default 30 min), session is automatically stopped and all resources deleted
-
-### NFS Workspace Mounting
-
-When a tool plugin has `workspaceEnabled() = true` and the user has a POSIX account in LDAP:
-
-1. Controller queries LDAP for `uidNumber`, `gidNumber`, and `homeDirectory`
-2. An NFS PV/PVC pair (`pups-workspace-{userId}`) is created pointing to the user's home directory on the NFS server
-3. The Pod's `securityContext` is set to the user's LDAP UID/GID
-4. The NFS share is mounted into the container (mount path depends on the plugin)
-
-Users without a POSIX account silently fall back to a per-user PVC — no error is shown.
 
 ## Built-in Tool Plugins
 
@@ -86,7 +75,7 @@ Each plugin can configure:
 - **Resource profiles** — named tiers with different CPU/memory/storage limits
 - **User parameters** — form fields on the dashboard (e.g., API key, project path)
 - **Security context** — `runAsUser`, `readOnlyRootFilesystem`, `seccompProfile`
-- **Workspace** — NFS home directory mounting with optional subpath
+- **Data mount path** — where the user's PVC is mounted in the container (`userDataMountPath`)
 - **Readiness probe** — HTTP health check for startup detection
 - **Path passthrough** — whether to rewrite or preserve the URL path prefix
 
@@ -132,7 +121,7 @@ Health endpoints are available at `/q/health/live` and `/q/health/ready`.
 - **fabric8 Kubernetes Client** — Pod, Service, HTTPRoute, SecurityPolicy, PVC, PV CRUD
 - **Keycloak** — OIDC authentication for dashboard and per-session JWT validation
 - **Envoy Gateway** — Gateway API implementation for request routing and security policies
-- **NFS CSI Driver** (`nfs.csi.k8s.io`) — Dynamic NFS volume provisioning for workspace mounting
+- **NFS CSI Driver** (`nfs.csi.k8s.io`) — Dynamic NFS volume provisioning for per-user storage
 - **MicroK8s** — Target Kubernetes cluster
 
 ## Project Structure
@@ -150,8 +139,6 @@ k8s-pups/
 │   ├── k8s/               # Kubernetes API client
 │   │   ├── K8sApiClient.java          # fabric8 wrapper (Pod/Svc/Route/PVC)
 │   │   ├── SessionInfo.java           # Session creation parameters
-│   │   ├── WorkspaceInfo.java         # LDAP POSIX account info
-│   │   └── LdapUserInfoClient.java    # LDAP query client
 │   ├── plugin/            # ToolPlugin SPI and built-in plugins
 │   │   ├── ToolPlugin.java            # Plugin interface (20+ methods)
 │   │   ├── ConnectionType.java        # HTTP / VNC enum
@@ -197,9 +184,6 @@ Key properties in `application.properties` (all overridable via environment vari
 | `k8spups.max-sessions-per-user` | `2` | Per-user session limit |
 | `k8spups.storage-size-options` | `20Gi,50Gi,100Gi,500Gi,1Ti` | PVC size choices |
 | `k8spups.default-storage-size` | `100Gi` | Default PVC size |
-| `k8spups.workspace.ldap.url` | `ldap://ldap-set2.sc-account-bg.svc:389` | LDAP server for POSIX lookup |
-| `k8spups.workspace.nfs.server` | `10.0.0.20` | NFS server for home directories |
-| `k8spups.workspace.nfs.base-path` | `/Public/Users` | NFS base path |
 
 ## Build & Deploy
 
@@ -225,8 +209,6 @@ kubectl rollout status deployment/k8s-pups-controller -n k8s-pups
 
 - MicroK8s cluster with Envoy Gateway and NFS CSI driver
 - Keycloak realm with `k8s-pups` OIDC client
-- LDAP server with POSIX account attributes (for workspace mounting)
-- NFS server exporting user home directories
 - Container registry at `10.0.0.23:32000`
 
 ## License

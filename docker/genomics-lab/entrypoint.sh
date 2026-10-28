@@ -3,7 +3,7 @@
 # PUPS_SESSION_PATH is injected by k8s-pups (e.g. /session/abc123/).
 
 # Ensure current UID/GID exist in /etc/passwd and /etc/group.
-# In workspace mode, the container runs as a LDAP UID that doesn't exist
+# The container runs as the tool Pod ID set by the controller, which does not exist
 # in the image's /etc/passwd. Python's pwd module needs to resolve it.
 CURRENT_UID=$(id -u)
 CURRENT_GID=$(id -g)

@@ -209,7 +209,7 @@ RUN mkdir -p /etc/skel/.config/fcitx5
 COPY fcitx5-profile /etc/skel/.config/fcitx5/profile
 
 # ---- Allow arbitrary UID in sidecar mode ----
-# When the desktop container runs as a LDAP UID (e.g. 1002), it needs to add
+# When the desktop container runs as the tool Pod ID (e.g. 1000), it needs to add
 # a passwd/group entry so dbus and MATE can resolve the current user.
 # readOnlyRootFilesystem=false, so these files are writable at runtime.
 RUN chmod 666 /etc/passwd /etc/group
@@ -218,7 +218,7 @@ RUN chmod 666 /etc/passwd /etc/group
 # Main entrypoint: all-in-one mode (single container, no workspace)
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 # Sidecar entrypoints: split mode (workspace with NFS mount)
-# - entrypoint-desktop.sh: VNC + MATE only (runs as LDAP UID)
+# - entrypoint-desktop.sh: VNC + MATE only (runs as the tool Pod ID)
 # - entrypoint-guacamole.sh: guacd + Tomcat only (runs as UID 1000)
 COPY entrypoint-desktop.sh /usr/local/bin/entrypoint-desktop.sh
 COPY entrypoint-guacamole.sh /usr/local/bin/entrypoint-guacamole.sh

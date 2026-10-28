@@ -3,7 +3,7 @@
 # PUPS_SESSION_PATH is injected by k8s-pups (e.g. /session/abc123/).
 # JUPYTER_AI_BASE_URL is the OpenAI-compatible base URL (ending in /v1); JUPYTER_AI_MODEL is the default model id (may be empty).
 
-# Ensure the current UID/GID exist in /etc/passwd and /etc/group: in workspace mode the container runs as an LDAP UID.
+# Ensure the current UID/GID exist in /etc/passwd and /etc/group: the container runs as the tool Pod ID set by the controller.
 CURRENT_UID=$(id -u)
 CURRENT_GID=$(id -g)
 if ! id -un "$CURRENT_UID" >/dev/null 2>&1; then
