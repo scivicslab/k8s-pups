@@ -448,11 +448,6 @@
                     {/for}
                 </select>
                 <div class="extra-mounts-container"></div>
-                <div class="shared-pvc-data" style="display:none;">
-                    {#for sp in sharedPvcs}
-                    <span data-shared-from="{sp.get('sharedFrom')}" data-pvc="{sp.get('pvcName')}"></span>
-                    {/for}
-                </div>
                 <button type="button" class="btn-add-mount" onclick="addExtraMount(this)"
                         style="font-size:0.75rem;color:#6366f1;background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px;">+ Add mount</button>
                 {/if}
@@ -503,6 +498,12 @@
             <div class="tool-name">Datasets</div>
             <div class="tool-desc">JGA/AGD: register files and grant users read access to them. Administrators only.</div>
             <a class="btn btn-primary" href="datasets" target="_blank" rel="noopener">Open</a>
+        </div>
+        <div class="tool-card" id="admin-storage-card" style="order: {otherCardOrder}">
+            <div class="tool-icon"><img src="icons/storage.png" alt="Storage"></div>
+            <div class="tool-name">Storage of users</div>
+            <div class="tool-desc">Give users storage, enlarge it, take it away and give it back. Administrators only.</div>
+            <a class="btn btn-primary" href="storage-admin" target="_blank" rel="noopener">Open</a>
         </div>
         <div class="tool-card" id="admin-settings-card" style="order: {otherCardOrder}">
             <div class="tool-icon"><img src="icons/settings.png" alt="Settings"></div>
@@ -648,14 +649,6 @@
         typeSelect.className = 'profile-select';
         typeSelect.style.cssText = 'flex:1;font-size:0.8rem;';
         typeSelect.innerHTML = primarySelect.innerHTML;
-        // Add shared PVC options
-        var sharedData = btn.parentElement.querySelectorAll('.shared-pvc-data span');
-        sharedData.forEach(function(sp) {
-            var opt = document.createElement('option');
-            opt.value = 'nfs-k8s-shared::' + sp.dataset.sharedFrom;
-            opt.textContent = 'Shared: ' + sp.dataset.sharedFrom;
-            typeSelect.appendChild(opt);
-        });
         // Mount path input
         var pathInput = document.createElement('input');
         pathInput.name = 'extraPath_' + existingRows.length;

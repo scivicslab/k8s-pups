@@ -7,6 +7,7 @@ import com.scivicslab.k8spups.actor.SessionStatus;
 import com.scivicslab.k8spups.actor.SessionSummary;
 import com.scivicslab.k8spups.k8s.MountSpec;
 import com.scivicslab.k8spups.k8s.StorageTypes;
+import com.scivicslab.k8spups.storage.StorageAllocationService;
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.plugin.SharedService;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
@@ -215,9 +216,18 @@ public class DashboardResource {
         var dynamicToolsFuture = sm.ask(mgr -> mgr.listDynamicToolsForRoles(userRoles));
         var sessionsFuture = sm.ask(mgr -> mgr.getUserSessions(sm, userId));
         var summaryFuture = sm.ask(mgr -> mgr.getSessionSummary(sm));
+        // The user's storage comes from an administrator's allocation; prepare it (the default allocation at the
+        // first login, the PVCs of the allocations) before the PVC states are read.
+        Map<String, String> allocated = Collections.emptyMap();
+        try {
+            ActorRef<StorageAllocationService> alloc = actorSystem.getStorageAllocations();
+            alloc.ask(a -> { a.ensureStorage(userId); return null; }).get();
+            allocated = alloc.ask(a -> a.activeTypes(userId)).get();
+        } catch (Exception e) {
+            LOG.warning("Failed to prepare the storage of " + userId + ": " + e.getMessage());
+        }
         var storageInfoFuture = sm.ask(mgr -> mgr.getUserStorageInfo(userId));
         var allPvcInfoFuture = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId));
-        var sharedPvcsFuture = sm.ask(mgr -> mgr.listSharedPvcs(userId));
 
         List<ToolPlugin> tools;
         try { tools = toolsFuture.get(); }
@@ -253,9 +263,6 @@ public class DashboardResource {
             clusterResources = Collections.emptyMap();
         }
 
-        List<Map<String, String>> sharedPvcs = Collections.emptyList();
-        try { sharedPvcs = sharedPvcsFuture.get(); }
-        catch (Exception e) { LOG.warning("Failed to load shared PVCs: " + e.getMessage()); }
 
         Map<String, Object> data = new HashMap<>();
         data.put("userId", userId);
@@ -268,12 +275,13 @@ public class DashboardResource {
         data.put("summary", summary);
         data.put("clusterResources", clusterResources);
         data.put("storageSizeOptions", actorSystem.getStorageSizeOptions());
-        data.put("storageTypeOptions", actorSystem.getStorageTypeOptions());
-        data.put("storageTypeNames", StorageTypes.names(actorSystem.getStorageTypeOptions()));
+        // Only allocated storage can be chosen at launch
+        List<String> allocatedTypes = List.copyOf(allocated.keySet());
+        data.put("storageTypeOptions", allocatedTypes);
+        data.put("storageTypeNames", StorageTypes.names(allocatedTypes));
         data.put("currentStorageSize", storageInfo.getOrDefault("longhorn.size",
             storageInfo.getOrDefault("storageSize", actorSystem.getDefaultStorageSize())));
         data.put("pvcInfo", allPvcInfo);
-        data.put("sharedPvcs", sharedPvcs);
         data.put("basePath", basePath);
         data.put("displayName", displayName);
 
@@ -766,219 +774,43 @@ public class DashboardResource {
     @Authenticated
     @Produces(MediaType.APPLICATION_JSON)
     public Response getStorageInfo() {
+        // The storage an administrator gave the user, and the state of each PVC. Nothing is created here except the
+        // PVCs of the user's allocations (and the default allocation at the first use), as on the dashboard.
         String userId = getCurrentUsername();
         ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-
-        // Fire all independent ask() calls in parallel
-        var storageInfoFut = sm.ask(mgr -> mgr.getUserStorageInfo(userId));
-        var allPvcInfoFut = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId));
-        var sharableVolumesFut = sm.ask(mgr -> mgr.listSharableVolumes(userId));
-        var mySharedPvcsFut = sm.ask(mgr -> mgr.listSharedPvcs(userId));
-        var myShareSettingsFut = sm.ask(mgr -> mgr.getShareSettings(userId));
-        var sessionsFut = sm.ask(mgr -> mgr.getUserSessions(sm, userId));
-
-        Map<String, String> storageInfo = Collections.emptyMap();
+        ActorRef<StorageAllocationService> alloc = actorSystem.getStorageAllocations();
+        Map<String, String> allocated = Collections.emptyMap();
         Map<String, Object> allPvcInfo = Collections.emptyMap();
-        try {
-            storageInfo = storageInfoFut.get();
-            allPvcInfo = allPvcInfoFut.get();
-        } catch (Exception e) {
-            LOG.warning("Failed to load storage info: " + e.getMessage());
-        }
-
-        // Auto-create the default storage PVC if not yet created.
-        // Triggered on Storage Settings page load so users never need to manually create it.
-        String defaultStorageType = actorSystem.getDefaultStorageType();
-        if (defaultStorageType != null && !defaultStorageType.isBlank()) {
-            @SuppressWarnings("unchecked")
-            Map<String, String> defaultPvcInfo = (Map<String, String>) allPvcInfo.get(defaultStorageType);
-            if (defaultPvcInfo != null && !"true".equals(defaultPvcInfo.get("exists"))) {
-                String defaultSize = actorSystem.getDefaultStorageSize();
-                try {
-                    LOG.info("Auto-creating " + defaultStorageType + " PVC for user=" + userId);
-                    sm.ask(mgr -> mgr.createUserPvc(userId, defaultStorageType, defaultSize)).get();
-                    allPvcInfo = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId)).get();
-                } catch (Exception e) {
-                    LOG.warning("Auto-create " + defaultStorageType + " PVC failed for " + userId + ": " + e.getMessage());
-                }
-            }
-        }
-
-        List<Map<String, String>> sharableVolumes = Collections.emptyList();
-        List<Map<String, String>> mySharedPvcs = Collections.emptyList();
-        Map<String, String> myShareSettings = Collections.emptyMap();
-        try {
-            sharableVolumes = sharableVolumesFut.get();
-            mySharedPvcs = mySharedPvcsFut.get();
-            myShareSettings = myShareSettingsFut.get();
-        } catch (Exception e) {
-            LOG.warning("Failed to load share info: " + e.getMessage());
-        }
-
         List<Map<String, String>> activeSessions = Collections.emptyList();
         try {
-            var sessions = sessionsFut.get();
-            activeSessions = sessions.stream()
+            alloc.ask(a -> { a.ensureStorage(userId); return null; }).get();
+            allocated = alloc.ask(a -> a.activeTypes(userId)).get();
+            allPvcInfo = sm.ask(mgr -> mgr.getAllUserPvcInfo(userId)).get();
+            activeSessions = sm.ask(mgr -> mgr.getUserSessions(sm, userId)).get().stream()
                 .filter(s -> s.state() == com.scivicslab.k8spups.actor.SessionState.READY
                     || s.state() == com.scivicslab.k8spups.actor.SessionState.STARTING)
                 .map(s -> Map.of(
                     "toolName", s.toolName(),
                     "podName", s.podName() != null ? s.podName() : "",
                     "storageType", s.storageType() != null ? s.storageType() : "",
-                    "state", s.state().name()
-                ))
+                    "state", s.state().name()))
                 .toList();
         } catch (Exception e) {
-            LOG.warning("Failed to load active sessions: " + e.getMessage());
+            LOG.warning("Failed to load storage info: " + e.getMessage());
         }
+        List<String> types = List.copyOf(allocated.keySet());
+        Map<String, Object> pvcInfo = new HashMap<>();
+        for (String t : types) pvcInfo.put(t, allPvcInfo.getOrDefault(t, Map.of("exists", "false")));
 
         Map<String, Object> result = new HashMap<>();
         result.put("userId", userId);
-        result.put("storageSizeOptions", actorSystem.getStorageSizeOptions());
-        result.put("storageTypeOptions", actorSystem.getStorageTypeOptions());
-        result.put("storageTypeNames", StorageTypes.names(actorSystem.getStorageTypeOptions()));
-        result.put("storageTypeDescriptions", StorageTypes.descriptions(actorSystem.getStorageTypeOptions()));
+        result.put("allocated", allocated);
+        result.put("storageTypeNames", StorageTypes.names(types));
+        result.put("storageTypeDescriptions", StorageTypes.descriptions(types));
         result.put("objectStorageEndpoint", objectStorageEndpoint.orElse(""));
-        result.put("currentStorageSize", storageInfo.getOrDefault("longhorn.size",
-            storageInfo.getOrDefault("storageSize", actorSystem.getDefaultStorageSize())));
-        result.put("pvcInfo", allPvcInfo);
+        result.put("pvcInfo", pvcInfo);
         result.put("activeSessions", activeSessions);
-        result.put("sharableVolumes", sharableVolumes);
-        result.put("mySharedPvcs", mySharedPvcs);
-        result.put("myShareSettings", myShareSettings);
         return Response.ok(result).build();
-    }
-
-    @POST
-    @Path("/storage/pvc/create")
-    @Authenticated
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response createPvc(Map<String, String> body) {
-        String userId = getCurrentUsername();
-        String storageType = body != null ? body.get("storageType") : null;
-        String storageSize = body != null ? body.get("storageSize") : null;
-        if (storageType == null || !actorSystem.getStorageTypeOptions().contains(storageType)) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                .entity(Map.of("error", "invalid_storage_type")).build();
-        }
-        if (("longhorn".equals(storageType) || "lustre-csi".equals(storageType))
-                && (storageSize == null || storageSize.isBlank())) {
-            storageSize = actorSystem.getDefaultStorageSize();
-        }
-        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-        try {
-            String sz = storageSize;
-            String error = sm.ask(mgr -> mgr.createUserPvc(userId, storageType, sz)).get();
-            if (error != null) {
-                return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", error)).build();
-            }
-            return Response.ok(Map.of("status", "created", "storageType", storageType)).build();
-        } catch (Exception e) {
-            LOG.severe("PVC creation failed: " + e.getMessage());
-            return Response.serverError()
-                .entity(Map.of("error", "pvc_create_failed")).build();
-        }
-    }
-
-    @POST
-    @Path("/storage/pvc/expand")
-    @Authenticated
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response expandPvc(Map<String, String> body) {
-        String userId = getCurrentUsername();
-        String storageSize = body != null ? body.get("storageSize") : null;
-        if (storageSize == null || !actorSystem.getStorageSizeOptions().contains(storageSize)) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                .entity(Map.of("error", "invalid_storage_size")).build();
-        }
-        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-        try {
-            sm.tell(mgr -> mgr.expandUserPvc(userId, storageSize));
-            return Response.ok(Map.of("status", "expanded", "storageSize", storageSize)).build();
-        } catch (Exception e) {
-            LOG.severe("PVC expand failed: " + e.getMessage());
-            return Response.serverError()
-                .entity(Map.of("error", "pvc_expand_failed")).build();
-        }
-    }
-
-    @POST
-    @Path("/storage/pvc/delete")
-    @Authenticated
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response deletePvc(Map<String, String> body) {
-        String userId = getCurrentUsername();
-        String storageType = body != null ? body.get("storageType") : null;
-        String confirmation = body != null ? body.get("confirmation") : null;
-        if (storageType == null || !actorSystem.getStorageTypeOptions().contains(storageType)) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                .entity(Map.of("error", "invalid_storage_type")).build();
-        }
-        if (!"DELETE".equals(confirmation)) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                .entity(Map.of("error", "confirmation_required")).build();
-        }
-        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-        try {
-            String error = sm.ask(mgr -> mgr.deleteUserPvc(userId, storageType)).get();
-            if (error != null) {
-                return Response.status(Response.Status.CONFLICT)
-                    .entity(Map.of("error", error)).build();
-            }
-            return Response.ok(Map.of("status", "deleted", "storageType", storageType)).build();
-        } catch (Exception e) {
-            LOG.severe("PVC deletion failed: " + e.getMessage());
-            return Response.serverError()
-                .entity(Map.of("error", "pvc_delete_failed")).build();
-        }
-    }
-
-    @POST
-    @Path("/storage/save")
-    @Authenticated
-    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
-    public Response saveStoragePreference(@FormParam("storageSize") String storageSize,
-                                          @FormParam("storageType") String storageType,
-                                          @HeaderParam("Accept") String accept) {
-        String userId = getCurrentUsername();
-        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-        boolean wantJson = accept != null && accept.contains("application/json");
-
-        if (storageSize == null || !actorSystem.getStorageSizeOptions().contains(storageSize)) {
-            if (wantJson) {
-                return Response.status(Response.Status.BAD_REQUEST)
-                    .type(MediaType.APPLICATION_JSON)
-                    .entity(Map.of("error", "invalid_storage_size")).build();
-            }
-            return Response.seeOther(URI.create("/dashboard?error=invalid_storage_size")).build();
-        }
-        if (storageType == null || !actorSystem.getStorageTypeOptions().contains(storageType)) {
-            storageType = actorSystem.getDefaultStorageType();
-        }
-
-        try {
-            String type = storageType;
-            sm.tell(mgr -> mgr.saveUserStoragePreference(userId, storageSize, type));
-            sm.tell(mgr -> mgr.expandUserPvc(userId, storageSize));
-        } catch (Exception e) {
-            LOG.severe("Failed to save storage preference: " + e.getMessage());
-            if (wantJson) {
-                return Response.serverError()
-                    .type(MediaType.APPLICATION_JSON)
-                    .entity(Map.of("error", "storage_save_failed")).build();
-            }
-            return Response.seeOther(URI.create("/dashboard?error=storage_save_failed")).build();
-        }
-
-        if (wantJson) {
-            return Response.ok(Map.of("status", "saved", "storageSize", storageSize,
-                "storageType", storageType)).type(MediaType.APPLICATION_JSON).build();
-        }
-        return Response.seeOther(URI.create("/dashboard")).build();
     }
 
     /**
@@ -1016,129 +848,6 @@ public class DashboardResource {
         return result;
     }
 
-    // -- Shared NFS endpoints --
-
-    /**
-     * Returns available shared volumes and the user's own share settings.
-     */
-    @GET
-    @Path("/storage/shares")
-    @Authenticated
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response getShareInfo() {
-        String userId = getCurrentUsername();
-        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-        try {
-            // Fire all ask() calls in parallel
-            var sharableVolumesFut = sm.ask(mgr -> mgr.listSharableVolumes(userId));
-            var mySharedPvcsFut = sm.ask(mgr -> mgr.listSharedPvcs(userId));
-            var myShareSettingsFut = sm.ask(mgr -> mgr.getShareSettings(userId));
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("sharableVolumes", sharableVolumesFut.get());
-            result.put("mySharedPvcs", mySharedPvcsFut.get());
-            result.put("myShareSettings", myShareSettingsFut.get());
-            return Response.ok(result).build();
-        } catch (Exception e) {
-            LOG.severe("Failed to get share info: " + e.getMessage());
-            return Response.serverError()
-                .entity(Map.of("error", "share_info_failed")).build();
-        }
-    }
-
-    /**
-     * Creates a shared NFS PV/PVC pointing to another user's nfs-k8s directory.
-     */
-    @POST
-    @Path("/storage/share/mount")
-    @Authenticated
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response mountSharedVolume(Map<String, String> body) {
-        String userId = getCurrentUsername();
-        String sourceUserId = body != null ? body.get("sourceUserId") : null;
-        if (sourceUserId == null || sourceUserId.isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                .entity(Map.of("error", "sourceUserId is required")).build();
-        }
-        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-        try {
-            String error = sm.ask(mgr -> mgr.createSharedNfsPvPvc(userId, sourceUserId)).get();
-            if (error != null) {
-                return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", error)).build();
-            }
-            return Response.ok(Map.of("status", "mounted", "sourceUserId", sourceUserId)).build();
-        } catch (Exception e) {
-            LOG.severe("Failed to mount shared volume: " + e.getMessage());
-            return Response.serverError()
-                .entity(Map.of("error", "share_mount_failed")).build();
-        }
-    }
-
-    /**
-     * Deletes a shared NFS PV/PVC.
-     */
-    @POST
-    @Path("/storage/share/unmount")
-    @Authenticated
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response unmountSharedVolume(Map<String, String> body) {
-        String userId = getCurrentUsername();
-        String sourceUserId = body != null ? body.get("sourceUserId") : null;
-        if (sourceUserId == null || sourceUserId.isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                .entity(Map.of("error", "sourceUserId is required")).build();
-        }
-        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-        try {
-            String error = sm.ask(mgr -> mgr.deleteSharedNfsPvPvc(userId, sourceUserId)).get();
-            if (error != null) {
-                return Response.status(Response.Status.CONFLICT)
-                    .entity(Map.of("error", error)).build();
-            }
-            return Response.ok(Map.of("status", "unmounted", "sourceUserId", sourceUserId)).build();
-        } catch (Exception e) {
-            LOG.severe("Failed to unmount shared volume: " + e.getMessage());
-            return Response.serverError()
-                .entity(Map.of("error", "share_unmount_failed")).build();
-        }
-    }
-
-    /**
-     * Updates the user's own share settings (enable/disable sharing, allow list, mode).
-     */
-    @POST
-    @Path("/storage/share/settings")
-    @Authenticated
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response updateShareSettings(Map<String, String> body) {
-        String userId = getCurrentUsername();
-        if (body == null) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                .entity(Map.of("error", "body is required")).build();
-        }
-        boolean enabled = "true".equals(body.get("enabled"));
-        String allowList = body.getOrDefault("allow", "");
-        String mode = body.getOrDefault("mode", "ro");
-        if (!"ro".equals(mode) && !"rw".equals(mode)) {
-            mode = "ro";
-        }
-
-        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-        try {
-            String m = mode;
-            sm.tell(mgr -> mgr.saveShareSettings(userId, enabled, allowList, m));
-            return Response.ok(Map.of("status", "saved")).build();
-        } catch (Exception e) {
-            LOG.severe("Failed to save share settings: " + e.getMessage());
-            return Response.serverError()
-                .entity(Map.of("error", "share_settings_failed")).build();
-        }
-    }
-
     private List<MountSpec> resolveAdditionalMounts(String... typePathPairs) {
         List<MountSpec> mounts = new ArrayList<>();
         // typePathPairs are: type0, path0, type1, path1, type2, path2
@@ -1150,13 +859,8 @@ public class DashboardResource {
                 if (!path.startsWith("/")) {
                     path = "/" + path;
                 }
-                // Parse shared mount format: "nfs-k8s-shared::sourceUserId"
-                String sharedFrom = null;
-                if (type.startsWith("nfs-k8s-shared::")) {
-                    sharedFrom = type.substring("nfs-k8s-shared::".length());
-                    type = "nfs-k8s-shared";
-                }
-                mounts.add(new MountSpec(type, path, sharedFrom));
+                // The type is checked against the user's allocations when the session is created
+                mounts.add(new MountSpec(type, path, null));
             }
         }
         return mounts;

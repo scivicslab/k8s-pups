@@ -130,6 +130,20 @@ public class K8sPupsActorSystem {
     @Inject
     com.scivicslab.k8spups.dataset.DatasetRepository datasetRepository;
 
+    @Inject
+    com.scivicslab.k8spups.storage.StorageAllocationRepository storageAllocationRepository;
+
+    // Base of the users an administrator can give storage to (e.g. ou=personal_genome,ou=accounts,dc=nig,dc=ac,dc=jp);
+    // empty = the workspace LDAP base
+    @ConfigProperty(name = "k8spups.users.ldap-base-dn", defaultValue = "")
+    String usersLdapBaseDn;
+
+    private LdapUserInfoClient ldapClient;
+
+    // The allocation a user gets at the first login, <type>:<size> (e.g. lustre-csi:50Gi); empty = none
+    @ConfigProperty(name = "k8spups.storage.default-allocation", defaultValue = "")
+    String defaultAllocation;
+
     @ConfigProperty(name = "k8spups.nfs-k8s.server", defaultValue = "")
     String nfsK8sServer;
 
@@ -229,7 +243,7 @@ public class K8sPupsActorSystem {
             controllerUrl);
 
         // Create LdapUserInfoClient for workspace mounting (null if not configured)
-        LdapUserInfoClient ldapClient = null;
+        ldapClient = null;
         if (!workspaceLdapUrl.isBlank() && !workspaceLdapBindPassword.isBlank()) {
             ldapClient = new LdapUserInfoClient(
                 workspaceLdapUrl, workspaceLdapBaseDn, workspaceLdapBindDn, workspaceLdapBindPassword);
@@ -253,6 +267,12 @@ public class K8sPupsActorSystem {
                 com.scivicslab.k8spups.passport.PassportConfig.fromConfig(
                     org.eclipse.microprofile.config.ConfigProvider.getConfig()),
                 s3Access));
+
+        // Storage allocation: one actor serializes the changes of a user's storage
+        actorSystem.actorOf(com.scivicslab.k8spups.storage.StorageAllocationService.ACTOR_NAME,
+            new com.scivicslab.k8spups.storage.StorageAllocationService(storageAllocationRepository, datasetRepository,
+                k8sClient, storageTypeOptions,
+                com.scivicslab.k8spups.storage.StoragePolicy.parseDefault(defaultAllocation, storageTypeOptions)));
 
         // Shared settings: one actor serializes saves and the reads of starting sessions
         actorSystem.actorOf(com.scivicslab.k8spups.settings.SettingsService.ACTOR_NAME,
@@ -414,6 +434,20 @@ public class K8sPupsActorSystem {
 
     public String getDefaultStorageSize() {
         return defaultStorageSize;
+    }
+
+    /**
+     * The users an administrator can give storage to: the posixAccounts under {@code k8spups.users.ldap-base-dn}.
+     * Empty when no LDAP is configured.
+     */
+    public List<String> listUsers() {
+        if (ldapClient == null) return List.of();
+        return ldapClient.listUserNames(usersLdapBaseDn.isBlank() ? ldapClient.baseDn() : usersLdapBaseDn);
+    }
+
+    /** The actor that holds the storage administrators give to users. */
+    public ActorRef<com.scivicslab.k8spups.storage.StorageAllocationService> getStorageAllocations() {
+        return actorSystem.getActor(com.scivicslab.k8spups.storage.StorageAllocationService.ACTOR_NAME);
     }
 
     public List<String> getStorageTypeOptions() {

@@ -233,20 +233,14 @@
     <div id="content" style="display:none;">
         <h1 class="page-title">Storage Settings</h1>
         <p class="page-desc">
-            Create or remove your storage here. You choose which storage a tool uses when you launch the tool.
+            The storage an administrator gave you. You choose which of it a tool uses when you launch the tool.
+            To get more storage or another kind, ask an administrator.
         </p>
 
-        <!-- 0. Current Status -->
         <div class="section" id="sec-overview">
-            <div class="section-title">Current Status</div>
-            <div class="section-desc">
-                Your storage and the tools that are running.
-            </div>
+            <div class="section-title">Your storage</div>
             <div id="overview-body"></div>
         </div>
-
-        <!-- One section per storage type the deployment offers; built by render(). -->
-        <div id="storage-sections"></div>
 
         <!-- S3 object storage: shown only when the deployment gives users an S3 endpoint. -->
         <div class="section" id="sec-s3" hidden>
@@ -256,83 +250,23 @@
             </div>
             <div class="s3-endpoint">Endpoint: <span id="s3-endpoint"></span></div>
         </div>
-
-        <!-- 6. My Share Settings -->
-        <div class="section nfs-share-section" id="sec-my-share" hidden>
-            <div class="section-title">
-                My Share Settings
-            </div>
-            <div class="section-desc">
-                Let other users use your shared file storage, read-only or read-write.
-            </div>
-            <div id="my-share-body"></div>
-        </div>
-
-        <!-- 7. Available Shared Volumes -->
-        <div class="section nfs-share-section" id="sec-available-shares" hidden>
-            <div class="section-title">
-                Available Shared Volumes
-            </div>
-            <div class="section-desc">
-                Shared file storage that other users let you use.
-            </div>
-            <div id="available-shares-body"></div>
-        </div>
-
-        <!-- 8. My Mounted Shares -->
-        <div class="section nfs-share-section" id="sec-mounted-shares" hidden>
-            <div class="section-title">
-                My Mounted Shares
-            </div>
-            <div class="section-desc">
-                Other users' storage you have added. You can attach it to a tool when you launch the tool.
-            </div>
-            <div id="mounted-shares-body"></div>
-        </div>
     </div>
 </main>
 
-<div class="toast" id="toast"></div>
-
-<!-- Delete Confirmation Modal -->
-<div class="modal-overlay" id="delete-modal">
-    <div class="modal">
-        <h3>Remove storage</h3>
-        <p id="delete-msg">Type <strong>DELETE</strong> to confirm.</p>
-        <input type="text" id="delete-confirm-input" placeholder='Type "DELETE" to confirm'>
-        <div class="btn-row">
-            <button class="btn-cancel" onclick="closeDeleteModal()">Cancel</button>
-            <button class="btn btn-delete" id="delete-confirm-btn" onclick="confirmDelete()">Remove</button>
-        </div>
-    </div>
-</div>
-
 <script>
+// A view only: users cannot create, enlarge, remove or share storage. /storage/info returns the storage allocated
+// to the user (storageTypeNames, storageTypeDescriptions, pvcInfo) and the running tools.
 var API_BASE = '/pups';
-var currentData = null;
-var pendingDeleteType = null;
 
 fetch('config').then(function(r) { return r.json(); }).then(function(c) {
     API_BASE = c.apiBase;
     loadSettings();
 }).catch(function() { loadSettings(); });
 
-// Names and descriptions of the storage types; replaced by the controller's storageTypeNames and
-// storageTypeDescriptions, which list only the offered types.
-var TYPE_LABELS = {
-    'lustre-csi': 'Shared file storage',
-    'longhorn': 'Block storage',
-    'nfs-k8s': 'Shared file storage',
-    'nfs-home': 'Home directory'
-};
-var TYPE_DESCS = {};
-var OFFERED_TYPES = ['longhorn', 'nfs-k8s', 'nfs-home'];   // a controller without storageTypeNames offers these
-
-function showToast(msg, type) {
-    var t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'toast show ' + type;
-    setTimeout(function() { t.className = 'toast'; }, 3500);
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(ch) {
+        return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch];
+    });
 }
 
 function loadSettings() {
@@ -341,424 +275,57 @@ function loadSettings() {
             if (!r.ok) throw new Error('Failed to load (HTTP ' + r.status + ')');
             return r.json();
         })
-        .then(function(data) {
-            currentData = data;
-            render(data);
-        })
+        .then(render)
         .catch(function(err) {
             document.getElementById('loading').innerHTML =
-                '<div style="color:#991B1B;">Failed to load storage settings.<br>' + err.message + '</div>';
+                '<div style="color:#991B1B;">Failed to load storage settings.<br>' + esc(err.message) + '</div>';
         });
 }
 
 function render(data) {
     document.getElementById('user-id').textContent = data.userId || '';
+    var names = data.storageTypeNames || {};
+    var descs = data.storageTypeDescriptions || {};
     var pvc = data.pvcInfo || {};
-    var sizeOpts = data.storageSizeOptions || [];
-    var currentSize = data.currentStorageSize || '100Gi';
+    var sizes = data.allocated || {};
+    var types = Object.keys(names);
+    var sessions = data.activeSessions || [];
 
-    if (data.storageTypeNames) {
-        OFFERED_TYPES = Object.keys(data.storageTypeNames);
-        OFFERED_TYPES.forEach(function(t) { TYPE_LABELS[t] = data.storageTypeNames[t]; });
+    var html = '';
+    if (types.length === 0) {
+        html = '<div class="empty-msg" id="no-storage">No storage has been given to you yet. Ask an administrator.</div>';
+    } else {
+        html += '<table class="overview-table"><thead><tr><th>Storage</th><th>Size</th><th>State</th></tr></thead><tbody>';
+        types.forEach(function(t) {
+            var info = pvc[t] || {};
+            var state = info.exists !== 'true' ? 'Being prepared'
+                : (info.inUse === 'true' ? 'In use' + (info.usedBy ? ' (' + info.usedBy + ')' : '') : 'Idle');
+            html += '<tr id="storage-' + esc(t) + '"><td><div style="font-weight:600;">' + esc(names[t]) + '</div>' +
+                '<div style="font-size:12px;color:var(--muted);">' + esc(descs[t] || '') + '</div></td>' +
+                '<td>' + esc(sizes[t] || info.size || '-') + '</td><td>' + esc(state) + '</td></tr>';
+        });
+        html += '</tbody></table>';
     }
-    TYPE_DESCS = data.storageTypeDescriptions || {};
-
-    // Overview (storage + sessions)
-    renderOverview(pvc, data.activeSessions || []);
-
-    // One section per offered type
-    document.getElementById('storage-sections').innerHTML = OFFERED_TYPES.map(function(t) {
-        return '<div class="section" id="sec-' + t + '">' +
-            '<div class="section-title">' + TYPE_LABELS[t] + '</div>' +
-            '<div class="section-desc">' + (TYPE_DESCS[t] || '') + '</div>' +
-            '<div id="' + t + '-body"></div></div>';
-    }).join('');
-    OFFERED_TYPES.forEach(function(t) {
-        if (t === 'longhorn') renderLonghorn(pvc.longhorn || {}, sizeOpts, currentSize);
-        else if (t === 'lustre-csi') renderLustreCsi(pvc['lustre-csi'] || {}, sizeOpts, currentSize);
-        else renderNfsSection(t, pvc[t] || {});
-    });
+    html += '<div class="overview-sub" style="margin-top:20px;">Running tools</div>';
+    if (sessions.length === 0) {
+        html += '<div class="empty-msg">No tools are running.</div>';
+    } else {
+        sessions.forEach(function(s) {
+            html += '<div class="pvc-status"><div><div style="font-weight:600;font-size:14px;">' + esc(s.toolName) +
+                '</div><div class="pvc-detail">Storage: <strong>' + esc(names[s.storageType] || s.storageType || 'N/A') +
+                '</strong></div></div><span class="badge ' + (s.state === 'READY' ? 'badge-green' : 'badge-orange') + '">' +
+                (s.state === 'READY' ? 'Ready' : 'Starting') + '</span></div>';
+        });
+    }
+    document.getElementById('overview-body').innerHTML = html;
 
     var s3 = data.objectStorageEndpoint || '';
     document.getElementById('sec-s3').hidden = !s3;
     document.getElementById('s3-endpoint').textContent = s3;
 
-    // Share sections: sharing is a feature of the NFS server's shared file storage (nfs-k8s)
-    var sharing = OFFERED_TYPES.indexOf('nfs-k8s') >= 0;
-    document.querySelectorAll('.nfs-share-section').forEach(function(sec) { sec.hidden = !sharing; });
-    if (sharing) {
-        renderMyShareSettings(data.myShareSettings || {});
-        renderAvailableShares(data.sharableVolumes || []);
-        renderMountedShares(data.mySharedPvcs || []);
-    }
-
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = 'block';
 }
-
-function renderOverview(pvc, sessions) {
-    var body = document.getElementById('overview-body');
-    var html = '';
-
-    // Storage volumes table
-    html += '<div class="overview-sub">Storage Volumes</div>';
-    html += '<table class="overview-table"><thead><tr>';
-    html += '<th>Type</th><th>Status</th><th>Size</th><th>State</th>';
-    html += '</tr></thead><tbody>';
-
-    OFFERED_TYPES.forEach(function(t) {
-        var info = pvc[t] || {};
-        var exists = info.exists === 'true';
-        var inUse = info.inUse === 'true';
-        html += '<tr>';
-        html += '<td style="font-weight:600;">' + TYPE_LABELS[t] + '</td>';
-        if (exists) {
-            html += '<td><span class="badge badge-green">Created</span></td>';
-            html += '<td>' + (info.size && info.size !== '0' ? info.size : '-') + '</td>';
-            html += '<td>';
-            if (inUse) {
-                html += '<span class="badge badge-red">In Use</span>';
-                if (info.usedBy) {
-                    html += ' <span style="font-size:12px;color:var(--muted);">' + info.usedBy + '</span>';
-                }
-            } else {
-                html += '<span style="color:var(--muted);">Idle</span>';
-            }
-            html += '</td>';
-        } else {
-            html += '<td><span style="color:var(--muted);">Not created</span></td>';
-            html += '<td>-</td><td>-</td>';
-        }
-        html += '</tr>';
-    });
-    html += '</tbody></table>';
-
-    // Active sessions
-    html += '<div class="overview-sub" style="margin-top:20px;">Active Sessions</div>';
-    if (!sessions || sessions.length === 0) {
-        html += '<div class="empty-msg">No active sessions.</div>';
-    } else {
-        sessions.forEach(function(s) {
-            var stateLabel = s.state === 'READY' ? 'Ready' : 'Starting';
-            var stateBadge = s.state === 'READY'
-                ? '<span class="badge badge-green">' + stateLabel + '</span>'
-                : '<span class="badge badge-orange">' + stateLabel + '</span>';
-            var storageLabel = TYPE_LABELS[s.storageType] || s.storageType || 'N/A';
-            html += '<div class="pvc-status">';
-            html += '<div><div style="font-weight:600;font-size:14px;">' + s.toolName + '</div>';
-            html += '<div class="pvc-detail">Storage: <strong>' + storageLabel + '</strong>';
-            if (s.podName) html += ' &nbsp; Pod: <code>' + s.podName + '</code>';
-            html += '</div></div>';
-            html += stateBadge;
-            html += '</div>';
-        });
-    }
-
-    body.innerHTML = html;
-}
-
-function renderLonghorn(info, sizeOpts, currentSize) {
-    var body = document.getElementById('longhorn-body');
-    var exists = info.exists === 'true';
-    var inUse = info.inUse === 'true';
-
-    if (!exists) {
-        var html = '<div class="size-row"><label>Size:</label><select id="longhorn-size" class="size-select">';
-        sizeOpts.forEach(function(s) {
-            html += '<option value="' + s + '"' + (s === currentSize ? ' selected' : '') + '>' + s + '</option>';
-        });
-        html += '</select></div>';
-        html += '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'longhorn\')">Create</button></div>';
-        body.innerHTML = html;
-        return;
-    }
-
-    var usedBy = info.usedBy || '';
-    var html = '<div class="pvc-status"><div class="pvc-detail">' +
-        '<strong>Size:</strong> ' + (info.size || '-') +
-        ' &nbsp; <strong>Status:</strong> ' + (info.phase || '-') +
-        '</div>' +
-        (inUse ? '<span class="badge badge-red">In Use</span>' : '') +
-        '</div>';
-    if (inUse && usedBy) {
-        html += '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Pod: <code>' +
-            usedBy.split(',').join('</code>, <code>') + '</code></div>';
-    }
-
-    html += '<div class="size-row"><label>Expand to:</label><select id="longhorn-expand-size" class="size-select">';
-    sizeOpts.forEach(function(s) {
-        html += '<option value="' + s + '"' + (s === info.size ? ' selected' : '') + '>' + s + '</option>';
-    });
-    html += '</select></div>';
-
-    html += '<div class="btn-row">';
-    html += '<button class="btn btn-expand" onclick="expandPvc()">Expand</button>';
-    html += '<button class="btn btn-delete" ' + (inUse ? 'disabled title="Cannot delete while in use"' : '') +
-        ' onclick="openDeleteModal(\'longhorn\')">Remove</button>';
-    html += '</div>';
-    body.innerHTML = html;
-}
-
-// Lustre (k8s): created with a size; the StorageClass keeps the directory when the PVC is removed (Retain).
-function renderLustreCsi(info, sizeOpts, currentSize) {
-    var body = document.getElementById('lustre-csi-body');
-    var exists = info.exists === 'true';
-    var inUse = info.inUse === 'true';
-
-    if (!exists) {
-        var html = '<div class="size-row"><label>Size:</label><select id="lustre-csi-size" class="size-select">';
-        sizeOpts.forEach(function(s) {
-            html += '<option value="' + s + '"' + (s === currentSize ? ' selected' : '') + '>' + s + '</option>';
-        });
-        html += '</select></div>';
-        html += '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'lustre-csi\')">Create</button></div>';
-        body.innerHTML = html;
-        return;
-    }
-
-    var usedBy = info.usedBy || '';
-    var html = '<div class="pvc-status"><div class="pvc-detail">' +
-        '<strong>Size:</strong> ' + (info.size || '-') +
-        ' &nbsp; <strong>Status:</strong> ' + (info.phase || '-') +
-        '</div>' +
-        (inUse ? '<span class="badge badge-red">In Use</span>' : '') +
-        '</div>';
-    if (inUse && usedBy) {
-        html += '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Pod: <code>' +
-            usedBy.split(',').join('</code>, <code>') + '</code></div>';
-    }
-    html += '<div class="btn-row">';
-    html += '<button class="btn btn-delete" ' + (inUse ? 'disabled title="Cannot remove while in use"' : '') +
-        ' onclick="openDeleteModal(\'lustre-csi\')">Remove</button>';
-    html += '</div>';
-    body.innerHTML = html;
-}
-
-function renderNfsSection(type, info) {
-    var body = document.getElementById(type + '-body');
-    var exists = info.exists === 'true';
-    var inUse = info.inUse === 'true';
-
-    if (!exists) {
-        body.innerHTML = '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'' + type + '\')">Create</button></div>';
-        return;
-    }
-
-    var usedBy = info.usedBy || '';
-    var html = '<div class="pvc-status"><div class="pvc-detail">' +
-        '<strong>Status:</strong> ' + (info.phase || '-') +
-        '</div>' +
-        (inUse ? '<span class="badge badge-red">In Use</span>' : '') +
-        '</div>';
-    if (inUse && usedBy) {
-        html += '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">Pod: <code>' +
-            usedBy.split(',').join('</code>, <code>') + '</code></div>';
-    }
-    html += '<div class="btn-row">';
-    html += '<button class="btn btn-delete" ' + (inUse ? 'disabled title="Cannot remove while in use"' : '') +
-        ' onclick="openDeleteModal(\'' + type + '\')">Remove</button>';
-    html += '</div>';
-
-    if (type === 'nfs-home') {
-        html += '<div style="margin-top:10px;font-size:12px;color:var(--muted);">' +
-            'Removing it does not delete the files in your home directory.</div>';
-    }
-    body.innerHTML = html;
-}
-
-function createPvc(type) {
-    var body = { storageType: type };
-    if (type === 'longhorn' || type === 'lustre-csi') {
-        var sel = document.getElementById(type + '-size');
-        body.storageSize = sel ? sel.value : '100Gi';
-    }
-    fetch(API_BASE + '/storage/pvc/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body)
-    })
-    .then(function(r) {
-        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Create failed'); });
-        showToast(TYPE_LABELS[type] + ' created', 'success');
-        setTimeout(loadSettings, 1000);
-    })
-    .catch(function(err) { showToast(err.message, 'error'); });
-}
-
-function expandPvc() {
-    var sel = document.getElementById('longhorn-expand-size');
-    if (!sel) return;
-    fetch(API_BASE + '/storage/pvc/expand', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ storageSize: sel.value })
-    })
-    .then(function(r) {
-        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Expand failed'); });
-        showToast(TYPE_LABELS['longhorn'] + ' expanded to ' + sel.value, 'success');
-        setTimeout(loadSettings, 1000);
-    })
-    .catch(function(err) { showToast(err.message, 'error'); });
-}
-
-function openDeleteModal(type) {
-    pendingDeleteType = type;
-    var msg = 'This will remove your <strong>' + TYPE_LABELS[type] + '</strong>';
-    if (type === 'nfs-home') {
-        msg += '. <br><em>Your files in the home directory stay.</em>';
-    } else if (type === 'lustre-csi') {
-        msg += '. <br><em>Your tools can no longer reach its files. The files stay until an administrator removes them;' +
-            ' if you create it again, you get a new, empty one.</em>';
-    } else {
-        msg += ' and <strong>all its files will be lost</strong>.';
-    }
-    msg += '<br><br>Type <strong>DELETE</strong> to confirm.';
-    document.getElementById('delete-msg').innerHTML = msg;
-    document.getElementById('delete-confirm-input').value = '';
-    document.getElementById('delete-modal').classList.add('show');
-}
-
-function closeDeleteModal() {
-    pendingDeleteType = null;
-    document.getElementById('delete-modal').classList.remove('show');
-}
-
-function confirmDelete() {
-    var input = document.getElementById('delete-confirm-input').value.trim();
-    if (input !== 'DELETE') {
-        showToast('Please type DELETE to confirm', 'error');
-        return;
-    }
-    if (!pendingDeleteType) return;
-    var type = pendingDeleteType;
-    closeDeleteModal();
-
-    fetch(API_BASE + '/storage/pvc/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ storageType: type, confirmation: 'DELETE' })
-    })
-    .then(function(r) {
-        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Delete failed'); });
-        showToast(TYPE_LABELS[type] + ' removed', 'success');
-        setTimeout(loadSettings, 1000);
-    })
-    .catch(function(err) { showToast(err.message, 'error'); });
-}
-
-// -- Share settings --
-
-function renderMyShareSettings(settings) {
-    var body = document.getElementById('my-share-body');
-    var enabled = settings['share.enabled'] === 'true';
-    var allow = settings['share.allow'] || '';
-    var mode = settings['share.mode'] || 'ro';
-
-    var html = '<div class="form-group">';
-    html += '<label class="toggle-label">';
-    html += '<input type="checkbox" id="share-enabled" ' + (enabled ? 'checked' : '') + '>';
-    html += 'Let other users use my shared file storage</label></div>';
-    html += '<div class="form-group"><label>Allowed users (comma-separated, or * for all):</label>';
-    html += '<input type="text" id="share-allow" value="' + allow + '" placeholder="user1,user2 or *"></div>';
-    html += '<div class="form-group"><label>Access mode:</label>';
-    html += '<select id="share-mode" class="size-select" style="width:auto;min-width:160px;">';
-    html += '<option value="ro"' + (mode === 'ro' ? ' selected' : '') + '>Read Only</option>';
-    html += '<option value="rw"' + (mode === 'rw' ? ' selected' : '') + '>Read / Write</option>';
-    html += '</select></div>';
-    html += '<div class="btn-row"><button class="btn btn-orange" onclick="saveShareSettings()">Save Share Settings</button></div>';
-    body.innerHTML = html;
-}
-
-function saveShareSettings() {
-    var enabled = document.getElementById('share-enabled').checked;
-    var allow = document.getElementById('share-allow').value.trim();
-    var mode = document.getElementById('share-mode').value;
-
-    fetch(API_BASE + '/storage/share/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ enabled: String(enabled), allow: allow, mode: mode })
-    })
-    .then(function(r) {
-        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Save failed'); });
-        showToast('Share settings saved', 'success');
-    })
-    .catch(function(err) { showToast(err.message, 'error'); });
-}
-
-function renderAvailableShares(volumes) {
-    var body = document.getElementById('available-shares-body');
-    if (!volumes || volumes.length === 0) {
-        body.innerHTML = '<div class="empty-msg">No shared volumes available.</div>';
-        return;
-    }
-    var html = '';
-    volumes.forEach(function(v) {
-        html += '<div class="share-row">';
-        html += '<div><span class="share-user">' + v.userId + '</span>';
-        html += '<span class="share-mode">(' + (v.shareMode === 'rw' ? 'Read/Write' : 'Read Only') + ')</span></div>';
-        html += '<button class="btn btn-create btn-sm" onclick="mountShare(\'' + v.userId + '\')">Mount</button>';
-        html += '</div>';
-    });
-    body.innerHTML = html;
-}
-
-function mountShare(sourceUserId) {
-    fetch(API_BASE + '/storage/share/mount', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ sourceUserId: sourceUserId })
-    })
-    .then(function(r) {
-        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Mount failed'); });
-        showToast('Shared volume from ' + sourceUserId + ' mounted', 'success');
-        setTimeout(loadSettings, 1000);
-    })
-    .catch(function(err) { showToast(err.message, 'error'); });
-}
-
-function renderMountedShares(pvcs) {
-    var body = document.getElementById('mounted-shares-body');
-    if (!pvcs || pvcs.length === 0) {
-        body.innerHTML = '<div class="empty-msg">No shared volumes mounted.</div>';
-        return;
-    }
-    var html = '';
-    pvcs.forEach(function(p) {
-        var inUse = p.inUse === 'true';
-        html += '<div class="share-row">';
-        html += '<div><span class="share-user">From: ' + p.sharedFrom + '</span>';
-        html += '<span class="share-mode">' + p.pvcName + '</span>';
-        if (inUse) html += ' <span class="badge badge-red">In Use</span>';
-        html += '</div>';
-        html += '<button class="btn btn-delete btn-sm" ' + (inUse ? 'disabled title="In use by a Pod"' : '') +
-            ' onclick="unmountShare(\'' + p.sharedFrom + '\')">Unmount</button>';
-        html += '</div>';
-    });
-    body.innerHTML = html;
-}
-
-function unmountShare(sourceUserId) {
-    fetch(API_BASE + '/storage/share/unmount', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ sourceUserId: sourceUserId })
-    })
-    .then(function(r) {
-        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Unmount failed'); });
-        showToast('Shared volume unmounted', 'success');
-        setTimeout(loadSettings, 1000);
-    })
-    .catch(function(err) { showToast(err.message, 'error'); });
-}
-
-// loadSettings() is called after /config resolves API_BASE (see top of script)
 </script>
 
 </body>

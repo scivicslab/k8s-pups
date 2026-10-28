@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storage of users</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #1E293B; margin: 0; padding: 24px 32px; max-width: 900px; }
+        h1 { font-size: 1.4rem; }
+        table { border-collapse: collapse; width: 100%; background: white; margin-top: 12px; }
+        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #E2E8F0; font-size: .95rem; }
+        th { color: #64748B; font-size: .8rem; text-transform: uppercase; }
+        .none { color: #94A3B8; }
+        .note { color: #64748B; font-size: .85rem; }
+        .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; }
+        input { font-size: .95rem; padding: 5px 8px; }
+    </style>
+</head>
+<body>
+<p><a href="{basePath}/dashboard">&larr; Dashboard</a></p>
+<h1>Storage of users</h1>
+<p class="note">Users get storage only from an administrator here, or the default storage at their first login.
+    Users cannot create, enlarge, remove or share storage themselves.</p>
+{#if error}<div class="error" id="list-error">{error}</div>{/if}
+<form method="get" action="{basePath}/storage-admin">
+    <input name="q" value="{q}" placeholder="Filter by user name" id="filter">
+    <button type="submit">Filter</button>
+</form>
+<table id="users">
+    <tr><th>User</th><th>Storage</th></tr>
+    {#for r in rows}
+    <tr><td><a href="{basePath}/storage-admin/u/{r.user}">{r.user}</a></td>
+        <td>{#if r.storage}{r.storage}{#else}<span class="none">none</span>{/if}</td></tr>
+    {/for}
+</table>
+</body>
+</html>

@@ -768,105 +768,8 @@ public class K8sApiClient {
         return sharedPvcName(ownerUserId, sourceUserId) + "-" + userPodsNamespace;
     }
 
-    /**
-     * Creates a shared NFS PV/PVC pointing to another user's nfs-k8s directory.
-     * The PV/PVC is owned by ownerUserId but references sourceUserId's NFS path.
-     */
-    public void createSharedNfsPvPvc(String ownerUserId, String sourceUserId, boolean readOnly) {
-        String pvName = sharedPvName(ownerUserId, sourceUserId);
-        String pvcName = sharedPvcName(ownerUserId, sourceUserId);
-        String nfsPath = nfsK8sBasePath + "/" + sanitizeUserId(sourceUserId);
 
-        // Create PV if absent
-        if (client.persistentVolumes().withName(pvName).get() == null) {
-            PersistentVolume pv = new PersistentVolumeBuilder()
-                .withNewMetadata()
-                    .withName(pvName)
-                    .addToLabels("app", "k8s-pups-user")
-                    .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", UserKey.encode(ownerUserId))
-                    .addToLabels("storage-type", "nfs-k8s-shared")
-                    .addToLabels("shared-from", sanitizeUserId(sourceUserId))
-                .endMetadata()
-                .withNewSpec()
-                    .withCapacity(Map.of("storage", new Quantity("1Ti")))
-                    .withAccessModes("ReadWriteMany")
-                    .withPersistentVolumeReclaimPolicy("Retain")
-                    .withStorageClassName("")
-                    .withNewCsi()
-                        .withDriver("nfs.csi.k8s.io")
-                        .withVolumeHandle(pvName)
-                        .addToVolumeAttributes("server", nfsK8sServer)
-                        .addToVolumeAttributes("share", nfsPath)
-                    .endCsi()
-                    .withMountOptions(List.of("nfsvers=4"))
-                .endSpec()
-                .build();
-            client.persistentVolumes().resource(pv).create();
-            LOG.info("Shared NFS PV created: " + pvName + " -> " + nfsK8sServer + ":" + nfsPath);
-        }
 
-        // Create PVC if absent
-        if (client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() == null) {
-            PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
-                .withNewMetadata()
-                    .withName(pvcName)
-                    .withNamespace(userPodsNamespace)
-                    .addToLabels("app", "k8s-pups-user")
-                    .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", UserKey.encode(ownerUserId))
-                    .addToLabels("storage-type", "nfs-k8s-shared")
-                    .addToLabels("shared-from", sanitizeUserId(sourceUserId))
-                .endMetadata()
-                .withNewSpec()
-                    .withAccessModes("ReadWriteMany")
-                    .withStorageClassName("")
-                    .withVolumeName(pvName)
-                    .withNewResources()
-                        .addToRequests("storage", new Quantity("1Ti"))
-                    .endResources()
-                .endSpec()
-                .build();
-            client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
-            LOG.info("Shared NFS PVC created: " + pvcName);
-        }
-    }
-
-    /**
-     * Deletes a shared NFS PV/PVC.
-     */
-    public void deleteSharedNfsPvPvc(String ownerUserId, String sourceUserId) {
-        String pvName = sharedPvName(ownerUserId, sourceUserId);
-        String pvcName = sharedPvcName(ownerUserId, sourceUserId);
-        client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).delete();
-        client.persistentVolumes().withName(pvName).delete();
-        LOG.info("Shared NFS PV/PVC deleted: " + pvcName);
-    }
-
-    /**
-     * Lists shared PVCs owned by a user (PVCs with storage-type=nfs-k8s-shared and user=ownerUserId).
-     */
-    public List<Map<String, String>> listSharedPvcs(String ownerUserId) {
-        List<Map<String, String>> result = new ArrayList<>();
-        var pvcs = client.persistentVolumeClaims().inNamespace(userPodsNamespace)
-            .withLabel("managed-by", "k8s-pups")
-            .withLabel("user", UserKey.encode(ownerUserId))
-            .withLabel("storage-type", "nfs-k8s-shared")
-            .list().getItems();
-        for (var pvc : pvcs) {
-            String sharedFrom = pvc.getMetadata().getLabels().getOrDefault("shared-from", "");
-            String phase = pvc.getStatus() != null && pvc.getStatus().getPhase() != null
-                ? pvc.getStatus().getPhase() : "Unknown";
-            boolean inUse = isSharedPvcInUse(ownerUserId, sharedFrom);
-            result.add(Map.of(
-                "sharedFrom", sharedFrom,
-                "pvcName", pvc.getMetadata().getName(),
-                "phase", phase,
-                "inUse", String.valueOf(inUse)
-            ));
-        }
-        return result;
-    }
 
     /**
      * Checks if a shared PVC is mounted by any running/pending Pod.
@@ -889,48 +792,7 @@ public class K8sApiClient {
         return false;
     }
 
-    /**
-     * Checks if sourceUser allows targetUser to mount their nfs-k8s volume.
-     */
-    public boolean isShareAllowed(String sourceUserId, String targetUserId) {
-        Map<String, String> prefs = getUserStorageInfo(sourceUserId);
-        if (!"true".equals(prefs.get("share.enabled"))) return false;
-        String allowList = prefs.getOrDefault("share.allow", "").trim();
-        if ("*".equals(allowList)) return true;
-        for (String u : allowList.split(",")) {
-            if (u.trim().equals(targetUserId)) return true;
-        }
-        return false;
-    }
 
-    /**
-     * Lists users who have sharing enabled and whose nfs-k8s PVC exists.
-     * Returns list of {userId, shareMode} maps.
-     */
-    public List<Map<String, String>> listSharableVolumes(String requestingUserId) {
-        List<Map<String, String>> result = new ArrayList<>();
-        // Find all user prefs ConfigMaps
-        var configMaps = client.configMaps().inNamespace(userPodsNamespace)
-            .withLabel("managed-by", "k8s-pups")
-            .list().getItems();
-        for (var cm : configMaps) {
-            if (cm.getData() == null) continue;
-            if (!"true".equals(cm.getData().get("share.enabled"))) continue;
-            // Extract userId from ConfigMap name (pups-prefs-{UserKey.encode(userId)})
-            String cmName = cm.getMetadata().getName();
-            if (!cmName.startsWith("pups-prefs-")) continue;
-            String sourceUserId = UserKey.decode(cmName.substring("pups-prefs-".length()));
-            if (sourceUserId.equals(requestingUserId)) continue; // skip self
-            // Check if requester is allowed
-            if (!isShareAllowed(sourceUserId, requestingUserId)) continue;
-            // Check if source has nfs-k8s PVC
-            Map<String, String> pvcInfo = getUserPvcInfo(sourceUserId, "nfs-k8s");
-            if (!"true".equals(pvcInfo.get("exists"))) continue;
-            String mode = cm.getData().getOrDefault("share.mode", "ro");
-            result.add(Map.of("userId", sourceUserId, "shareMode", mode));
-        }
-        return result;
-    }
 
     /**
      * Returns the PV name for NFS-based storage types (nfs-k8s, nfs-home).
@@ -992,6 +854,96 @@ public class K8sApiClient {
             lustreCsiStorageClass, "ReadWriteMany", storageSize);
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
         LOG.info("Lustre CSI PVC created: " + pvcName + " (" + storageSize + ")");
+    }
+
+    /** Creates the user's PVC of an allocated storage type, with the allocated size; a no-op if it exists. */
+    public void createAllocatedPvc(String userId, String storageType, String size) {
+        switch (storageType) {
+            case "lustre-csi" -> createLustreCsiPvc(userId, size);
+            case "longhorn" -> createLonghornPvc(userId, size);
+            case "nfs-k8s" -> createNfsK8sPvPvc(userId, size);
+            default -> throw new IllegalArgumentException("storage type cannot be allocated: " + storageType);
+        }
+    }
+
+    /**
+     * The PV the user's PVC of this type is bound to, with the values needed to write it again; empty when the PVC
+     * does not exist or is not bound yet.
+     */
+    public Optional<com.scivicslab.k8spups.storage.PvRecord> boundPv(String userId, String storageType) {
+        PersistentVolumeClaim pvc = client.persistentVolumeClaims()
+            .inNamespace(userPodsNamespace).withName(userPvcName(userId, storageType)).get();
+        if (pvc == null || pvc.getSpec().getVolumeName() == null || pvc.getSpec().getVolumeName().isEmpty()) {
+            return Optional.empty();
+        }
+        PersistentVolume pv = client.persistentVolumes().withName(pvc.getSpec().getVolumeName()).get();
+        if (pv == null) return Optional.empty();
+        Quantity cap = pv.getSpec().getCapacity() != null ? pv.getSpec().getCapacity().get("storage") : null;
+        CSIPersistentVolumeSource csi = pv.getSpec().getCsi();
+        return Optional.of(new com.scivicslab.k8spups.storage.PvRecord(pv.getMetadata().getName(),
+            pv.getSpec().getStorageClassName(), cap != null ? cap.toString() : null,
+            csi != null ? csi.getDriver() : null, csi != null ? csi.getVolumeHandle() : null,
+            csi != null && csi.getVolumeAttributes() != null ? Map.copyOf(csi.getVolumeAttributes()) : Map.of()));
+    }
+
+    /**
+     * Gives the user back the Lustre CSI directory of a revoked allocation: binds a new PVC (the user's usual PVC name)
+     * to the PV of the record. If the PV object still exists it is reused after its old claim is removed; if it was
+     * deleted, it is written again from the record (Retain, so deleting the PVC again keeps it). Checked on a007 with
+     * the Lustre CSI driver exa.csi.ddn.com.
+     */
+    public void restoreLustreCsiPvc(String userId, com.scivicslab.k8spups.storage.PvRecord rec) {
+        String pvcName = userPvcName(userId, "lustre-csi");
+        if (client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() != null) {
+            throw new IllegalStateException("PVC already exists: " + pvcName);
+        }
+        PersistentVolume pv = client.persistentVolumes().withName(rec.name()).get();
+        if (pv == null) {
+            if (rec.csiDriver() == null || rec.volumeHandle() == null) {
+                throw new IllegalStateException("the record of PV " + rec.name() + " has no CSI values to write it again");
+            }
+            pv = new PersistentVolumeBuilder()
+                .withNewMetadata().withName(rec.name()).endMetadata()
+                .withNewSpec()
+                    .withCapacity(Map.of("storage", new Quantity(rec.capacity())))
+                    .withAccessModes("ReadWriteMany")
+                    .withPersistentVolumeReclaimPolicy("Retain")
+                    .withStorageClassName(rec.storageClass())
+                    .withVolumeMode("Filesystem")
+                    .withNewCsi().withDriver(rec.csiDriver()).withVolumeHandle(rec.volumeHandle())
+                        .withVolumeAttributes(rec.volumeAttributes()).endCsi()
+                .endSpec().build();
+            client.persistentVolumes().resource(pv).create();
+            LOG.info("PV written again from its record: " + rec.name());
+        } else if (pv.getSpec().getClaimRef() != null) {
+            String phase = pv.getStatus() != null ? pv.getStatus().getPhase() : "";
+            if (!"Released".equals(phase)) {
+                throw new IllegalStateException("PV " + rec.name() + " is " + phase + ", not Released");
+            }
+            pv.getSpec().setClaimRef(null);
+            client.persistentVolumes().resource(pv).update();
+            LOG.info("Old claim removed from PV " + rec.name());
+        }
+        PersistentVolumeClaim pvc = UserPvcs.build(pvcName, userPodsNamespace, userId, "lustre-csi",
+            rec.storageClass(), "ReadWriteMany", rec.capacity());
+        pvc.getSpec().setVolumeName(rec.name());
+        client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+        LOG.info("Lustre CSI PVC restored: " + pvcName + " -> " + rec.name());
+    }
+
+    /** Grows the user's PVC of this type to the size (the StorageClass must allow expansion); never shrinks it. */
+    public void growPvc(String userId, String storageType, String size) {
+        String pvcName = userPvcName(userId, storageType);
+        PersistentVolumeClaim pvc = client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get();
+        if (pvc == null) throw new IllegalStateException("PVC not found: " + pvcName);
+        Quantity current = pvc.getSpec().getResources().getRequests().get("storage");
+        Quantity wanted = new Quantity(size);
+        if (current != null && compareSizeGi(wanted, current) <= 0) {
+            throw new IllegalArgumentException("a PVC cannot be made smaller: " + current + " -> " + size);
+        }
+        pvc.getSpec().getResources().getRequests().put("storage", wanted);
+        client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).update();
+        LOG.info("PVC grown: " + pvcName + " -> " + size);
     }
 
     /**
@@ -1372,29 +1324,6 @@ public class K8sApiClient {
         }
     }
 
-    /**
-     * Expands a Longhorn PVC to the given size. Only Longhorn supports expansion.
-     * Fails silently if the PVC doesn't exist or the requested size is not larger.
-     */
-    public void expandLonghornPvc(String userId, String storageSize) {
-        String pvcName = userPvcName(userId, "longhorn");
-        PersistentVolumeClaim existing = client.persistentVolumeClaims()
-            .inNamespace(userPodsNamespace).withName(pvcName).get();
-        if (existing == null) {
-            LOG.warning("Cannot expand: Longhorn PVC not found: " + pvcName);
-            return;
-        }
-        Quantity currentSize = existing.getSpec().getResources().getRequests().get("storage");
-        Quantity requestedSize = new Quantity(storageSize);
-        if (currentSize != null && compareSizeGi(requestedSize, currentSize) > 0) {
-            existing.getSpec().getResources().getRequests().put("storage", requestedSize);
-            client.persistentVolumeClaims().inNamespace(userPodsNamespace)
-                .resource(existing).update();
-            LOG.info("Longhorn PVC expanded: " + pvcName + " from " + currentSize + " to " + storageSize);
-        } else {
-            LOG.info("No expansion needed for " + pvcName + " (current=" + currentSize + ", requested=" + storageSize + ")");
-        }
-    }
 
     /**
      * Deletes a user's PVC (and PV for NFS types).
@@ -1516,65 +1445,8 @@ public class K8sApiClient {
         return new HashMap<>(cm.getData());
     }
 
-    /**
-     * Saves the user's active storage type to the ConfigMap.
-     */
-    public void setActiveStorageType(String userId, String storageType) {
-        updateUserPref(userId, "activeStorageType", storageType);
-        // Legacy compat
-        updateUserPref(userId, "storageType", storageType);
-        LOG.info("Active storage type set for " + userId + ": " + storageType);
-    }
 
-    /**
-     * Saves the user's NFS share settings to their ConfigMap.
-     */
-    public void saveShareSettings(String userId, boolean enabled, String allowList, String mode) {
-        updateUserPref(userId, "share.enabled", String.valueOf(enabled));
-        updateUserPref(userId, "share.allow", allowList != null ? allowList.trim() : "");
-        updateUserPref(userId, "share.mode", mode != null ? mode : "ro");
-        LOG.info("Share settings saved for " + userId + ": enabled=" + enabled
-            + ", allow=" + allowList + ", mode=" + mode);
-    }
 
-    /**
-     * Saves the user's storage preferences to a ConfigMap.
-     * Creates the ConfigMap if it does not exist.
-     */
-    public void saveUserStoragePreference(String userId, String storageSize, String storageType) {
-        String cmName = userPrefsConfigMapName(userId);
-        ConfigMap existing = client.configMaps()
-            .inNamespace(userPodsNamespace)
-            .withName(cmName)
-            .get();
-        if (existing != null) {
-            if (existing.getData() == null) {
-                existing.setData(new HashMap<>());
-            }
-            existing.getData().put("storageSize", storageSize);
-            existing.getData().put("storageType", storageType);
-            existing.getData().put("activeStorageType", storageType);
-            existing.getData().put("longhorn.size", storageSize);
-            client.configMaps().inNamespace(userPodsNamespace)
-                .resource(existing).update();
-        } else {
-            ConfigMap cm = new ConfigMapBuilder()
-                .withNewMetadata()
-                    .withName(cmName)
-                    .withNamespace(userPodsNamespace)
-                    .addToLabels("app", "k8s-pups-user")
-                    .addToLabels("managed-by", "k8s-pups")
-                    .addToLabels("user", UserKey.encode(userId))
-                .endMetadata()
-                .addToData("storageSize", storageSize)
-                .addToData("storageType", storageType)
-                .addToData("activeStorageType", storageType)
-                .addToData("longhorn.size", storageSize)
-                .build();
-            client.configMaps().inNamespace(userPodsNamespace).resource(cm).create();
-        }
-        LOG.info("Saved storage preference for " + userId + ": " + storageSize + " (" + storageType + ")");
-    }
 
     /**
      * Updates a single key in the user's preferences ConfigMap.

@@ -91,6 +91,43 @@ public class LdapUserInfoClient {
     }
 
     /**
+     * The uid of every posixAccount under {@code base} (the users an administrator can give storage to), sorted.
+     * Throws when the directory cannot be read, so an empty list always means the directory has no such users.
+     */
+    public java.util.List<String> listUserNames(String base) {
+        Hashtable<String, String> env = new Hashtable<>();
+        env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
+        env.put(Context.PROVIDER_URL, ldapUrl);
+        env.put(Context.SECURITY_AUTHENTICATION, "simple");
+        env.put(Context.SECURITY_PRINCIPAL, bindDn);
+        env.put(Context.SECURITY_CREDENTIALS, bindPassword);
+        java.util.TreeSet<String> names = new java.util.TreeSet<>();
+        try {
+            DirContext ctx = new InitialDirContext(env);
+            try {
+                SearchControls controls = new SearchControls();
+                controls.setSearchScope(SearchControls.SUBTREE_SCOPE);
+                controls.setReturningAttributes(new String[]{"uid"});
+                NamingEnumeration<SearchResult> results = ctx.search(base, "(objectClass=posixAccount)", controls);
+                while (results.hasMore()) {
+                    Attribute uid = results.next().getAttributes().get("uid");
+                    if (uid != null) names.add(uid.get().toString());
+                }
+            } finally {
+                ctx.close();
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("LDAP user list under " + base + " failed: " + e.getMessage(), e);
+        }
+        return java.util.List.copyOf(names);
+    }
+
+    /** The search base of {@link #lookup}. */
+    public String baseDn() {
+        return baseDn;
+    }
+
+    /**
      * Escape special characters in LDAP filter values to prevent injection.
      */
     private static String escapeLdapFilter(String input) {

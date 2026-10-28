@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storage of {user}</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #1E293B; margin: 0; padding: 24px 32px; max-width: 900px; }
+        h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 28px; }
+        table { border-collapse: collapse; width: 100%; background: white; }
+        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #E2E8F0; font-size: .95rem; vertical-align: middle; }
+        th { color: #64748B; font-size: .8rem; text-transform: uppercase; }
+        form.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+        input, select { font-size: .9rem; padding: 4px 6px; }
+        input.size { width: 6em; }
+        .note { color: #64748B; font-size: .85rem; }
+        .none { color: #94A3B8; }
+        .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; }
+        .done { background: #DCFCE7; border: 1px solid #86EFAC; padding: 8px 12px; margin: 12px 0; }
+    </style>
+</head>
+<body>
+<p><a href="{basePath}/storage-admin">&larr; Storage of users</a></p>
+<h1>Storage of {user}</h1>
+{#if error}<div class="error" id="admin-error">{error}</div>{/if}
+{#if done}<div class="done" id="admin-done">{done}</div>{/if}
+
+<h2>Current storage</h2>
+{#if active.isEmpty}
+<p class="none">None.</p>
+{#else}
+<table id="active">
+    <tr><th>Storage</th><th>Size</th><th>State</th><th>Given by</th><th></th></tr>
+    {#for a in active}
+    <tr id="alloc-{a.id}">
+        <td>{a.name}</td><td>{a.storageSize}</td><td>{a.pvc}</td><td>{a.grantedBy}, {a.grantedAt}</td>
+        <td>
+            <form class="inline" method="post" action="{basePath}/storage-admin/a/{a.id}/resize">
+                <input type="hidden" name="user" value="{user}">
+                <input class="size" name="size" placeholder="100Gi" required>
+                <button type="submit">Enlarge</button>
+            </form>
+            <form class="inline" method="post" action="{basePath}/storage-admin/a/{a.id}/revoke"
+                  onsubmit="return confirm({#if a.type == 'longhorn'}'Take this storage away? Its files are deleted and cannot be restored.'{#else}'Take this storage away? Its files stay and the storage can be given back later.'{/if})">
+                <input type="hidden" name="user" value="{user}">
+                <button type="submit">Take away</button>
+            </form>
+        </td>
+    </tr>
+    {/for}
+</table>
+{/if}
+
+<h2>Give storage</h2>
+<form method="post" action="{basePath}/storage-admin/u/{user}/allocate" id="allocate">
+    <select name="type">
+        {#for t in types}<option value="{t.type}">{t.name}</option>{/for}
+    </select>
+    <input class="size" name="size" value="50Gi" required>
+    <button type="submit">Give</button>
+</form>
+<p class="note">Sizes are whole Gi or Ti, for example 50Gi or 2Ti.</p>
+
+<h2>Storage taken away</h2>
+{#if revoked.isEmpty}
+<p class="none">None.</p>
+{#else}
+<table id="revoked">
+    <tr><th>Storage</th><th>Size</th><th>Given</th><th>Taken away</th><th></th></tr>
+    {#for a in revoked}
+    <tr id="alloc-{a.id}">
+        <td>{a.name}</td><td>{a.storageSize}</td><td>{a.grantedBy}, {a.grantedAt}</td><td>{a.revokedBy}, {a.revokedAt}</td>
+        <td>{#if a.restorable}
+            <form class="inline" method="post" action="{basePath}/storage-admin/a/{a.id}/restore">
+                <input type="hidden" name="user" value="{user}">
+                <button type="submit">Give back</button>
+            </form>
+        {#else}<span class="none">cannot be given back</span>{/if}</td>
+    </tr>
+    {/for}
+</table>
+{/if}
+</body>
+</html>

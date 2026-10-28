@@ -1,6 +1,7 @@
 package com.scivicslab.k8spups.actor;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
+import com.scivicslab.k8spups.storage.StorageAllocationService;
 import com.scivicslab.k8spups.k8s.LdapUserInfoClient;
 import com.scivicslab.k8spups.dataset.DatasetService;
 import com.scivicslab.k8spups.settings.SettingsEnv;
@@ -208,6 +209,29 @@ public class SessionManager {
         return mounts;
     }
 
+    /** Type to size of the user's allocated storage; empty when the allocation service is missing or fails. */
+    private Map<String, String> allocatedStorage(ActorRef<SessionManager> self, String userId) {
+        ActorRef<StorageAllocationService> alloc = self.system().getActor(StorageAllocationService.ACTOR_NAME);
+        if (alloc == null) return Map.of();
+        try {
+            return alloc.ask(a -> a.activeTypes(userId)).get();
+        } catch (Exception e) {
+            LOG.warning("Storage allocations of " + userId + " could not be read: " + e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /** Creates the PVCs of the user's allocations that do not exist yet (and the default allocation at first use). */
+    private void ensureStorage(ActorRef<SessionManager> self, String userId) {
+        ActorRef<StorageAllocationService> alloc = self.system().getActor(StorageAllocationService.ACTOR_NAME);
+        if (alloc == null) return;
+        try {
+            alloc.ask(a -> { a.ensureStorage(userId); return null; }).get();
+        } catch (Exception e) {
+            LOG.warning("Storage of " + userId + " could not be prepared: " + e.getMessage());
+        }
+    }
+
     /**
      * Create a new session with optional storage type override and additional mounts.
      * Returns the SessionStatus, or null if creation was rejected.
@@ -276,6 +300,36 @@ public class SessionManager {
         String storageType = (overrideStorageType != null && !overrideStorageType.isBlank())
             ? overrideStorageType
             : storageInfo.getOrDefault("activeStorageType", storageInfo.get("storageType"));
+
+        // Storage comes only from an administrator's allocation: the primary storage and every additional storage mount
+        // must be an allocated type of the user. ensureStorage first gives a new user the default allocation and creates
+        // the missing PVCs of the allocations.
+        if (plugin.userDataMountPath() != null || (additionalMounts != null && !additionalMounts.isEmpty())) {
+            ensureStorage(self, userId);
+            Map<String, String> allocated = allocatedStorage(self, userId);
+            if (plugin.userDataMountPath() != null && (storageType == null || !allocated.containsKey(storageType))) {
+                if (overrideStorageType != null && !overrideStorageType.isBlank()) {
+                    LOG.warning("Rejected " + toolName + " for " + userId + ": storage " + overrideStorageType
+                        + " is not allocated to the user");
+                    return null;
+                }
+                storageType = allocated.isEmpty() ? null : allocated.keySet().iterator().next();
+                if (storageType == null) {
+                    LOG.warning("Rejected " + toolName + " for " + userId + ": no storage is allocated to the user");
+                    return null;
+                }
+            }
+            if (additionalMounts != null) {
+                for (MountSpec m : additionalMounts) {
+                    if (K8sApiClient.isDatasetStorageType(m.storageType())) continue;
+                    if (m.sharedFrom() != null || !allocated.containsKey(m.storageType())) {
+                        LOG.warning("Rejected " + toolName + " for " + userId + ": mount " + m.storageType()
+                            + " is not allocated to the user");
+                        return null;
+                    }
+                }
+            }
+        }
 
         // Look up POSIX account for workspace mounting (silently skip if not found)
         WorkspaceInfo workspaceInfo = null;
@@ -643,124 +697,16 @@ public class SessionManager {
         return k8sClient.getUserStorageInfo(userId);
     }
 
-    /** Saves the user's storage preferences. */
-    public void saveUserStoragePreference(String userId, String storageSize, String storageType) {
-        k8sClient.saveUserStoragePreference(userId, storageSize, storageType);
-    }
 
-    /** Sets the active storage type in the user's ConfigMap. */
-    public void setActiveStorageType(String userId, String storageType) {
-        k8sClient.setActiveStorageType(userId, storageType);
-    }
 
-    /**
-     * Creates a PVC for the user. Dispatches to type-specific method.
-     * @return error message or null on success
-     */
-    public String createUserPvc(String userId, String storageType, String storageSize) {
-        try {
-            switch (storageType) {
-                case "lustre-csi" -> k8sClient.createLustreCsiPvc(userId, storageSize);
-                case "longhorn" -> k8sClient.createLonghornPvc(userId, storageSize);
-                case "nfs-k8s" -> k8sClient.createNfsK8sPvPvc(userId, storageSize);
-                case "nfs-home" -> {
-                    if (ldapClient == null) {
-                        return "LDAP client not configured";
-                    }
-                    var wsInfo = ldapClient.lookup(userId);
-                    if (wsInfo.isEmpty()) {
-                        return "LDAP POSIX account not found for user: " + userId;
-                    }
-                    k8sClient.createNfsHomePvPvc(userId, wsInfo.get());
-                }
-                default -> { return "Unknown storage type: " + storageType; }
-            }
-            return null;
-        } catch (Exception e) {
-            LOG.warning("Failed to create PVC for " + userId + " (" + storageType + "): " + e.getMessage());
-            return "PVC creation failed: " + e.getMessage();
-        }
-    }
 
-    /**
-     * Deletes a user's PVC. Refuses if in use.
-     * @return error message or null on success
-     */
-    public String deleteUserPvc(String userId, String storageType) {
-        try {
-            boolean deleted = k8sClient.deleteUserPvc(userId, storageType);
-            return deleted ? null : "PVC not found or currently in use";
-        } catch (Exception e) {
-            LOG.warning("Failed to delete PVC for " + userId + " (" + storageType + "): " + e.getMessage());
-            return "PVC deletion failed: " + e.getMessage();
-        }
-    }
 
-    /** Expands a Longhorn PVC to the given size. */
-    public void expandUserPvc(String userId, String storageSize) {
-        k8sClient.expandLonghornPvc(userId, storageSize);
-    }
 
-    // -- Shared NFS operations --
 
-    /** Creates a shared NFS PV/PVC pointing to sourceUser's nfs-k8s directory. */
-    public String createSharedNfsPvPvc(String ownerUserId, String sourceUserId) {
-        try {
-            if (!k8sClient.isShareAllowed(sourceUserId, ownerUserId)) {
-                return "Share not allowed: " + sourceUserId + " has not granted access to " + ownerUserId;
-            }
-            // Check source user has nfs-k8s PVC
-            Map<String, String> srcPvc = k8sClient.getUserPvcInfo(sourceUserId, "nfs-k8s");
-            if (!"true".equals(srcPvc.get("exists"))) {
-                return "Source user " + sourceUserId + " does not have an nfs-k8s PVC";
-            }
-            Map<String, String> srcPrefs = k8sClient.getUserStorageInfo(sourceUserId);
-            boolean readOnly = "ro".equals(srcPrefs.getOrDefault("share.mode", "ro"));
-            k8sClient.createSharedNfsPvPvc(ownerUserId, sourceUserId, readOnly);
-            return null;
-        } catch (Exception e) {
-            LOG.warning("Failed to create shared NFS PV/PVC: " + e.getMessage());
-            return "Shared PVC creation failed: " + e.getMessage();
-        }
-    }
 
-    /** Deletes a shared NFS PV/PVC. Refuses if in use. */
-    public String deleteSharedNfsPvPvc(String ownerUserId, String sourceUserId) {
-        try {
-            if (k8sClient.isSharedPvcInUse(ownerUserId, sourceUserId)) {
-                return "Shared PVC is currently in use by a running Pod";
-            }
-            k8sClient.deleteSharedNfsPvPvc(ownerUserId, sourceUserId);
-            return null;
-        } catch (Exception e) {
-            LOG.warning("Failed to delete shared NFS PV/PVC: " + e.getMessage());
-            return "Shared PVC deletion failed: " + e.getMessage();
-        }
-    }
 
-    /** Lists shared PVCs owned by a user. */
-    public List<Map<String, String>> listSharedPvcs(String ownerUserId) {
-        return k8sClient.listSharedPvcs(ownerUserId);
-    }
 
-    /** Lists users who allow sharing their nfs-k8s volumes. */
-    public List<Map<String, String>> listSharableVolumes(String requestingUserId) {
-        return k8sClient.listSharableVolumes(requestingUserId);
-    }
 
-    /** Saves share settings for a user. */
-    public void saveShareSettings(String userId, boolean enabled, String allowList, String mode) {
-        k8sClient.saveShareSettings(userId, enabled, allowList, mode);
-    }
 
-    /** Returns the user's share settings from ConfigMap. */
-    public Map<String, String> getShareSettings(String userId) {
-        Map<String, String> prefs = k8sClient.getUserStorageInfo(userId);
-        Map<String, String> result = new HashMap<>();
-        result.put("share.enabled", prefs.getOrDefault("share.enabled", "false"));
-        result.put("share.allow", prefs.getOrDefault("share.allow", ""));
-        result.put("share.mode", prefs.getOrDefault("share.mode", "ro"));
-        return result;
-    }
 
 }
