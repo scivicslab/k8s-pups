@@ -884,6 +884,11 @@ public class DashboardResource {
             LOG.warning("Group memberships of " + userId + " could not be read: " + e.getMessage());
         }
         try {
+            // The datasets of the user's Visas count too: hand over the Visas of this login first, as a launch does.
+            // Read on the request thread: the identity is not available on the thread of the actor.
+            List<String> visas = currentVisas();
+            ActorRef<SessionManager> sm = actorSystem.getSessionManager();
+            sm.ask(mgr -> mgr.supplyVisas(sm, userId, visas)).get();
             ActorRef<com.scivicslab.k8spups.dataset.DatasetService> datasets = actorSystem.getDatasetManager();
             if (datasets != null) ds = datasets.ask(d -> d.mountableDatasets(userId)).get();
         } catch (Exception e) {
