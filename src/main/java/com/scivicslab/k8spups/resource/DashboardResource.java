@@ -84,6 +84,10 @@ public class DashboardResource {
     @ConfigProperty(name = "k8spups.display-name", defaultValue = "k8s-pups")
     String displayName;
 
+    // S3 endpoint the users reach with their own S3 tools; unset when the deployment offers users no S3 storage.
+    @ConfigProperty(name = "k8spups.object-storage-endpoint")
+    Optional<String> objectStorageEndpoint;
+
     @Context
     HttpHeaders httpHeaders;
 
@@ -833,6 +837,8 @@ public class DashboardResource {
         result.put("storageSizeOptions", actorSystem.getStorageSizeOptions());
         result.put("storageTypeOptions", actorSystem.getStorageTypeOptions());
         result.put("storageTypeNames", StorageTypes.names(actorSystem.getStorageTypeOptions()));
+        result.put("storageTypeDescriptions", StorageTypes.descriptions(actorSystem.getStorageTypeOptions()));
+        result.put("objectStorageEndpoint", objectStorageEndpoint.orElse(""));
         result.put("currentStorageSize", storageInfo.getOrDefault("longhorn.size",
             storageInfo.getOrDefault("storageSize", actorSystem.getDefaultStorageSize())));
         result.put("pvcInfo", allPvcInfo);

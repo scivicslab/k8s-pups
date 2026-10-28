@@ -5,27 +5,48 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Names shown to users for the storage types a deployment offers ({@code k8spups.storage-type-options}).
+ * Names and one-line descriptions shown to users for the storage types a deployment offers
+ * ({@code k8spups.storage-type-options}).
  *
  * The storage types differ between clusters: W206 offers {@code nfs-k8s} (NFS server stonefly520), {@code longhorn}
  * and {@code nfs-home}; the personal genome k0s cluster offers {@code lustre-csi} (Lustre CSI driver on
- * {@code lustre12}) and {@code longhorn}. Each key always means the same kind of storage, so its name is fixed here and
- * the deployment chooses only which keys it offers. The dashboard and the Storage Settings tool show these names, and
- * show no storage type the deployment does not offer.
+ * {@code lustre12}) and {@code longhorn}. Users choose storage by what it does, not by the product behind it, so the
+ * names say what the storage is for: {@code nfs-k8s} and {@code lustre-csi} are both shared file storage on their
+ * cluster. The deployment chooses only which keys it offers. The dashboard and the Storage Settings tool show these
+ * names, and show no storage type the deployment does not offer.
  */
 public final class StorageTypes {
 
     private static final Map<String, String> NAMES = Map.of(
-            "lustre-csi", "Lustre (k8s)",
-            "longhorn", "Longhorn",
-            "nfs-k8s", "NFS (k8s)",
-            "nfs-home", "NFS (Home)");
+            "lustre-csi", "Shared file storage",
+            "nfs-k8s", "Shared file storage",
+            "longhorn", "Block storage",
+            "nfs-home", "Home directory");
+
+    private static final String SHARED = "Files that several of your tools can use at the same time.";
+    private static final Map<String, String> DESCRIPTIONS = Map.of(
+            "lustre-csi", SHARED,
+            "nfs-k8s", SHARED,
+            "longhorn", "Faster storage that one tool at a time can use.",
+            "nfs-home", "Your home directory on the physical computers, used as the tool's storage.");
 
     private StorageTypes() {}
 
     /** The name shown for a storage type key; an unknown key is shown as it is. */
     public static String name(String type) {
         return NAMES.getOrDefault(type, type);
+    }
+
+    /** The one-line description shown for a storage type key; empty for an unknown key. */
+    public static String description(String type) {
+        return DESCRIPTIONS.getOrDefault(type, "");
+    }
+
+    /** Key to description for the offered types, in the order the deployment lists them. */
+    public static Map<String, String> descriptions(List<String> offered) {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (String type : offered) out.put(type, description(type));
+        return out;
     }
 
     /** Key to name for the offered types, in the order the deployment lists them. */

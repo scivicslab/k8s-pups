@@ -233,89 +233,37 @@
     <div id="content" style="display:none;">
         <h1 class="page-title">Storage Settings</h1>
         <p class="page-desc">
-            Manage your personal storage volumes. Create, expand, or delete PVCs as needed.
-            Storage type is selected per session when launching a tool.
+            Create or remove your storage here. You choose which storage a tool uses when you launch the tool.
         </p>
 
         <!-- 0. Current Status -->
         <div class="section" id="sec-overview">
             <div class="section-title">Current Status</div>
             <div class="section-desc">
-                Overview of your storage volumes and active sessions.
+                Your storage and the tools that are running.
             </div>
             <div id="overview-body"></div>
         </div>
 
-        <!-- Storage type sections: only the types the deployment offers are shown (render()). -->
-        <!-- Lustre CSI PVC -->
-        <div class="section storage-type-section" id="sec-lustre-csi" hidden>
-            <div class="section-title">
-                Lustre (k8s)
-                <span class="badge badge-blue" style="font-size:10px;">RWX / Shared</span>
-            </div>
-            <div class="section-desc">
-                A directory on the supercomputer's Lustre file system, created for you by the Lustre CSI driver.
-                Multi-Pod shared access (ReadWriteMany).
-            </div>
-            <div id="lustre-csi-body"></div>
-        </div>
+        <!-- One section per storage type the deployment offers; built by render(). -->
+        <div id="storage-sections"></div>
 
-        <!-- 1. Longhorn PVC -->
-        <div class="section storage-type-section" id="sec-longhorn" hidden>
-            <div class="section-title">
-                Longhorn (Block Storage)
-                <span class="badge badge-green" style="font-size:10px;">RWO / Fast</span>
-            </div>
+        <!-- S3 object storage: shown only when the deployment gives users an S3 endpoint. -->
+        <div class="section" id="sec-s3" hidden>
+            <div class="section-title">S3 object storage</div>
             <div class="section-desc">
-                High-performance block storage. Single Pod access only (ReadWriteOnce).
+                Buckets you reach with S3 tools such as aws-cli, boto3 and mc. Separate from the storage above.
             </div>
-            <div id="longhorn-body"></div>
-        </div>
-
-        <!-- 3. NFS k8s PVC -->
-        <div class="section storage-type-section" id="sec-nfs-k8s" hidden>
-            <div class="section-title">
-                NFS (k8s Dedicated)
-                <span class="badge badge-blue" style="font-size:10px;">RWX / Shared</span>
-            </div>
-            <div class="section-desc">
-                Network filesystem dedicated to k8s. Multi-Pod shared access (ReadWriteMany).
-            </div>
-            <div id="nfs-k8s-body"></div>
-        </div>
-
-        <!-- 4. NFS Home PVC -->
-        <div class="section storage-type-section" id="sec-nfs-home" hidden>
-            <div class="section-title">
-                NFS (Home Directory)
-                <span class="badge badge-blue" style="font-size:10px;">RWX / Shared</span>
-            </div>
-            <div class="section-desc">
-                Mount your physical cluster home directory. Requires LDAP POSIX account.
-            </div>
-            <div id="nfs-home-body"></div>
-        </div>
-
-        <!-- 5. Object Storage (S3) -->
-        <div class="section">
-            <div class="section-title">Object Storage (S3)</div>
-            <div class="section-desc">
-                S3-compatible object storage. Access via S3 API (aws-cli, boto3, mc).
-            </div>
-            <div class="s3-endpoint">Endpoint: minio.minio.svc.cluster.local:9000</div>
-            <div style="margin-top: 8px; font-size: 12px; color: var(--muted);">
-                Buckets are managed manually via mc/aws-cli. Independent of PVC lifecycle.
-            </div>
+            <div class="s3-endpoint">Endpoint: <span id="s3-endpoint"></span></div>
         </div>
 
         <!-- 6. My Share Settings -->
         <div class="section nfs-share-section" id="sec-my-share" hidden>
             <div class="section-title">
                 My Share Settings
-                <span class="badge badge-orange" style="font-size:10px;">NFS Sharing</span>
             </div>
             <div class="section-desc">
-                Allow other users to mount your NFS (k8s) volume as a shared read-only or read-write volume.
+                Let other users use your shared file storage, read-only or read-write.
             </div>
             <div id="my-share-body"></div>
         </div>
@@ -324,10 +272,9 @@
         <div class="section nfs-share-section" id="sec-available-shares" hidden>
             <div class="section-title">
                 Available Shared Volumes
-                <span class="badge badge-blue" style="font-size:10px;">From Others</span>
             </div>
             <div class="section-desc">
-                NFS volumes shared by other users that you can mount.
+                Shared file storage that other users let you use.
             </div>
             <div id="available-shares-body"></div>
         </div>
@@ -336,10 +283,9 @@
         <div class="section nfs-share-section" id="sec-mounted-shares" hidden>
             <div class="section-title">
                 My Mounted Shares
-                <span class="badge badge-green" style="font-size:10px;">Active</span>
             </div>
             <div class="section-desc">
-                Shared volumes you have mounted. These can be added as extra mounts when launching Pods.
+                Other users' storage you have added. You can attach it to a tool when you launch the tool.
             </div>
             <div id="mounted-shares-body"></div>
         </div>
@@ -351,12 +297,12 @@
 <!-- Delete Confirmation Modal -->
 <div class="modal-overlay" id="delete-modal">
     <div class="modal">
-        <h3>Remove PVC</h3>
-        <p id="delete-msg">This will remove the PVC. Type <strong>DELETE</strong> to confirm.</p>
+        <h3>Remove storage</h3>
+        <p id="delete-msg">Type <strong>DELETE</strong> to confirm.</p>
         <input type="text" id="delete-confirm-input" placeholder='Type "DELETE" to confirm'>
         <div class="btn-row">
             <button class="btn-cancel" onclick="closeDeleteModal()">Cancel</button>
-            <button class="btn btn-delete" id="delete-confirm-btn" onclick="confirmDelete()">Remove PVC</button>
+            <button class="btn btn-delete" id="delete-confirm-btn" onclick="confirmDelete()">Remove</button>
         </div>
     </div>
 </div>
@@ -371,13 +317,15 @@ fetch('config').then(function(r) { return r.json(); }).then(function(c) {
     loadSettings();
 }).catch(function() { loadSettings(); });
 
-// Names of the storage types; replaced by the controller's storageTypeNames, which lists only the offered types.
+// Names and descriptions of the storage types; replaced by the controller's storageTypeNames and
+// storageTypeDescriptions, which list only the offered types.
 var TYPE_LABELS = {
-    'lustre-csi': 'Lustre (k8s)',
-    'longhorn': 'Longhorn',
-    'nfs-k8s': 'NFS (k8s)',
-    'nfs-home': 'NFS (Home)'
+    'lustre-csi': 'Shared file storage',
+    'longhorn': 'Block storage',
+    'nfs-k8s': 'Shared file storage',
+    'nfs-home': 'Home directory'
 };
+var TYPE_DESCS = {};
 var OFFERED_TYPES = ['longhorn', 'nfs-k8s', 'nfs-home'];   // a controller without storageTypeNames offers these
 
 function showToast(msg, type) {
@@ -413,22 +361,29 @@ function render(data) {
         OFFERED_TYPES = Object.keys(data.storageTypeNames);
         OFFERED_TYPES.forEach(function(t) { TYPE_LABELS[t] = data.storageTypeNames[t]; });
     }
+    TYPE_DESCS = data.storageTypeDescriptions || {};
 
     // Overview (storage + sessions)
     renderOverview(pvc, data.activeSessions || []);
 
-    // Per-type sections, for the offered types only
-    document.querySelectorAll('.storage-type-section').forEach(function(sec) { sec.hidden = true; });
+    // One section per offered type
+    document.getElementById('storage-sections').innerHTML = OFFERED_TYPES.map(function(t) {
+        return '<div class="section" id="sec-' + t + '">' +
+            '<div class="section-title">' + TYPE_LABELS[t] + '</div>' +
+            '<div class="section-desc">' + (TYPE_DESCS[t] || '') + '</div>' +
+            '<div id="' + t + '-body"></div></div>';
+    }).join('');
     OFFERED_TYPES.forEach(function(t) {
-        var sec = document.getElementById('sec-' + t);
-        if (!sec) return;
-        sec.hidden = false;
         if (t === 'longhorn') renderLonghorn(pvc.longhorn || {}, sizeOpts, currentSize);
         else if (t === 'lustre-csi') renderLustreCsi(pvc['lustre-csi'] || {}, sizeOpts, currentSize);
         else renderNfsSection(t, pvc[t] || {});
     });
 
-    // Share sections: sharing is a feature of the NFS (k8s) volume
+    var s3 = data.objectStorageEndpoint || '';
+    document.getElementById('sec-s3').hidden = !s3;
+    document.getElementById('s3-endpoint').textContent = s3;
+
+    // Share sections: sharing is a feature of the NFS server's shared file storage (nfs-k8s)
     var sharing = OFFERED_TYPES.indexOf('nfs-k8s') >= 0;
     document.querySelectorAll('.nfs-share-section').forEach(function(sec) { sec.hidden = !sharing; });
     if (sharing) {
@@ -513,7 +468,7 @@ function renderLonghorn(info, sizeOpts, currentSize) {
             html += '<option value="' + s + '"' + (s === currentSize ? ' selected' : '') + '>' + s + '</option>';
         });
         html += '</select></div>';
-        html += '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'longhorn\')">Create Longhorn PVC</button></div>';
+        html += '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'longhorn\')">Create</button></div>';
         body.innerHTML = html;
         return;
     }
@@ -539,7 +494,7 @@ function renderLonghorn(info, sizeOpts, currentSize) {
     html += '<div class="btn-row">';
     html += '<button class="btn btn-expand" onclick="expandPvc()">Expand</button>';
     html += '<button class="btn btn-delete" ' + (inUse ? 'disabled title="Cannot delete while in use"' : '') +
-        ' onclick="openDeleteModal(\'longhorn\')">Delete PVC</button>';
+        ' onclick="openDeleteModal(\'longhorn\')">Remove</button>';
     html += '</div>';
     body.innerHTML = html;
 }
@@ -556,8 +511,7 @@ function renderLustreCsi(info, sizeOpts, currentSize) {
             html += '<option value="' + s + '"' + (s === currentSize ? ' selected' : '') + '>' + s + '</option>';
         });
         html += '</select></div>';
-        html += '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'lustre-csi\')">Create ' +
-            TYPE_LABELS['lustre-csi'] + ' PVC</button></div>';
+        html += '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'lustre-csi\')">Create</button></div>';
         body.innerHTML = html;
         return;
     }
@@ -575,7 +529,7 @@ function renderLustreCsi(info, sizeOpts, currentSize) {
     }
     html += '<div class="btn-row">';
     html += '<button class="btn btn-delete" ' + (inUse ? 'disabled title="Cannot remove while in use"' : '') +
-        ' onclick="openDeleteModal(\'lustre-csi\')">Remove PVC</button>';
+        ' onclick="openDeleteModal(\'lustre-csi\')">Remove</button>';
     html += '</div>';
     body.innerHTML = html;
 }
@@ -586,7 +540,7 @@ function renderNfsSection(type, info) {
     var inUse = info.inUse === 'true';
 
     if (!exists) {
-        body.innerHTML = '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'' + type + '\')">Create ' + TYPE_LABELS[type] + ' PVC</button></div>';
+        body.innerHTML = '<div class="btn-row"><button class="btn btn-create" onclick="createPvc(\'' + type + '\')">Create</button></div>';
         return;
     }
 
@@ -602,12 +556,12 @@ function renderNfsSection(type, info) {
     }
     html += '<div class="btn-row">';
     html += '<button class="btn btn-delete" ' + (inUse ? 'disabled title="Cannot remove while in use"' : '') +
-        ' onclick="openDeleteModal(\'' + type + '\')">Remove PVC</button>';
+        ' onclick="openDeleteModal(\'' + type + '\')">Remove</button>';
     html += '</div>';
 
     if (type === 'nfs-home') {
         html += '<div style="margin-top:10px;font-size:12px;color:var(--muted);">' +
-            'Note: Deleting removes only the PV/PVC objects. Files on NFS remain.</div>';
+            'Removing it does not delete the files in your home directory.</div>';
     }
     body.innerHTML = html;
 }
@@ -626,7 +580,7 @@ function createPvc(type) {
     })
     .then(function(r) {
         if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Create failed'); });
-        showToast(TYPE_LABELS[type] + ' PVC created', 'success');
+        showToast(TYPE_LABELS[type] + ' created', 'success');
         setTimeout(loadSettings, 1000);
     })
     .catch(function(err) { showToast(err.message, 'error'); });
@@ -643,7 +597,7 @@ function expandPvc() {
     })
     .then(function(r) {
         if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Expand failed'); });
-        showToast('Longhorn PVC expanded to ' + sel.value, 'success');
+        showToast(TYPE_LABELS['longhorn'] + ' expanded to ' + sel.value, 'success');
         setTimeout(loadSettings, 1000);
     })
     .catch(function(err) { showToast(err.message, 'error'); });
@@ -651,14 +605,14 @@ function expandPvc() {
 
 function openDeleteModal(type) {
     pendingDeleteType = type;
-    var msg = 'This will permanently delete the <strong>' + TYPE_LABELS[type] + '</strong> PVC';
+    var msg = 'This will remove your <strong>' + TYPE_LABELS[type] + '</strong>';
     if (type === 'nfs-home') {
-        msg += '. <br><em>Note: Only the PV/PVC objects are removed. NFS files remain.</em>';
+        msg += '. <br><em>Your files in the home directory stay.</em>';
     } else if (type === 'lustre-csi') {
-        msg += '. <br><em>Your tools can no longer reach its files. They stay on Lustre until an administrator removes them;' +
-            ' a new PVC gets a new, empty directory.</em>';
+        msg += '. <br><em>Your tools can no longer reach its files. The files stay until an administrator removes them;' +
+            ' if you create it again, you get a new, empty one.</em>';
     } else {
-        msg += ' and <strong>all data will be lost</strong>.';
+        msg += ' and <strong>all its files will be lost</strong>.';
     }
     msg += '<br><br>Type <strong>DELETE</strong> to confirm.';
     document.getElementById('delete-msg').innerHTML = msg;
@@ -689,7 +643,7 @@ function confirmDelete() {
     })
     .then(function(r) {
         if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Delete failed'); });
-        showToast(TYPE_LABELS[type] + ' PVC deleted', 'success');
+        showToast(TYPE_LABELS[type] + ' removed', 'success');
         setTimeout(loadSettings, 1000);
     })
     .catch(function(err) { showToast(err.message, 'error'); });
@@ -706,7 +660,7 @@ function renderMyShareSettings(settings) {
     var html = '<div class="form-group">';
     html += '<label class="toggle-label">';
     html += '<input type="checkbox" id="share-enabled" ' + (enabled ? 'checked' : '') + '>';
-    html += 'Enable sharing of my NFS (k8s) volume</label></div>';
+    html += 'Let other users use my shared file storage</label></div>';
     html += '<div class="form-group"><label>Allowed users (comma-separated, or * for all):</label>';
     html += '<input type="text" id="share-allow" value="' + allow + '" placeholder="user1,user2 or *"></div>';
     html += '<div class="form-group"><label>Access mode:</label>';

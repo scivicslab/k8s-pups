@@ -13,14 +13,22 @@ class StorageTypesTest {
     void namesTheOfferedTypesInTheirOrderOnly() {
         Map<String, String> names = StorageTypes.names(List.of("lustre-csi", "longhorn"));
         assertEquals(List.of("lustre-csi", "longhorn"), List.copyOf(names.keySet()));
-        assertEquals("Lustre (k8s)", names.get("lustre-csi"));
-        assertEquals("Longhorn", names.get("longhorn"));
+        assertEquals("Shared file storage", names.get("lustre-csi"));
+        assertEquals("Block storage", names.get("longhorn"));
         assertFalse(names.containsKey("nfs-home"));   // not offered, so not shown
     }
 
     @Test
     void anUnknownKeyIsShownAsItIs() {
         assertEquals("ceph-rbd", StorageTypes.name("ceph-rbd"));
-        assertEquals("NFS (k8s)", StorageTypes.name("nfs-k8s"));
+        assertEquals("Shared file storage", StorageTypes.name("nfs-k8s"));
+        assertEquals("", StorageTypes.description("ceph-rbd"));
+    }
+
+    @Test
+    void descriptionsFollowTheOfferedTypes() {
+        Map<String, String> d = StorageTypes.descriptions(List.of("longhorn"));
+        assertEquals(List.of("longhorn"), List.copyOf(d.keySet()));
+        assertFalse(d.get("longhorn").isEmpty());
     }
 }
