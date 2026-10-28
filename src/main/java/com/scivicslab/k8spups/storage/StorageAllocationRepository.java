@@ -19,7 +19,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Reads and writes {@code storage_allocation} and {@code tool_mount_preference} (PostgreSQL, plain JDBC). */
+/**
+ * Reads and writes {@code storage_allocation}, {@code storage_group}, {@code storage_group_member} and
+ * {@code tool_mount_preference} (PostgreSQL, plain JDBC).
+ */
 @ApplicationScoped
 public class StorageAllocationRepository {
 
@@ -97,6 +100,101 @@ public class StorageAllocationRepository {
                 ps.setString(7, r != null ? toJson(r.volumeAttributes()) : null);
                 ps.setLong(8, id);
             });
+    }
+
+    // ── Group storage (storage_group, storage_group_member) ──────────────────
+
+    /** One row of {@code storage_group}; {@code pv} is empty until its storage is taken away. */
+    public record Group(String name, String type, String size, String state, String createdBy, Instant createdAt,
+                        String revokedBy, Instant revokedAt, Optional<PvRecord> pv) {
+        public boolean active() { return "active".equals(state); }
+    }
+
+    /** One member of a group: {@code mode} is "rw" (read-write) or "ro" (read-only). */
+    public record Member(String group, String user, String mode, String addedBy, Instant addedAt) {}
+
+    private static final String GROUP_COLUMNS = "name, storage_type, size, state, created_by, created_at, revoked_by, "
+        + "revoked_at, pv_name, pv_storage_class, pv_capacity, pv_csi_driver, pv_volume_handle, pv_volume_attributes::text";
+
+    public List<Group> groups() {
+        return query("SELECT " + GROUP_COLUMNS + " FROM storage_group ORDER BY name", ps -> {},
+            StorageAllocationRepository::groupRow);
+    }
+
+    public Optional<Group> group(String name) {
+        return query("SELECT " + GROUP_COLUMNS + " FROM storage_group WHERE name = ?", ps -> ps.setString(1, name),
+            StorageAllocationRepository::groupRow).stream().findFirst();
+    }
+
+    public void insertGroup(String name, String size, String by) {
+        execute("INSERT INTO storage_group (name, size, created_by) VALUES (?, ?, ?)",
+            ps -> { ps.setString(1, name); ps.setString(2, size); ps.setString(3, by); });
+    }
+
+    public void resizeGroup(String name, String size) {
+        execute("UPDATE storage_group SET size = ? WHERE name = ? AND state = 'active'",
+            ps -> { ps.setString(1, size); ps.setString(2, name); });
+    }
+
+    /** Marks the group's storage taken away and keeps the PV it was bound to. */
+    public void revokeGroup(String name, String by, Optional<PvRecord> pv) {
+        execute("UPDATE storage_group SET state = 'revoked', revoked_by = ?, revoked_at = now(), pv_name = ?, "
+            + "pv_storage_class = ?, pv_capacity = ?, pv_csi_driver = ?, pv_volume_handle = ?, "
+            + "pv_volume_attributes = ?::jsonb WHERE name = ? AND state = 'active'", ps -> {
+                ps.setString(1, by);
+                PvRecord r = pv.orElse(null);
+                ps.setString(2, r != null ? r.name() : null);
+                ps.setString(3, r != null ? r.storageClass() : null);
+                ps.setString(4, r != null ? r.capacity() : null);
+                ps.setString(5, r != null ? r.csiDriver() : null);
+                ps.setString(6, r != null ? r.volumeHandle() : null);
+                ps.setString(7, r != null ? toJson(r.volumeAttributes()) : null);
+                ps.setString(8, name);
+            });
+    }
+
+    /** Gives the group its storage back (the history stays in the audit trail). */
+    public void reactivateGroup(String name) {
+        execute("UPDATE storage_group SET state = 'active', revoked_by = NULL, revoked_at = NULL WHERE name = ?",
+            ps -> ps.setString(1, name));
+    }
+
+    public List<Member> members(String group) {
+        return query("SELECT group_name, user_name, mode, added_by, added_at FROM storage_group_member "
+            + "WHERE group_name = ? ORDER BY user_name", ps -> ps.setString(1, group),
+            rs -> new Member(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                instant(rs.getTimestamp(5))));
+    }
+
+    /** Adds a member, or changes the mode of an existing one. */
+    public void putMember(String group, String user, String mode, String by) {
+        execute("INSERT INTO storage_group_member (group_name, user_name, mode, added_by) VALUES (?, ?, ?, ?) "
+            + "ON CONFLICT (group_name, user_name) DO UPDATE SET mode = EXCLUDED.mode, added_by = EXCLUDED.added_by, "
+            + "added_at = now()", ps -> {
+                ps.setString(1, group); ps.setString(2, user); ps.setString(3, mode); ps.setString(4, by);
+            });
+    }
+
+    public void removeMember(String group, String user) {
+        execute("DELETE FROM storage_group_member WHERE group_name = ? AND user_name = ?",
+            ps -> { ps.setString(1, group); ps.setString(2, user); });
+    }
+
+    /** Group name to mode, for the groups with active storage that the user is a member of. */
+    public Map<String, String> memberships(String user) {
+        Map<String, String> out = new java.util.LinkedHashMap<>();
+        query("SELECT m.group_name, m.mode FROM storage_group_member m JOIN storage_group g ON g.name = m.group_name "
+            + "WHERE m.user_name = ? AND g.state = 'active' ORDER BY m.group_name", ps -> ps.setString(1, user),
+            rs -> out.put(rs.getString(1), rs.getString(2)));
+        return out;
+    }
+
+    private static Group groupRow(ResultSet rs) throws SQLException {
+        String pvName = rs.getString(9);
+        Optional<PvRecord> pv = pvName == null ? Optional.empty() : Optional.of(new PvRecord(pvName, rs.getString(10),
+            rs.getString(11), rs.getString(12), rs.getString(13), fromJson(rs.getString(14))));
+        return new Group(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
+            instant(rs.getTimestamp(6)), rs.getString(7), instant(rs.getTimestamp(8)), pv);
     }
 
     /** The mounts the user chose for the tool the last time, as stored (a JSON array); "[]" when none. */

@@ -743,6 +743,14 @@ public class K8sApiClient {
         return UserKey.encode(userId);
     }
 
+    /** Storage type of a mount of a group's storage ({@link MountSpec#sharedFrom} names the group). */
+    public static final String GROUP_STORAGE_TYPE = "group";
+
+    /** The PVC of a group's storage: one Lustre CSI PVC per group, mounted by the Pods of its members. */
+    public String groupPvcName(String group) {
+        return "pups-group-" + sanitizeUserId(group) + "-lustre-csi";
+    }
+
     /**
      * Returns the PVC name for a given userId and storage type.
      * Format: pups-data-{sanitizedUserId}-{storageType}
@@ -750,49 +758,6 @@ public class K8sApiClient {
     public String userPvcName(String userId, String storageType) {
         return "pups-data-" + sanitizeUserId(userId) + "-" + storageType;
     }
-
-    /**
-     * Returns the PVC name for a shared NFS volume.
-     * Format: pups-shared-{ownerUserId}-from-{sourceUserId}
-     */
-    public String sharedPvcName(String ownerUserId, String sourceUserId) {
-        return "pups-shared-" + sanitizeUserId(ownerUserId) + "-from-" + sanitizeUserId(sourceUserId);
-    }
-
-    /**
-     * Returns the PV name for a shared NFS volume. Carries the user-pods namespace for
-     * the same reason as {@link #userPvName}: PVs are cluster-scoped and two instances
-     * can hold the same user names.
-     */
-    private String sharedPvName(String ownerUserId, String sourceUserId) {
-        return sharedPvcName(ownerUserId, sourceUserId) + "-" + userPodsNamespace;
-    }
-
-
-
-
-    /**
-     * Checks if a shared PVC is mounted by any running/pending Pod.
-     */
-    public boolean isSharedPvcInUse(String ownerUserId, String sourceUserId) {
-        String pvcName = sharedPvcName(ownerUserId, sourceUserId);
-        var pods = client.pods().inNamespace(userPodsNamespace)
-            .withLabel("managed-by", "k8s-pups").list().getItems();
-        for (var pod : pods) {
-            if (pod.getSpec() == null || pod.getSpec().getVolumes() == null) continue;
-            String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "";
-            if (!"Running".equals(phase) && !"Pending".equals(phase)) continue;
-            for (var vol : pod.getSpec().getVolumes()) {
-                if (vol.getPersistentVolumeClaim() != null
-                        && pvcName.equals(vol.getPersistentVolumeClaim().getClaimName())) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-
 
     /**
      * Returns the PV name for NFS-based storage types (nfs-k8s, nfs-home).
@@ -871,8 +836,13 @@ public class K8sApiClient {
      * does not exist or is not bound yet.
      */
     public Optional<com.scivicslab.k8spups.storage.PvRecord> boundPv(String userId, String storageType) {
+        return boundPvOf(userPvcName(userId, storageType));
+    }
+
+    /** {@link #boundPv} for a PVC given by name (a group's PVC). */
+    public Optional<com.scivicslab.k8spups.storage.PvRecord> boundPvOf(String pvcName) {
         PersistentVolumeClaim pvc = client.persistentVolumeClaims()
-            .inNamespace(userPodsNamespace).withName(userPvcName(userId, storageType)).get();
+            .inNamespace(userPodsNamespace).withName(pvcName).get();
         if (pvc == null || pvc.getSpec().getVolumeName() == null || pvc.getSpec().getVolumeName().isEmpty()) {
             return Optional.empty();
         }
@@ -893,7 +863,18 @@ public class K8sApiClient {
      * the Lustre CSI driver exa.csi.ddn.com.
      */
     public void restoreLustreCsiPvc(String userId, com.scivicslab.k8spups.storage.PvRecord rec) {
-        String pvcName = userPvcName(userId, "lustre-csi");
+        PersistentVolumeClaim pvc = UserPvcs.build(userPvcName(userId, "lustre-csi"), userPodsNamespace, userId,
+            "lustre-csi", rec.storageClass(), "ReadWriteMany", rec.capacity());
+        restorePvc(pvc, rec);
+    }
+
+    /** {@link #restoreLustreCsiPvc} for a group's PVC. */
+    public void restoreGroupPvc(String group, com.scivicslab.k8spups.storage.PvRecord rec) {
+        restorePvc(groupPvc(group, rec.storageClass(), rec.capacity()), rec);
+    }
+
+    private void restorePvc(PersistentVolumeClaim pvc, com.scivicslab.k8spups.storage.PvRecord rec) {
+        String pvcName = pvc.getMetadata().getName();
         if (client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() != null) {
             throw new IllegalStateException("PVC already exists: " + pvcName);
         }
@@ -924,16 +905,66 @@ public class K8sApiClient {
             client.persistentVolumes().resource(pv).update();
             LOG.info("Old claim removed from PV " + rec.name());
         }
-        PersistentVolumeClaim pvc = UserPvcs.build(pvcName, userPodsNamespace, userId, "lustre-csi",
-            rec.storageClass(), "ReadWriteMany", rec.capacity());
         pvc.getSpec().setVolumeName(rec.name());
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
         LOG.info("Lustre CSI PVC restored: " + pvcName + " -> " + rec.name());
     }
 
+    /** Whether a PVC of this name exists in the user Pods' namespace. */
+    public boolean pvcExists(String pvcName) {
+        return client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() != null;
+    }
+
+    /** A group's PVC object: Lustre CSI, ReadWriteMany, labelled with the group instead of a user. */
+    private PersistentVolumeClaim groupPvc(String group, String storageClass, String size) {
+        PersistentVolumeClaim pvc = UserPvcs.build(groupPvcName(group), userPodsNamespace, group, "lustre-csi",
+            storageClass, "ReadWriteMany", size);
+        Map<String, String> labels = pvc.getMetadata().getLabels();
+        labels.remove("user");
+        labels.put("group", UserKey.encode(group));
+        return pvc;
+    }
+
+    /** Creates the Lustre CSI PVC of a group's storage; a no-op if it exists. */
+    public void createGroupPvc(String group, String size) {
+        if (pvcExists(groupPvcName(group))) return;
+        client.persistentVolumeClaims().inNamespace(userPodsNamespace)
+            .resource(groupPvc(group, lustreCsiStorageClass, size)).create();
+        LOG.info("Group PVC created: " + groupPvcName(group) + " (" + size + ")");
+    }
+
+    /** The Pods that mount the group's PVC. */
+    public List<String> podsUsingGroupPvc(String group) {
+        String pvcName = groupPvcName(group);
+        List<String> out = new ArrayList<>();
+        for (Pod pod : client.pods().inNamespace(userPodsNamespace).list().getItems()) {
+            if (pod.getSpec() == null || pod.getSpec().getVolumes() == null) continue;
+            String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "";
+            if (!"Running".equals(phase) && !"Pending".equals(phase)) continue;
+            for (Volume v : pod.getSpec().getVolumes()) {
+                if (v.getPersistentVolumeClaim() != null && pvcName.equals(v.getPersistentVolumeClaim().getClaimName())) {
+                    out.add(pod.getMetadata().getName());
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Deletes the group's PVC; refused (false) while a Pod mounts it. */
+    public boolean deleteGroupPvc(String group) {
+        if (!podsUsingGroupPvc(group).isEmpty()) return false;
+        client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(groupPvcName(group)).delete();
+        LOG.info("Group PVC deleted: " + groupPvcName(group));
+        return true;
+    }
+
     /** Grows the user's PVC of this type to the size (the StorageClass must allow expansion); never shrinks it. */
     public void growPvc(String userId, String storageType, String size) {
-        String pvcName = userPvcName(userId, storageType);
+        growPvcNamed(userPvcName(userId, storageType), size);
+    }
+
+    /** {@link #growPvc} for a PVC given by name (a group's PVC). */
+    public void growPvcNamed(String pvcName, String size) {
         PersistentVolumeClaim pvc = client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get();
         if (pvc == null) throw new IllegalStateException("PVC not found: " + pvcName);
         Quantity current = pvc.getSpec().getResources().getRequests().get("storage");
@@ -1445,9 +1476,6 @@ public class K8sApiClient {
         return new HashMap<>(cm.getData());
     }
 
-
-
-
     /**
      * Updates a single key in the user's preferences ConfigMap.
      * Creates the ConfigMap if it does not exist.
@@ -1758,21 +1786,21 @@ public class K8sApiClient {
                 boolean dataset = isDatasetStorageType(extra.storageType());
                 String pvcName = DATASET_ROOT_STORAGE_TYPE.equals(extra.storageType()) ? datasetRootPvcName(info.userId())
                     : dataset ? datasetPvcName(info.userId())
-                    : extra.sharedFrom() != null
-                    ? sharedPvcName(info.userId(), extra.sharedFrom())
+                    : GROUP_STORAGE_TYPE.equals(extra.storageType()) ? groupPvcName(extra.sharedFrom())
                     : userPvcName(info.userId(), extra.storageType());
+                boolean readOnly = dataset || extra.readOnly();
 
                 var mountBuilder = new VolumeMountBuilder()
                     .withName(volName)
                     .withMountPath(extra.mountPath())
-                    .withReadOnly(dataset);
+                    .withReadOnly(readOnly);
                 if (extra.subPath() != null) mountBuilder.withSubPath(extra.subPath());
                 mounts.add(mountBuilder.build());
 
                 volumes.add(new VolumeBuilder().withName(volName)
                     .withNewPersistentVolumeClaim()
                         .withClaimName(pvcName)
-                        .withReadOnly(dataset)
+                        .withReadOnly(readOnly)
                     .endPersistentVolumeClaim()
                     .build());
                 idx++;

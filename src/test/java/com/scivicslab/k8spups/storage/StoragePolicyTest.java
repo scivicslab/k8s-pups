@@ -38,6 +38,17 @@ class StoragePolicyTest {
     }
 
     @Test
+    void groupNamesAndModes() {
+        assertTrue(StoragePolicy.validGroupName("lab1"));
+        assertFalse(StoragePolicy.validGroupName("1lab"));
+        assertFalse(StoragePolicy.validGroupName("lab-1"));
+        assertFalse(StoragePolicy.validGroupName("Lab"));
+        assertFalse(StoragePolicy.validGroupName("l"));
+        assertTrue(StoragePolicy.validMode("ro"));
+        assertFalse(StoragePolicy.validMode("x"));
+    }
+
+    @Test
     void defaultAllocation() {
         assertEquals(Optional.of(new StoragePolicy.Grant("lustre-csi", "50Gi")),
             StoragePolicy.parseDefault("lustre-csi:50Gi", A007));

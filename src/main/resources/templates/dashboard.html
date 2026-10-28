@@ -420,7 +420,7 @@
             <div class="tool-icon"><img src="{tool.icon}" alt="{tool.displayName}"></div>
             <div class="tool-name">{tool.displayName}</div>
             <div class="tool-desc">{tool.description}</div>
-            <form method="post" action="session/start">
+            <form method="post" action="session/start" data-remembered="{rememberedMounts.get(tool.name) ?: ''}">
                 <input type="hidden" name="tool" value="{tool.name}">
                 {#if tool.resourceProfiles.size > 1}
                 <select name="profile" class="profile-select">
@@ -448,6 +448,7 @@
                     {/for}
                 </select>
                 <div class="extra-mounts-container"></div>
+                <div class="mount-note" style="display:none;font-size:0.75rem;color:#B45309;margin-top:2px;"></div>
                 <button type="button" class="btn-add-mount" onclick="addExtraMount(this)"
                         style="font-size:0.75rem;color:#6366f1;background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px;">+ Add mount</button>
                 {/if}
@@ -517,6 +518,7 @@
 
 </main>
 
+<div id="mount-choices" data-json="{mountChoicesJson}" hidden></div>
 <script>
     // The user menu closes on a click outside it and on Escape.
     document.addEventListener('click', e => {
@@ -631,32 +633,48 @@
         setTimeout(pollSessionStatus, 3000);
     }
 
-    // Add extra mount row to a tool launch form
+    // Mounts the user can add (own storage, group storage, datasets), from the controller; each has a default path
+    var MOUNT_CHOICES = JSON.parse(document.getElementById('mount-choices').dataset.json || '[]');
+    function choiceOf(value) {
+        for (var i = 0; i < MOUNT_CHOICES.length; i++) if (MOUNT_CHOICES[i].value === value) return MOUNT_CHOICES[i];
+        return null;
+    }
+
+    // Add extra mount row to a tool launch form (value and path: a remembered choice, or empty)
     var extraMountCounter = 0;
-    function addExtraMount(btn) {
+    function addExtraMount(btn, value, path) {
         var container = btn.parentElement.querySelector('.extra-mounts-container');
         if (!container) return;
         var existingRows = container.querySelectorAll('.extra-mount-row');
         if (existingRows.length >= 3) return; // max 3 additional mounts
-        var idx = extraMountCounter++;
+        if (MOUNT_CHOICES.length === 0) return;
+        extraMountCounter++;
         var row = document.createElement('div');
         row.className = 'extra-mount-row';
         row.style.cssText = 'display:flex;gap:4px;align-items:center;margin-top:4px;';
-        // Storage type select - copy options from the primary select
-        var primarySelect = btn.parentElement.querySelector('select[name="storageType"]');
         var typeSelect = document.createElement('select');
         typeSelect.name = 'extraType_' + existingRows.length;
         typeSelect.className = 'profile-select';
         typeSelect.style.cssText = 'flex:1;font-size:0.8rem;';
-        typeSelect.innerHTML = primarySelect.innerHTML;
-        // Mount path input
+        MOUNT_CHOICES.forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = c.value;
+            opt.textContent = c.label;
+            typeSelect.appendChild(opt);
+        });
         var pathInput = document.createElement('input');
         pathInput.name = 'extraPath_' + existingRows.length;
         pathInput.className = 'profile-select';
         pathInput.style.cssText = 'flex:1;font-size:0.8rem;';
-        pathInput.placeholder = '/data';
         pathInput.required = true;
-        // Remove button
+        if (value) typeSelect.value = value;
+        pathInput.value = path || (choiceOf(typeSelect.value) || {}).path || '/data';
+        var lastDefault = (choiceOf(typeSelect.value) || {}).path;
+        typeSelect.onchange = function() {
+            var c = choiceOf(typeSelect.value);
+            if (c && (pathInput.value === '' || pathInput.value === lastDefault)) pathInput.value = c.path;
+            lastDefault = c ? c.path : lastDefault;
+        };
         var removeBtn = document.createElement('button');
         removeBtn.type = 'button';
         removeBtn.textContent = '\u00D7';
@@ -667,6 +685,25 @@
         row.appendChild(removeBtn);
         container.appendChild(row);
     }
+
+    // Each tool form starts with the choices of its last launch; those no longer allowed are left out and counted
+    document.querySelectorAll('form[data-remembered]').forEach(function(form) {
+        var raw = form.dataset.remembered;
+        if (!raw) return;
+        var r;
+        try { r = JSON.parse(raw); } catch (e) { return; }
+        var primary = form.querySelector('select[name="storageType"]');
+        if (primary && r.primary) primary.value = r.primary;
+        var btn = form.querySelector('.btn-add-mount');
+        if (btn) (r.mounts || []).forEach(function(m) { addExtraMount(btn, m.value, m.path); });
+        if (r.dropped > 0) {
+            var note = form.querySelector('.mount-note');
+            if (note) {
+                note.textContent = r.dropped + ' mount(s) of your last launch are no longer available and were left out.';
+                note.style.display = 'block';
+            }
+        }
+    });
     function reindexExtraMounts(container) {
         var rows = container.querySelectorAll('.extra-mount-row');
         rows.forEach(function(row, i) {

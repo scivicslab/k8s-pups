@@ -184,6 +184,103 @@ public class StorageAllocationService {
         return null;
     }
 
+    // ── Group storage ───────────────────────────────────────────────────────
+
+    public List<StorageAllocationRepository.Group> groups() {
+        return repository.groups();
+    }
+
+    public Optional<StorageAllocationRepository.Group> group(String name) {
+        return repository.group(name);
+    }
+
+    public List<StorageAllocationRepository.Member> members(String group) {
+        return repository.members(group);
+    }
+
+    /** Group name to mode ("rw" or "ro") of the groups with storage that the user is a member of. */
+    public Map<String, String> memberships(String user) {
+        return repository.memberships(user);
+    }
+
+    /** Creates a group with Lustre CSI storage of the size; returns an error message, or null when done. */
+    public String createGroup(String admin, String name, String size) {
+        if (!offered.contains("lustre-csi")) return "Group storage needs shared file storage (lustre-csi) on this cluster";
+        if (!StoragePolicy.validGroupName(name)) {
+            return "A group name is 2 to 31 lowercase letters and digits, starting with a letter";
+        }
+        if (!StoragePolicy.validSize(size)) return "Size must be a whole number of Gi or Ti, for example 500Gi";
+        if (repository.group(name).isPresent()) return "A group of this name exists";
+        repository.insertGroup(name, size, admin);
+        k8sClient.createGroupPvc(name, size);
+        audit.addAudit("group.create", admin, null, null, null, null, null, name + " " + size);
+        return null;
+    }
+
+    public String resizeGroup(String admin, String name, String size) {
+        var g = repository.group(name).filter(StorageAllocationRepository.Group::active).orElse(null);
+        if (g == null) return "No such group with storage";
+        if (!StoragePolicy.validSize(size)) return "Size must be a whole number of Gi or Ti, for example 500Gi";
+        if (StoragePolicy.gibibytes(size) <= StoragePolicy.gibibytes(g.size())) return "Storage can only be made larger";
+        try {
+            k8sClient.growPvcNamed(k8sClient.groupPvcName(name), size);
+        } catch (Exception e) {
+            return "The PVC could not be made larger: " + e.getMessage();
+        }
+        repository.resizeGroup(name, size);
+        audit.addAudit("group.resize", admin, null, null, null, null, null, name + " " + g.size() + " -> " + size);
+        return null;
+    }
+
+    /** Takes the group's storage away (refused while a Pod mounts it); the members stay. */
+    public String revokeGroup(String admin, String name) {
+        var g = repository.group(name).filter(StorageAllocationRepository.Group::active).orElse(null);
+        if (g == null) return "No such group with storage";
+        if (!k8sClient.podsUsingGroupPvc(name).isEmpty()) return "A tool is using this group's storage; stop it first";
+        Optional<PvRecord> pv = k8sClient.boundPvOf(k8sClient.groupPvcName(name));
+        if (k8sClient.pvcExists(k8sClient.groupPvcName(name)) && !k8sClient.deleteGroupPvc(name)) {
+            return "The PVC could not be deleted";
+        }
+        repository.revokeGroup(name, admin, pv);
+        audit.addAudit("group.revoke", admin, null, null, null, null, null,
+            name + " " + g.size() + pv.map(r -> " pv " + r.name()).orElse(""));
+        return null;
+    }
+
+    public String restoreGroup(String admin, String name) {
+        var g = repository.group(name).filter(x -> !x.active()).orElse(null);
+        if (g == null) return "No such group whose storage was taken away";
+        if (g.pv().isEmpty()) return "No PV was recorded when this group's storage was taken away";
+        try {
+            k8sClient.restoreGroupPvc(name, g.pv().get());
+        } catch (Exception e) {
+            return "The storage could not be restored: " + e.getMessage();
+        }
+        repository.reactivateGroup(name);
+        audit.addAudit("group.restore", admin, null, null, null, null, null, name + " " + g.size());
+        return null;
+    }
+
+    /** Adds a member or changes the member's mode; returns an error message, or null when done. */
+    public String putMember(String admin, String group, String user, String mode) {
+        if (repository.group(group).isEmpty()) return "No such group";
+        if (user == null || user.isBlank()) return "Give a user name";
+        if (!StoragePolicy.validMode(mode)) return "Mode is rw or ro";
+        repository.putMember(group, user.trim(), mode, admin);
+        audit.addAudit("group.member.add", admin, user.trim(), null, null, null, null, group + " " + mode);
+        return null;
+    }
+
+    /**
+     * Removes a member. The member's running tools that mount the group's storage are stopped by
+     * {@code SessionManager.enforceStorageAccess}.
+     */
+    public String removeMember(String admin, String group, String user) {
+        repository.removeMember(group, user);
+        audit.addAudit("group.member.remove", admin, user, null, null, null, null, group);
+        return null;
+    }
+
     /** The mounts the user chose for the tool the last time (a JSON array), "[]" when none. */
     public String mountPreference(String user, String tool) {
         return repository.mountPreference(user, tool);

@@ -279,6 +279,22 @@ public class DashboardResource {
         List<String> allocatedTypes = List.copyOf(allocated.keySet());
         data.put("storageTypeOptions", allocatedTypes);
         data.put("storageTypeNames", StorageTypes.names(allocatedTypes));
+        // The mounts the user can add (own storage, group storage, datasets) and each tool's remembered choices
+        List<MountChoices.Choice> choices = mountChoices(userId, allocatedTypes);
+        Map<String, String> remembered = new HashMap<>();
+        try {
+            ActorRef<StorageAllocationService> alloc = actorSystem.getStorageAllocations();
+            for (ToolPlugin t : tools) {
+                String json = alloc.ask(a -> a.mountPreference(userId, t.name())).get();
+                var r = MountChoices.remembered(json, choices, allocatedTypes);
+                remembered.put(t.name(), new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(r));
+            }
+            data.put("mountChoicesJson", new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(choices));
+        } catch (Exception e) {
+            LOG.warning("Mount choices of " + userId + " could not be read: " + e.getMessage());
+            data.put("mountChoicesJson", "[]");
+        }
+        data.put("rememberedMounts", remembered);
         data.put("currentStorageSize", storageInfo.getOrDefault("longhorn.size",
             storageInfo.getOrDefault("storageSize", actorSystem.getDefaultStorageSize())));
         data.put("pvcInfo", allPvcInfo);
@@ -337,6 +353,16 @@ public class DashboardResource {
                 LOG.warning("Session creation rejected: user=" + userId + ", tool=" + toolName);
                 return Response.seeOther(URI.create("/dashboard?error=create_failed")).build();
             }
+            // Remember the choices of this tool for its next launch
+            List<Map<String, String>> chosen = new ArrayList<>();
+            String[][] pairs = {{extraType0, extraPath0}, {extraType1, extraPath1}, {extraType2, extraPath2}};
+            for (String[] pair : pairs) {
+                if (pair[0] != null && !pair[0].isBlank() && pair[1] != null && !pair[1].isBlank()) {
+                    chosen.add(Map.of("value", pair[0], "path", pair[1].startsWith("/") ? pair[1] : "/" + pair[1]));
+                }
+            }
+            String json = MountChoices.toJson(storageType, chosen);
+            actorSystem.getStorageAllocations().tell(a -> a.saveMountPreference(userId, toolName, json));
         } catch (Exception e) {
             LOG.severe("Failed to start session: " + e.getMessage());
             return Response.seeOther(URI.create("/dashboard?error=start_failed")).build();
@@ -848,6 +874,24 @@ public class DashboardResource {
         return result;
     }
 
+    /** The mounts the user can add at launch: own allocated storage, group storage, datasets, granted files. */
+    private List<MountChoices.Choice> mountChoices(String userId, List<String> allocatedTypes) {
+        Map<String, String> groups = Map.of();
+        com.scivicslab.k8spups.dataset.DatasetService.Mounts ds = com.scivicslab.k8spups.dataset.DatasetService.Mounts.NONE;
+        try {
+            groups = actorSystem.getStorageAllocations().ask(a -> a.memberships(userId)).get();
+        } catch (Exception e) {
+            LOG.warning("Group memberships of " + userId + " could not be read: " + e.getMessage());
+        }
+        try {
+            ActorRef<com.scivicslab.k8spups.dataset.DatasetService> datasets = actorSystem.getDatasetManager();
+            if (datasets != null) ds = datasets.ask(d -> d.mountableDatasets(userId)).get();
+        } catch (Exception e) {
+            LOG.warning("Datasets of " + userId + " could not be read: " + e.getMessage());
+        }
+        return MountChoices.of(StorageTypes.names(allocatedTypes), groups, ds.datasets(), ds.fileView());
+    }
+
     private List<MountSpec> resolveAdditionalMounts(String... typePathPairs) {
         List<MountSpec> mounts = new ArrayList<>();
         // typePathPairs are: type0, path0, type1, path1, type2, path2
@@ -859,8 +903,18 @@ public class DashboardResource {
                 if (!path.startsWith("/")) {
                     path = "/" + path;
                 }
-                // The type is checked against the user's allocations when the session is created
-                mounts.add(new MountSpec(type, path, null));
+                // The choice is checked when the session is created: own storage against the allocations, a dataset
+                // against the grants, a group's storage against the memberships
+                if (type.startsWith(MountChoices.DATASET)) {
+                    mounts.add(new MountSpec(K8sApiClient.DATASET_ROOT_STORAGE_TYPE, path, null,
+                        type.substring(MountChoices.DATASET.length())));
+                } else if (type.equals(MountChoices.DATASET_FILES)) {
+                    mounts.add(new MountSpec(K8sApiClient.DATASET_STORAGE_TYPE, path, null));
+                } else if (type.startsWith(MountChoices.GROUP)) {
+                    mounts.add(new MountSpec(K8sApiClient.GROUP_STORAGE_TYPE, path, type.substring(MountChoices.GROUP.length())));
+                } else {
+                    mounts.add(new MountSpec(type, path, null));
+                }
             }
         }
         return mounts;

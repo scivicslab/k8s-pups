@@ -297,6 +297,9 @@ public class K8sPupsActorSystem {
         // Access to a dataset can expire; the sessions that still mount it are stopped
         scheduler.scheduleAtFixedRate("dataset-access-check", sessionManager,
             sm -> sm.enforceDatasetAccess(sessionManager), 60, 60, TimeUnit.SECONDS);
+        // Group storage: a member can be removed while a tool of the member mounts it
+        scheduler.scheduleAtFixedRate("storage-access-check", sessionManager,
+            sm -> sm.enforceStorageAccess(sessionManager), 60, 60, TimeUnit.SECONDS);
 
         // Clean up any orphaned resources left from a previous controller instance
         reconcileOrphanedResources();

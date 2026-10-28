@@ -267,6 +267,20 @@ public class DatasetService {
      * out, because a stale view could still list files whose grant was revoked. Datasets need no rebuild: the list
      * comes from the database at this moment.
      */
+    /**
+     * What the user may mount, for the launch form: the datasets the user may read now and whether files are granted
+     * one by one. Unlike {@link #prepareMounts} this changes nothing (no PV, no view).
+     */
+    public Mounts mountableDatasets(String userId) {
+        if (!isAvailable()) return Mounts.NONE;
+        try {
+            return new Mounts(activeDatasets(userId), !repository.activePaths(userId).isEmpty());
+        } catch (Exception e) {
+            LOG.warning("Datasets of " + userId + " could not be read: " + e.getMessage());
+            return Mounts.NONE;
+        }
+    }
+
     public Mounts prepareMounts(String userId) {
         if (!isAvailable()) return Mounts.NONE;
         try {

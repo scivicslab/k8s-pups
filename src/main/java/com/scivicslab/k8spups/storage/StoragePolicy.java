@@ -53,6 +53,21 @@ public final class StoragePolicy {
         return Optional.of(new Grant(parts[0], parts[1]));
     }
 
+    private static final Pattern GROUP = Pattern.compile("[a-z][a-z0-9]{1,30}");
+
+    /**
+     * A group name: lowercase letters and digits, starting with a letter. It becomes part of the PVC name and the
+     * default mount path {@code /groups/<name>}, so it carries no characters that need escaping in either.
+     */
+    public static boolean validGroupName(String name) {
+        return name != null && GROUP.matcher(name).matches();
+    }
+
+    /** A member's mode: "rw" read-write or "ro" read-only. */
+    public static boolean validMode(String mode) {
+        return "rw".equals(mode) || "ro".equals(mode);
+    }
+
     /** Gibibytes of a size accepted by {@link #validSize}. */
     public static long gibibytes(String size) {
         long n = Long.parseLong(size.substring(0, size.length() - 2));

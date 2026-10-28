@@ -179,32 +179,58 @@ public class SessionManager {
     }
 
     /**
-     * Returns the user's additional mounts plus the read-only dataset mounts: every dataset the user may read as a
-     * subPath mount, and the file-level view when files are granted one by one. Mounts of the dataset types requested
-     * by the user are dropped: only the controller adds them.
+     * The mounts the user chose at launch, checked: a dataset only if the user may read it now (from the database or a
+     * Visa), the file-level view only if files are granted one by one, a group's storage only if the user is a member
+     * (read-only for a read-only member). Nothing is mounted that the user did not choose. Returns null when a chosen
+     * mount is not allowed, so the session is refused instead of starting without it.
      */
-    private List<MountSpec> withDatasetMount(ActorRef<SessionManager> self, String userId,
-                                             List<MountSpec> requested) {
+    private List<MountSpec> resolveMounts(ActorRef<SessionManager> self, String userId, List<MountSpec> requested) {
         List<MountSpec> mounts = new ArrayList<>();
-        if (requested != null) {
-            for (MountSpec m : requested) {
-                if (!K8sApiClient.isDatasetStorageType(m.storageType())) mounts.add(m);
+        if (requested == null || requested.isEmpty()) return mounts;
+        boolean wantsDatasets = requested.stream().anyMatch(m -> K8sApiClient.isDatasetStorageType(m.storageType()));
+        DatasetService.Mounts granted = DatasetService.Mounts.NONE;
+        if (wantsDatasets) {
+            ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
+            try {
+                if (datasets != null) granted = datasets.ask(d -> d.prepareMounts(userId)).get();
+            } catch (Exception e) {
+                LOG.warning("Dataset mounts failed for " + userId + ": " + e.getMessage());
+                return null;
             }
         }
-        ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
-        if (datasets == null) return mounts;
-        try {
-            DatasetService.Mounts granted = datasets.ask(d -> d.prepareMounts(userId)).get();
-            for (String dataset : granted.datasets()) {
-                // each dataset: a read-only subPath of the user's volume on the original directory
-                mounts.add(new MountSpec(K8sApiClient.DATASET_ROOT_STORAGE_TYPE,
-                    k8sClient.datasetMountPath() + "/" + dataset, null, dataset));
+        Map<String, String> groups = Map.of();
+        if (requested.stream().anyMatch(m -> K8sApiClient.GROUP_STORAGE_TYPE.equals(m.storageType()))) {
+            ActorRef<StorageAllocationService> alloc = self.system().getActor(StorageAllocationService.ACTOR_NAME);
+            try {
+                if (alloc != null) groups = alloc.ask(a -> a.memberships(userId)).get();
+            } catch (Exception e) {
+                LOG.warning("Group memberships of " + userId + " could not be read: " + e.getMessage());
+                return null;
             }
-            if (granted.fileView()) {
-                mounts.add(new MountSpec(K8sApiClient.DATASET_STORAGE_TYPE, k8sClient.datasetFilesMountPath(), null));
+        }
+        for (MountSpec m : requested) {
+            if (K8sApiClient.DATASET_ROOT_STORAGE_TYPE.equals(m.storageType())) {
+                if (m.subPath() == null || !granted.datasets().contains(m.subPath())) {
+                    LOG.warning("Refused mount of dataset " + m.subPath() + " for " + userId + ": not granted");
+                    return null;
+                }
+                mounts.add(new MountSpec(m.storageType(), m.mountPath(), null, m.subPath(), true));
+            } else if (K8sApiClient.DATASET_STORAGE_TYPE.equals(m.storageType())) {
+                if (!granted.fileView()) {
+                    LOG.warning("Refused mount of the granted files for " + userId + ": no files are granted");
+                    return null;
+                }
+                mounts.add(new MountSpec(m.storageType(), m.mountPath(), null, null, true));
+            } else if (K8sApiClient.GROUP_STORAGE_TYPE.equals(m.storageType())) {
+                String mode = groups.get(m.sharedFrom());
+                if (mode == null) {
+                    LOG.warning("Refused mount of group " + m.sharedFrom() + " for " + userId + ": not a member");
+                    return null;
+                }
+                mounts.add(new MountSpec(m.storageType(), m.mountPath(), m.sharedFrom(), null, "ro".equals(mode)));
+            } else {
+                mounts.add(m);   // the user's own storage, checked against the allocations in createSession
             }
-        } catch (Exception e) {
-            LOG.warning("Dataset mounts failed for " + userId + ": " + e.getMessage());
         }
         return mounts;
     }
@@ -321,7 +347,8 @@ public class SessionManager {
             }
             if (additionalMounts != null) {
                 for (MountSpec m : additionalMounts) {
-                    if (K8sApiClient.isDatasetStorageType(m.storageType())) continue;
+                    if (K8sApiClient.isDatasetStorageType(m.storageType())
+                            || K8sApiClient.GROUP_STORAGE_TYPE.equals(m.storageType())) continue;   // see resolveMounts
                     if (m.sharedFrom() != null || !allocated.containsKey(m.storageType())) {
                         LOG.warning("Rejected " + toolName + " for " + userId + ": mount " + m.storageType()
                             + " is not allocated to the user");
@@ -337,9 +364,14 @@ public class SessionManager {
             workspaceInfo = ldapClient.lookup(userId).orElse(null);
         }
 
+        List<MountSpec> mounts = resolveMounts(self, userId, additionalMounts);
+        if (mounts == null) {
+            LOG.warning("Rejected " + toolName + " for " + userId + ": a chosen mount is not allowed");
+            return null;
+        }
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType, workspaceInfo,
-            withDatasetMount(self, userId, additionalMounts),
+            mounts,
             withS3Access(self, userId, withSharedSettings(self, toolName, toolConfigEnv)));
         Session actor = new Session(info, k8sClient);
 
@@ -597,6 +629,40 @@ public class SessionManager {
             if (!revokedUsers.contains(entry.getValue())) continue;
             LOG.info("Stopping session " + entry.getKey() + ": its user lost access to a mounted dataset");
             destroySession(self, entry.getKey(), "access to a mounted dataset was taken away or expired");
+        }
+    }
+
+    /**
+     * Stops the sessions that mount a group's storage their user may no longer use as mounted: the user was removed
+     * from the group, the group's storage was taken away, or the user became read-only while the Pod mounts it
+     * read-write. Called periodically and after an administrator changes a group.
+     */
+    public void enforceStorageAccess(ActorRef<SessionManager> self) {
+        ActorRef<StorageAllocationService> alloc = self.system().getActor(StorageAllocationService.ACTOR_NAME);
+        if (alloc == null) return;
+        Map<String, Map<String, String>> byUser = new HashMap<>();
+        List<String> stop = new ArrayList<>();
+        for (ActorRef<Session> ref : sessions(self)) {
+            try {
+                Map<String, Boolean> mounted = ref.ask(Session::getGroupMounts).get();
+                if (mounted.isEmpty()) continue;
+                String user = ref.ask(Session::getUserId).get();
+                Map<String, String> member = byUser.get(user);
+                if (member == null) {
+                    member = alloc.ask(a -> a.memberships(user)).get();
+                    byUser.put(user, member);
+                }
+                for (var e : mounted.entrySet()) {
+                    String mode = member.get(e.getKey());
+                    if (mode == null || ("ro".equals(mode) && !e.getValue())) { stop.add(sessionIdOf(ref)); break; }
+                }
+            } catch (Exception e) {
+                LOG.warning("Group storage check failed for " + ref.getName() + ": " + e.getMessage());
+            }
+        }
+        for (String id : stop) {
+            LOG.info("Stopping session " + id + ": its user may no longer use a mounted group storage as mounted");
+            destroySession(self, id, "access to a mounted group storage was taken away");
         }
     }
 

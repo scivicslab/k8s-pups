@@ -120,14 +120,15 @@ public class Session {
                     if (K8sApiClient.isDatasetStorageType(extra.storageType())) {
                         continue;
                     }
-                    // PVC existence check
-                    String extraPvcName = extra.sharedFrom() != null
-                        ? k8sClient.sharedPvcName(info.userId(), extra.sharedFrom())
+                    // PVC existence check (a group's PVC is created when an administrator gives the group storage)
+                    boolean group = K8sApiClient.GROUP_STORAGE_TYPE.equals(extra.storageType());
+                    String extraPvcName = group ? k8sClient.groupPvcName(extra.sharedFrom())
                         : k8sClient.userPvcName(info.userId(), extra.storageType());
-                    Map<String, String> extraPvcInfo = k8sClient.getUserPvcInfo(info.userId(), extra.storageType());
-                    if (extra.sharedFrom() == null && !"true".equals(extraPvcInfo.get("exists"))) {
+                    boolean exists = group ? k8sClient.pvcExists(extraPvcName)
+                        : "true".equals(k8sClient.getUserPvcInfo(info.userId(), extra.storageType()).get("exists"));
+                    if (!exists) {
                         state = SessionState.FAILED;
-                        memo = "Additional mount PVC not found: " + extraPvcName;
+                        memo = "Storage to mount not found: " + extraPvcName;
                         return;
                     }
                     // RWO conflict check for Longhorn
@@ -313,6 +314,17 @@ public class Session {
             .anyMatch(m -> K8sApiClient.DATASET_STORAGE_TYPE.equals(m.storageType()));
         return new com.scivicslab.k8spups.dataset.DatasetService.SessionMounts(
             info.userId(), info.sessionId(), info.podName(), info.toolPlugin().name(), getDatasetNames(), fileView);
+    }
+
+    /** Group name to read-only flag of the group storage this session mounted (fixed when the Pod was created). */
+    public Map<String, Boolean> getGroupMounts() {
+        Map<String, Boolean> groups = new java.util.HashMap<>();
+        if (info.additionalMounts() != null) {
+            for (MountSpec m : info.additionalMounts()) {
+                if (K8sApiClient.GROUP_STORAGE_TYPE.equals(m.storageType())) groups.put(m.sharedFrom(), m.readOnly());
+            }
+        }
+        return groups;
     }
 
     /** Names of the whole datasets this session mounted (fixed when the Pod was created). */

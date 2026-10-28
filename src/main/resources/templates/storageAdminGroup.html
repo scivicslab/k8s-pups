@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Group {name}</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #1E293B; margin: 0; padding: 24px 32px; max-width: 900px; }
+        h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 28px; }
+        table { border-collapse: collapse; width: 100%; background: white; }
+        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #E2E8F0; font-size: .95rem; vertical-align: middle; }
+        th { color: #64748B; font-size: .8rem; text-transform: uppercase; }
+        form.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+        input, select { font-size: .9rem; padding: 4px 6px; } input.size { width: 6em; }
+        .note { color: #64748B; font-size: .85rem; } .none { color: #94A3B8; }
+        .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; }
+        .done { background: #DCFCE7; border: 1px solid #86EFAC; padding: 8px 12px; margin: 12px 0; }
+    </style>
+</head>
+<body>
+<p><a href="{basePath}/storage-admin/groups">&larr; Group storage</a></p>
+<h1>Group {name}</h1>
+{#if error}<div class="error" id="group-error">{error}</div>{/if}
+{#if done}<div class="done" id="group-done">{done}</div>{/if}
+
+<h2>Storage</h2>
+{#if active}
+<p id="group-storage">Shared file storage, {storageSize}, {pvc}</p>
+<form class="inline" method="post" action="{basePath}/storage-admin/g/{name}/resize">
+    <input class="size" name="size" placeholder="1Ti" required>
+    <button type="submit">Enlarge</button>
+</form>
+<form class="inline" method="post" action="{basePath}/storage-admin/g/{name}/revoke"
+      onsubmit="return confirm('Take this group\'s storage away? Its files stay and it can be given back later.')">
+    <button type="submit">Take away</button>
+</form>
+{#else}
+<p id="group-storage">Taken away ({revoked}).</p>
+{#if restorable}
+<form method="post" action="{basePath}/storage-admin/g/{name}/restore"><button type="submit">Give back</button></form>
+{/if}
+{/if}
+
+<h2>Members</h2>
+{#if members.isEmpty}
+<p class="none">No members.</p>
+{#else}
+<table id="members">
+    <tr><th>User</th><th>Access</th><th>Added by</th><th></th></tr>
+    {#for m in members}
+    <tr><td>{m.user}</td><td>{#if m.mode == 'ro'}read-only{#else}read-write{/if}</td><td>{m.addedBy}</td>
+        <td><form class="inline" method="post" action="{basePath}/storage-admin/g/{name}/member/remove"
+                  onsubmit="return confirm('Remove {m.user}? Their tools that mount this storage are stopped.')">
+            <input type="hidden" name="user" value="{m.user}"><button type="submit">Remove</button></form></td></tr>
+    {/for}
+</table>
+{/if}
+<h2>Add a member or change access</h2>
+<form method="post" action="{basePath}/storage-admin/g/{name}/member" id="add-member">
+    <input name="user" placeholder="user name" required>
+    <select name="mode"><option value="rw">read-write</option><option value="ro">read-only</option></select>
+    <button type="submit">Save</button>
+</form>
+</body>
+</html>

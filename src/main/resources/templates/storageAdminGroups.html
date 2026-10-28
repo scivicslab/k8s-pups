@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Group storage</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #1E293B; margin: 0; padding: 24px 32px; max-width: 900px; }
+        h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 28px; }
+        table { border-collapse: collapse; width: 100%; background: white; margin-top: 12px; }
+        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #E2E8F0; font-size: .95rem; }
+        th { color: #64748B; font-size: .8rem; text-transform: uppercase; }
+        input { font-size: .95rem; padding: 5px 8px; } input.size { width: 6em; }
+        .note { color: #64748B; font-size: .85rem; } .none { color: #94A3B8; }
+        .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; }
+        .done { background: #DCFCE7; border: 1px solid #86EFAC; padding: 8px 12px; margin: 12px 0; }
+    </style>
+</head>
+<body>
+<p><a href="{basePath}/storage-admin">&larr; Storage of users</a></p>
+<h1>Group storage</h1>
+<p class="note">Storage that the members of a group (for example a laboratory) mount next to their own storage, at
+    /groups/&lt;group&gt;. Only administrators create groups and choose their members.</p>
+{#if error}<div class="error" id="groups-error">{error}</div>{/if}
+{#if done}<div class="done" id="groups-done">{done}</div>{/if}
+{#if rows.isEmpty}
+<p class="none">No groups yet.</p>
+{#else}
+<table id="groups">
+    <tr><th>Group</th><th>Size</th><th>State</th><th>Members</th></tr>
+    {#for r in rows}
+    <tr><td><a href="{basePath}/storage-admin/g/{r.name}">{r.name}</a></td><td>{r.storageSize}</td><td>{r.state}</td><td>{r.memberCount}</td></tr>
+    {/for}
+</table>
+{/if}
+<h2>Create a group</h2>
+<form method="post" action="{basePath}/storage-admin/groups/create" id="create-group">
+    <input name="name" placeholder="lab1" required>
+    <input class="size" name="size" value="500Gi" required>
+    <button type="submit">Create</button>
+</form>
+<p class="note">A group name is 2 to 31 lowercase letters and digits, starting with a letter. The storage is shared
+    file storage; sizes are whole Gi or Ti.</p>
+</body>
+</html>
