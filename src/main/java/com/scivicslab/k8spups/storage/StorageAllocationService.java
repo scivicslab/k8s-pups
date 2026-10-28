@@ -194,6 +194,11 @@ public class StorageAllocationService {
         return repository.group(name);
     }
 
+    /** Records that the user opened the dashboard, so that the group member list can show who never logged in. */
+    public void recordLogin(String user) {
+        repository.recordLogin(user);
+    }
+
     public List<StorageAllocationRepository.Member> members(String group) {
         return repository.members(group);
     }

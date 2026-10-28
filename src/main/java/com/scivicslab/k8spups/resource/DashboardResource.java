@@ -221,7 +221,7 @@ public class DashboardResource {
         Map<String, String> allocated = Collections.emptyMap();
         try {
             ActorRef<StorageAllocationService> alloc = actorSystem.getStorageAllocations();
-            alloc.ask(a -> { a.ensureStorage(userId); return null; }).get();
+            alloc.ask(a -> { a.recordLogin(userId); a.ensureStorage(userId); return null; }).get();
             allocated = alloc.ask(a -> a.activeTypes(userId)).get();
         } catch (Exception e) {
             LOG.warning("Failed to prepare the storage of " + userId + ": " + e.getMessage());

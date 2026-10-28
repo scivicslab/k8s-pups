@@ -12,7 +12,7 @@
         th { color: #64748B; font-size: .8rem; text-transform: uppercase; }
         form.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
         input, select { font-size: .9rem; padding: 4px 6px; } input.size { width: 6em; }
-        .note { color: #64748B; font-size: .85rem; } .none { color: #94A3B8; }
+        .note { color: #64748B; font-size: .85rem; } .none { color: #94A3B8; } .never { color: #B45309; }
         .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; }
         .done { background: #DCFCE7; border: 1px solid #86EFAC; padding: 8px 12px; margin: 12px 0; }
     </style>
@@ -46,9 +46,10 @@
 <p class="none">No members.</p>
 {#else}
 <table id="members">
-    <tr><th>User</th><th>Access</th><th>Added by</th><th></th></tr>
+    <tr><th>User</th><th>Access</th><th>Last login</th><th>Added by</th><th></th></tr>
     {#for m in members}
-    <tr><td>{m.user}</td><td>{#if m.mode == 'ro'}read-only{#else}read-write{/if}</td><td>{m.addedBy}</td>
+    <tr><td>{m.user}</td><td>{#if m.mode == 'ro'}read-only{#else}read-write{/if}</td>
+        <td>{#if m.lastLogin == null}<span class="never">never logged in</span>{#else}{m.lastLoginText} UTC{/if}</td><td>{m.addedBy}</td>
         <td><form class="inline" method="post" action="{basePath}/storage-admin/g/{name}/member/remove"
                   onsubmit="return confirm('Remove {m.user}? Their tools that mount this storage are stopped.')">
             <input type="hidden" name="user" value="{m.user}"><button type="submit">Remove</button></form></td></tr>
@@ -61,5 +62,7 @@
     <select name="mode"><option value="rw">read-write</option><option value="ro">read-only</option></select>
     <button type="submit">Save</button>
 </form>
+<p class="note">The name is not checked: a member who has not logged in yet is shown as "never logged in". Check
+    the spelling of such a name.</p>
 </body>
 </html>

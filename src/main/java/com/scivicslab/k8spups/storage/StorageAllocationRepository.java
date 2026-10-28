@@ -110,8 +110,16 @@ public class StorageAllocationRepository {
         public boolean active() { return "active".equals(state); }
     }
 
-    /** One member of a group: {@code mode} is "rw" (read-write) or "ro" (read-only). */
-    public record Member(String group, String user, String mode, String addedBy, Instant addedAt) {}
+    /**
+     * One member of a group: {@code mode} is "rw" (read-write) or "ro" (read-only); {@code lastLogin} is null when
+     * the user has never logged in.
+     */
+    public record Member(String group, String user, String mode, String addedBy, Instant addedAt, Instant lastLogin) {
+        /** The last login as "yyyy-MM-dd HH:mm" (UTC), or empty. */
+        public String lastLoginText() {
+            return lastLogin == null ? "" : lastLogin.toString().substring(0, 16).replace('T', ' ');
+        }
+    }
 
     private static final String GROUP_COLUMNS = "name, storage_type, size, state, created_by, created_at, revoked_by, "
         + "revoked_at, pv_name, pv_storage_class, pv_capacity, pv_csi_driver, pv_volume_handle, pv_volume_attributes::text";
@@ -160,10 +168,17 @@ public class StorageAllocationRepository {
     }
 
     public List<Member> members(String group) {
-        return query("SELECT group_name, user_name, mode, added_by, added_at FROM storage_group_member "
-            + "WHERE group_name = ? ORDER BY user_name", ps -> ps.setString(1, group),
+        return query("SELECT m.group_name, m.user_name, m.mode, m.added_by, m.added_at, l.last_login "
+            + "FROM storage_group_member m LEFT JOIN user_login l ON l.user_name = m.user_name "
+            + "WHERE m.group_name = ? ORDER BY m.user_name", ps -> ps.setString(1, group),
             rs -> new Member(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
-                instant(rs.getTimestamp(5))));
+                instant(rs.getTimestamp(5)), instant(rs.getTimestamp(6))));
+    }
+
+    /** Records that the user opened the dashboard now. */
+    public void recordLogin(String user) {
+        execute("INSERT INTO user_login (user_name) VALUES (?) "
+            + "ON CONFLICT (user_name) DO UPDATE SET last_login = now()", ps -> ps.setString(1, user));
     }
 
     /** Adds a member, or changes the mode of an existing one. */
