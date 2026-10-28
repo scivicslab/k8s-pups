@@ -135,14 +135,15 @@ public class K8sPupsActorSystem {
 
     // Base of the users an administrator can give storage to (e.g. ou=personal_genome,ou=accounts,dc=nig,dc=ac,dc=jp);
     // empty = the workspace LDAP base
-    @ConfigProperty(name = "k8spups.users.ldap-base-dn", defaultValue = "")
-    String usersLdapBaseDn;
+    // Empty (unset) is allowed: Quarkus refuses an empty value for a String, so these are Optional
+    @ConfigProperty(name = "k8spups.users.ldap-base-dn")
+    Optional<String> usersLdapBaseDn;
 
     private LdapUserInfoClient ldapClient;
 
     // The allocation a user gets at the first login, <type>:<size> (e.g. lustre-csi:50Gi); empty = none
-    @ConfigProperty(name = "k8spups.storage.default-allocation", defaultValue = "")
-    String defaultAllocation;
+    @ConfigProperty(name = "k8spups.storage.default-allocation")
+    Optional<String> defaultAllocation;
 
     @ConfigProperty(name = "k8spups.nfs-k8s.server", defaultValue = "")
     String nfsK8sServer;
@@ -272,7 +273,7 @@ public class K8sPupsActorSystem {
         actorSystem.actorOf(com.scivicslab.k8spups.storage.StorageAllocationService.ACTOR_NAME,
             new com.scivicslab.k8spups.storage.StorageAllocationService(storageAllocationRepository, datasetRepository,
                 k8sClient, storageTypeOptions,
-                com.scivicslab.k8spups.storage.StoragePolicy.parseDefault(defaultAllocation, storageTypeOptions)));
+                com.scivicslab.k8spups.storage.StoragePolicy.parseDefault(defaultAllocation.orElse(""), storageTypeOptions)));
 
         // Shared settings: one actor serializes saves and the reads of starting sessions
         actorSystem.actorOf(com.scivicslab.k8spups.settings.SettingsService.ACTOR_NAME,
@@ -445,7 +446,7 @@ public class K8sPupsActorSystem {
      */
     public List<String> listUsers() {
         if (ldapClient == null) return List.of();
-        return ldapClient.listUserNames(usersLdapBaseDn.isBlank() ? ldapClient.baseDn() : usersLdapBaseDn);
+        return ldapClient.listUserNames(usersLdapBaseDn.filter(dn -> !dn.isBlank()).orElse(ldapClient.baseDn()));
     }
 
     /** The actor that holds the storage administrators give to users. */
