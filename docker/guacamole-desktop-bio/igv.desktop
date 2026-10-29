@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=IGV
+Comment=Integrative Genomics Viewer
+Exec=/opt/igv/igv.sh
+Icon=/opt/igv/igv.ico
+Terminal=false
+Categories=Science;Biology;
