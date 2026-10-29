@@ -66,6 +66,12 @@ public class K8sApiClient {
     // Dataset entitlement views (see DatasetViewScript): NFS location read from config.
     private final String datasetNfsServer;
     private final String datasetBasePath;
+    /**
+     * Storage class of the shared PVC that holds the dataset root (the original directory), for a cluster without an NFS server for
+     * datasets (a007 keeps them on Lustre). Empty = the dataset root is an NFS volume per user (datasetNfsServer, datasetBasePath).
+     */
+    private final String datasetRootStorageClass;
+    private final String datasetRootStorageSize;
     private final String longhornStorageClass;
     private final String lustreCsiStorageClass;
     /** User ID and group ID that replace the plugin's user ID in the tool Pods (see ToolPodIds). Null = not configured. */
@@ -116,6 +122,9 @@ public class K8sApiClient {
         var cfg = org.eclipse.microprofile.config.ConfigProvider.getConfig();
         this.datasetNfsServer = cfg.getOptionalValue("k8spups.dataset.nfs-server", String.class).orElse("");
         this.datasetBasePath = cfg.getOptionalValue("k8spups.dataset.base-path", String.class).orElse("");
+        this.datasetRootStorageClass = cfg.getOptionalValue("k8spups.dataset.root-storage-class", String.class).orElse("");
+        this.datasetRootStorageSize = cfg.getOptionalValue("k8spups.dataset.root-storage-size", String.class)
+            .filter(v -> !v.isBlank()).orElse("100Gi");
         this.longhornStorageClass = cfg.getOptionalValue("k8spups.longhorn.storage-class", String.class)
             .filter(v -> !v.isBlank()).orElse("longhorn-single");
         this.lustreCsiStorageClass = cfg.getOptionalValue("k8spups.lustre-csi.storage-class", String.class)
@@ -1144,7 +1153,14 @@ public class K8sApiClient {
 
     /** PVC name of the user's read-only volume on the original directory (whole datasets are subPaths of it). */
     public String datasetRootPvcName(String userId) {
-        return "pups-dataset-root-" + sanitizeUserId(userId);
+        return datasetRootClaimName(datasetRootStorageClass, sanitizeUserId(userId));
+    }
+
+    /** The shared claim when the dataset root is a PVC of a storage class; otherwise the user's own NFS claim. */
+    static String datasetRootClaimName(String rootStorageClass, String sanitizedUserId) {
+        return rootStorageClass == null || rootStorageClass.isBlank()
+            ? "pups-dataset-root-" + sanitizedUserId
+            : "pups-dataset-root";
     }
 
     private String datasetRootPvName(String userId) {
@@ -1153,6 +1169,10 @@ public class K8sApiClient {
 
     /** Creates the user's read-only PV/PVC on the original directory if absent (no Pod is needed: nothing is built). */
     public void ensureDatasetRootPvPvc(String userId) {
+        if (!datasetRootStorageClass.isBlank()) {
+            ensureDatasetRootClaim();
+            return;
+        }
         String pvName = datasetRootPvName(userId);
         String pvcName = datasetRootPvcName(userId);
         String path = datasetBasePath + "/" + datasetOriginalDir;
@@ -1189,6 +1209,21 @@ public class K8sApiClient {
         }
     }
 
+    /** Creates the shared PVC of the dataset root (dynamic volume of datasetRootStorageClass) if absent. */
+    private void ensureDatasetRootClaim() {
+        String pvcName = datasetRootClaimName(datasetRootStorageClass, "");
+        if (client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() != null) return;
+        PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+            .withNewMetadata().withName(pvcName).withNamespace(userPodsNamespace)
+                .addToLabels("app", "k8s-pups-dataset-root").addToLabels("managed-by", "k8s-pups")
+            .endMetadata()
+            .withNewSpec().withAccessModes("ReadWriteMany").withStorageClassName(datasetRootStorageClass)
+                .withNewResources().addToRequests("storage", new Quantity(datasetRootStorageSize)).endResources()
+            .endSpec().build();
+        client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+        LOG.info("Dataset root PVC created: " + pvcName + " (" + datasetRootStorageClass + ", " + datasetRootStorageSize + ")");
+    }
+
     /** PVC name of the user's dataset view. */
     public String datasetPvcName(String userId) {
         return "pups-dataset-" + sanitizeUserId(userId);
@@ -1207,6 +1242,11 @@ public class K8sApiClient {
      *         (the caller must then not mount it, because it may still list revoked files)
      */
     public boolean syncDatasetView(String userId, List<String> paths) {
+        if (!datasetRootStorageClass.isBlank()) {
+            LOG.warning("The file-level view of datasets needs the NFS location; not built for " + userId
+                + " because the dataset root is a PVC of the storage class " + datasetRootStorageClass);
+            return false;
+        }
         if (datasetNfsServer.isBlank() || datasetBasePath.isBlank()) {
             LOG.warning("Dataset NFS location is not configured; view not built for " + userId);
             return false;
