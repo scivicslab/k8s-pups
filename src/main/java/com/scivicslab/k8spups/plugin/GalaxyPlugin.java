@@ -34,7 +34,7 @@ public class GalaxyPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/galaxy-bio:26.1.2-2610300450";
+        return "${REGISTRY}/galaxy-bio:26.1.2-2610300545";
     }
 
     @Override

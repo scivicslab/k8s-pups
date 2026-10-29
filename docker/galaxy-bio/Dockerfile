@@ -19,7 +19,9 @@ USER root
 # The Pod runs as an arbitrary UID: configuration is writable (conda and the tools are world-readable already, umask 022).
 # The database directory is the user's storage at run time; it is filled from /galaxy/seed-db on first start.
 COPY file_sources_conf.yml /galaxy/server/config/
+# The image sets static_enabled: false because it expects a proxy for /static; here the Pod is behind the gateway only.
 RUN echo '    file_sources_config_file: /galaxy/server/config/file_sources_conf.yml' >> /galaxy/server/config/galaxy.yml && \
+    sed -i 's|^    static_enabled: false|    static_enabled: true|' /galaxy/server/config/galaxy.yml && \
     mv /galaxy/server/database /galaxy/seed-db && mkdir /galaxy/server/database && \
     chmod -R a+rwX /galaxy/server/config /galaxy/seed-db
 COPY entrypoint.sh /entrypoint.sh
