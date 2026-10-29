@@ -35,4 +35,10 @@ class SessionPathTest {
     void galaxyIsNotReadyBeforeItsApiAnswersUnderTheSessionPath() {
         assertEquals("{sessionPath}/api/version", new com.scivicslab.k8spups.plugin.GalaxyPlugin().readinessProbePath());
     }
+
+    @Test
+    void toolsThatServeUnderTheirSessionPathAreReadyOnlyWhenTheyAnswerThere() {
+        assertEquals("{sessionPath}/api", new com.scivicslab.k8spups.plugin.JupyterLabPlugin().readinessProbePath());
+        assertEquals("{sessionPath}/api", new com.scivicslab.k8spups.plugin.JupyterAiPlugin().readinessProbePath());
+    }
 }

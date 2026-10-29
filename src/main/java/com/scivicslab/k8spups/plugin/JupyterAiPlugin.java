@@ -101,6 +101,18 @@ public class JupyterAiPlugin implements ToolPlugin {
     }
 
     @Override
+    public String readinessProbePath() {
+        // JupyterLab serves under its session path (base_url); the session is ready, and the dashboard shows "Open",
+        // only when its API answers there.
+        return SESSION_PATH_PLACEHOLDER + "/api";
+    }
+
+    @Override
+    public int readinessProbeInitialDelay() {
+        return 3;
+    }
+
+    @Override
     public boolean passthroughPath() {
         // JupyterLab builds absolute URLs from its base_url; entrypoint.sh sets it from PUPS_SESSION_PATH.
         return true;

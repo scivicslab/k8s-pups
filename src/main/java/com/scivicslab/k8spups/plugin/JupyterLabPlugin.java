@@ -97,6 +97,18 @@ public class JupyterLabPlugin implements ToolPlugin {
     }
 
     @Override
+    public String readinessProbePath() {
+        // JupyterLab serves under its session path (base_url); the session is ready, and the dashboard shows "Open",
+        // only when its API answers there.
+        return SESSION_PATH_PLACEHOLDER + "/api";
+    }
+
+    @Override
+    public int readinessProbeInitialDelay() {
+        return 3;
+    }
+
+    @Override
     public boolean passthroughPath() {
         // JupyterLab generates absolute URLs based on its base_url.
         // Pass /session/{id}/* through without rewriting so assets resolve correctly.
