@@ -5,10 +5,8 @@ UPDATE storage_allocation SET storage_type = 'posix' WHERE storage_type IN ('lus
 ALTER TABLE storage_group ALTER COLUMN storage_type SET DEFAULT 'posix';
 UPDATE storage_group SET storage_type = 'posix' WHERE storage_type IN ('lustre-csi', 'nfs-k8s');
 
--- tool_mount_preference.mounts: [{"kind": "storage", "name": <storage type>, "path": ...}, ...]
-UPDATE tool_mount_preference SET mounts = (
-    SELECT COALESCE(jsonb_agg(
-        CASE WHEN e ->> 'kind' = 'storage' AND e ->> 'name' IN ('lustre-csi', 'nfs-k8s')
-             THEN jsonb_set(e, '{name}', '"posix"') ELSE e END ORDER BY ord), '[]'::jsonb)
-    FROM jsonb_array_elements(mounts) WITH ORDINALITY AS t(e, ord))
-WHERE mounts::text LIKE '%lustre-csi%' OR mounts::text LIKE '%nfs-k8s%';
+-- tool_mount_preference.mounts: {"mounts": [{"path": ..., "value": ...}, ...], "primary": <storage type>}. A storage type
+-- appears as a whole JSON string, so replacing the quoted key is exact.
+UPDATE tool_mount_preference
+SET mounts = replace(replace(mounts::text, '"lustre-csi"', '"posix"'), '"nfs-k8s"', '"posix"')::jsonb
+WHERE mounts::text LIKE '%"lustre-csi"%' OR mounts::text LIKE '%"nfs-k8s"%';

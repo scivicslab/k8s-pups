@@ -224,8 +224,13 @@ public class StorageAllocationService {
         }
         if (!StoragePolicy.validSize(size)) return "Size must be a whole number of Gi or Ti, for example 500Gi";
         if (repository.group(name).isPresent()) return "A group of this name exists";
+        // The volume first: when it cannot be made, no group is recorded.
+        try {
+            k8sClient.createGroupPvc(name, size);
+        } catch (Exception e) {
+            return "The storage of the group could not be made: " + e.getMessage();
+        }
         repository.insertGroup(name, size, admin);
-        k8sClient.createGroupPvc(name, size);
         audit.addAudit("group.create", admin, null, null, null, null, null, name + " " + size);
         return null;
     }

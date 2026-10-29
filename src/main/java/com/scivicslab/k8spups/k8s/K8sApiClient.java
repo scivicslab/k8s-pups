@@ -1141,12 +1141,18 @@ public class K8sApiClient {
      * directory or its contents could remain root-owned, leaving the non-root tool
      * container unable to write and uploads failing with permission denied.
      */
+    /** A directory name as a part of a Pod name: lower-case letters, digits and hyphens, not starting with a hyphen. */
+    static String podNameToken(String directory) {
+        String s = directory.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+        return s.startsWith("-") ? "g" + s : s;
+    }
+
     private void ensureNfsDirectory(String sanitizedUserId) {
         ToolPodIds ids = ToolPodIds.resolve(1000L, toolPodUid, toolPodGid);
         String cmd = "mkdir -p /mnt/nfs-base/" + sanitizedUserId
             + " && chown -R " + ids.uid() + ":" + ids.gid() + " /mnt/nfs-base/" + sanitizedUserId
             + " && echo 'Directory ready'";
-        runNfsScriptPod("posix-nfs-init-" + sanitizedUserId, "k8s-pups-nfs-init",
+        runNfsScriptPod("posix-nfs-init-" + podNameToken(sanitizedUserId), "k8s-pups-nfs-init",
             posixNfsServer, posixNfsBasePath, cmd);
     }
 

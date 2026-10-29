@@ -17,4 +17,11 @@ class DatasetRootClaimNameTest {
         assertEquals("pups-dataset-root", K8sApiClient.datasetRootClaimName("lustre-csi-pups", "alice"));
         assertEquals("pups-dataset-root", K8sApiClient.datasetRootClaimName("lustre-csi-pups", "bob"));
     }
+
+    @Test
+    void aPodNameTokenIsADnsLabelFragment() {
+        assertEquals("alice", K8sApiClient.podNameToken("alice"));
+        assertEquals("g-group-lab1", K8sApiClient.podNameToken("_group-lab1"));
+        assertEquals("u002d-x", K8sApiClient.podNameToken("U002d_x").replace("_", "-"));
+    }
 }
