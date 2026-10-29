@@ -1583,6 +1583,17 @@ public class K8sApiClient {
         return profiles.get(0);
     }
 
+    /**
+     * Copies the image's /etc/passwd and /etc/group to /identity and adds the Pod's own UID and GID when the image
+     * has no entry for them (it never has: the ID is the cluster's, not the image's). The tool container mounts the
+     * result over /etc/passwd and /etc/group, so this works for every image, with a read-only root filesystem too.
+     */
+    static final String USER_ENTRY_SCRIPT =
+        "set -e; cp /etc/passwd /identity/passwd; cp /etc/group /identity/group; "
+        + "uid=$(id -u); gid=$(id -g); "
+        + "id -un >/dev/null 2>&1 || echo \"pups:x:$uid:$gid:k8s-pups user:${PUPS_HOME:-/}:/bin/sh\" >> /identity/passwd; "
+        + "id -gn >/dev/null 2>&1 || echo \"pups:x:$gid:\" >> /identity/group";
+
     private SecurityContext buildContainerSecurityContext(ToolPlugin plugin, boolean readOnlyRoot) {
         CapabilitiesBuilder caps = new CapabilitiesBuilder().addToDrop("ALL");
         for (String cap : plugin.capabilities()) {
@@ -1695,6 +1706,20 @@ public class K8sApiClient {
             volumes.add(new VolumeBuilder().withName("writable-" + i)
                 .withNewEmptyDir().withSizeLimit(new Quantity("500Mi")).endEmptyDir().build());
         }
+        ToolPodIds ids = ToolPodIds.resolve(plugin.runAsUser(), toolPodUid, toolPodGid);
+        Long runAsUid = ids.uid();
+        Long runAsGid = ids.gid();
+
+        // A tool Pod runs as a number (the cluster's own when one is configured), which the image's /etc/passwd
+        // may not list. /etc/passwd and /etc/group then get that ID added, so that whoami, git, ssh, dbus and the
+        // like find the user. See USER_ENTRY_SCRIPT.
+        boolean addsUserEntry = runAsUid != null;
+        if (addsUserEntry) {
+            volumes.add(new VolumeBuilder().withName("identity")
+                .withNewEmptyDir().withSizeLimit(new Quantity("1Mi")).endEmptyDir().build());
+            mounts.add(new VolumeMountBuilder().withName("identity").withMountPath("/etc/passwd").withSubPath("passwd").build());
+            mounts.add(new VolumeMountBuilder().withName("identity").withMountPath("/etc/group").withSubPath("group").build());
+        }
         if (plugin.userDataMountPath() != null) {
             // The type-specific user PVC
             volumes.add(new VolumeBuilder().withName("user-data")
@@ -1753,9 +1778,6 @@ public class K8sApiClient {
             nfsIdx++;
         }
 
-        ToolPodIds ids = ToolPodIds.resolve(plugin.runAsUser(), toolPodUid, toolPodGid);
-        Long runAsUid = ids.uid();
-        Long runAsGid = ids.gid();
 
         // Init container: seed PVC with /etc/skel if empty.
         // Runs as the pod-level UID (same as the main container).
@@ -1786,6 +1808,27 @@ public class K8sApiClient {
                     .addToRequests("memory", new Quantity("64Mi"))
                     .addToLimits("cpu", new Quantity("200m"))
                     .addToLimits("memory", new Quantity("128Mi"))
+                .endResources()
+                .build());
+        }
+
+        if (addsUserEntry) {
+            String home = plugin.environmentVariables().getOrDefault("HOME", "/");
+            initContainers.add(new io.fabric8.kubernetes.api.model.ContainerBuilder()
+                .withName("user-entry")
+                .withImage(imageResolver.resolve(plugin))
+                .withCommand("sh", "-c", USER_ENTRY_SCRIPT)
+                .withEnv(new EnvVarBuilder().withName("PUPS_HOME").withValue(home).build())
+                .withVolumeMounts(new VolumeMountBuilder().withName("identity").withMountPath("/identity").build())
+                .withNewSecurityContext()
+                    .withAllowPrivilegeEscalation(false)
+                    .withNewCapabilities().addToDrop("ALL").endCapabilities()
+                .endSecurityContext()
+                .withNewResources()
+                    .addToRequests("cpu", new Quantity("10m"))
+                    .addToRequests("memory", new Quantity("16Mi"))
+                    .addToLimits("cpu", new Quantity("100m"))
+                    .addToLimits("memory", new Quantity("64Mi"))
                 .endResources()
                 .build());
         }
