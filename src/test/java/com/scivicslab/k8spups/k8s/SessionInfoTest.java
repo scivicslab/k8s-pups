@@ -81,7 +81,7 @@ class SessionInfoTest {
     @DisplayName("Full constructor stores additional mounts")
     void fullConstructorStoresAdditionalMounts() {
         ToolPlugin plugin = stubPlugin("jupyter-lab");
-        List<MountSpec> mounts = List.of(new MountSpec("nfs-k8s", "/data", null));
+        List<MountSpec> mounts = List.of(new MountSpec("posix", "/data", null));
         SessionInfo info = new SessionInfo(
             "s3", "user3", plugin, Collections.emptyList(),
             null, "standard", Collections.emptyMap(), "100Gi", "longhorn", mounts

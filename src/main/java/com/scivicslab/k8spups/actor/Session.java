@@ -69,8 +69,7 @@ public class Session {
 
             // Storage type determines what gets mounted at userDataMountPath:
             //   longhorn  -> Longhorn PVC (RWO block storage)
-            //   lustre-csi -> Lustre CSI PVC (RWX)
-            //   nfs-k8s   -> NFS k8s-dedicated PVC (RWX)
+                        //   posix     -> shared file storage PVC (RWX)
             // The PVC exists only for an administrator's allocation; SessionManager checked the allocation and created
             // the PVC before this session. A missing PVC therefore means the storage was taken away in between.
             if (plugin.userDataMountPath() != null) {
@@ -376,7 +375,7 @@ public class Session {
         // so the K8SPUPS_DEFAULT_STORAGE_TYPE default actually applies. A hardcoded
         // "longhorn" here contradicted that default and silently placed new users on
         // single-replica Longhorn volumes. Read from env to mirror resolveStorageSize().
-        return System.getenv().getOrDefault("K8SPUPS_DEFAULT_STORAGE_TYPE", "nfs-k8s");
+        return System.getenv().getOrDefault("K8SPUPS_DEFAULT_STORAGE_TYPE", "posix");
     }
 
     private void onPodEvent(Watcher.Action action, Pod pod) {

@@ -423,9 +423,8 @@ public class SessionManager {
                 if (vol.getPersistentVolumeClaim() != null) {
                     String claim = vol.getPersistentVolumeClaim().getClaimName();
                     if (claim != null) {
-                        if (claim.endsWith("-lustre-csi")) { storageType = "lustre-csi"; break; }
+                        if (claim.endsWith("-posix")) { storageType = "posix"; break; }
                         if (claim.endsWith("-longhorn")) { storageType = "longhorn"; break; }
-                        if (claim.endsWith("-nfs-k8s")) { storageType = "nfs-k8s"; break; }
                     }
                 }
             }

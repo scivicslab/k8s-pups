@@ -79,10 +79,10 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.default-storage-size", defaultValue = "100Gi")
     String defaultStorageSize;
 
-    @ConfigProperty(name = "k8spups.storage-type-options", defaultValue = "nfs-k8s,longhorn")
+    @ConfigProperty(name = "k8spups.storage-type-options", defaultValue = "posix,longhorn")
     List<String> storageTypeOptions;
 
-    @ConfigProperty(name = "k8spups.default-storage-type", defaultValue = "nfs-k8s")
+    @ConfigProperty(name = "k8spups.default-storage-type", defaultValue = "posix")
     String defaultStorageType;
 
     @ConfigProperty(name = "k8spups.session-oidc.issuer")
@@ -113,16 +113,16 @@ public class K8sPupsActorSystem {
     @Inject
     com.scivicslab.k8spups.storage.StorageAllocationRepository storageAllocationRepository;
 
-    // The allocation a user gets at the first login, <type>:<size> (e.g. lustre-csi:50Gi); empty = none
+    // The allocation a user gets at the first login, <type>:<size> (e.g. posix:50Gi); empty = none
     // Empty (unset) is allowed: Quarkus refuses an empty value for a String, so this is Optional
     @ConfigProperty(name = "k8spups.storage.default-allocation")
     Optional<String> defaultAllocation;
 
-    @ConfigProperty(name = "k8spups.nfs-k8s.server", defaultValue = "")
-    String nfsK8sServer;
+    @ConfigProperty(name = "k8spups.posix.nfs-server", defaultValue = "")
+    String posixNfsServer;
 
-    @ConfigProperty(name = "k8spups.nfs-k8s.base-path", defaultValue = "/Public/k8s-pups-data")
-    String nfsK8sBasePath;
+    @ConfigProperty(name = "k8spups.posix.nfs-base-path", defaultValue = "/Public/k8s-pups-data")
+    String posixNfsBasePath;
 
     @ConfigProperty(name = "k8spups.user-pods.allowed-nodes", defaultValue = "")
     String allowedNodesStr;
@@ -210,7 +210,7 @@ public class K8sPupsActorSystem {
             sessionOidcIssuer, sessionOidcAuthorizationEndpoint, sessionOidcTokenEndpoint,
             sessionOidcClientId, sessionOidcSecretName, sessionOidcJwksUri,
             sessionOidcRedirectBaseUrl,
-            nfsK8sServer, nfsK8sBasePath,
+            posixNfsServer, posixNfsBasePath,
             allowedNodes,
             basePath,
             controllerUrl);

@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 class StoragePolicyTest {
 
-    static final List<String> A007 = List.of("lustre-csi", "longhorn");
+    static final List<String> A007 = List.of("posix", "longhorn");
 
     @Test
     void sizesAreWholeGiOrTi() {
@@ -25,15 +25,15 @@ class StoragePolicyTest {
 
     @Test
     void onlyOfferedTypesWithAPvcCanBeAllocated() {
-        assertTrue(StoragePolicy.allocatable("lustre-csi", A007));
-        assertFalse(StoragePolicy.allocatable("nfs-k8s", A007));          // not offered on this cluster
+        assertTrue(StoragePolicy.allocatable("posix", A007));
+        assertFalse(StoragePolicy.allocatable("nfs-k8s", A007));          // the old key is gone: not allocatable
         assertFalse(StoragePolicy.allocatable("ceph-rbd", List.of("ceph-rbd")));   // offered, but no PVC the controller can create
     }
 
     @Test
-    void lustreAndNfsCanBeRestoredLonghornCannot() {
-        assertTrue(StoragePolicy.restorable("lustre-csi"));
-        assertTrue(StoragePolicy.restorable("nfs-k8s"));
+    void posixCanBeRestoredLonghornCannot() {
+        assertTrue(StoragePolicy.restorable("posix"));
+        assertFalse(StoragePolicy.restorable("lustre-csi"));
         assertFalse(StoragePolicy.restorable("longhorn"));
     }
 
@@ -50,10 +50,10 @@ class StoragePolicyTest {
 
     @Test
     void defaultAllocation() {
-        assertEquals(Optional.of(new StoragePolicy.Grant("lustre-csi", "50Gi")),
-            StoragePolicy.parseDefault("lustre-csi:50Gi", A007));
+        assertEquals(Optional.of(new StoragePolicy.Grant("posix", "50Gi")),
+            StoragePolicy.parseDefault("posix:50Gi", A007));
         assertEquals(Optional.empty(), StoragePolicy.parseDefault("", A007));
         assertThrows(IllegalArgumentException.class, () -> StoragePolicy.parseDefault("lustre:50Gi", A007));
-        assertThrows(IllegalArgumentException.class, () -> StoragePolicy.parseDefault("lustre-csi:50", A007));
+        assertThrows(IllegalArgumentException.class, () -> StoragePolicy.parseDefault("posix:50", A007));
     }
 }

@@ -48,7 +48,7 @@ class SessionStatusTest {
     void nullAccessUrlAndEmptyMemoAreValid() {
         SessionStatus status = new SessionStatus(
             "sess-003", "carol", "AI Toolkit", SessionState.FAILED,
-            "pups-ai-toolkit-sess-003", null, "", "nfs-k8s"
+            "pups-ai-toolkit-sess-003", null, "", "posix"
         );
 
         assertNull(status.accessUrl());

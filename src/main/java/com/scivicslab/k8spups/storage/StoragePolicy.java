@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
  *
  * Users get storage only through an allocation; the controller creates the PVC of an active allocation with the type
  * and size written there. Which allocation types can be given back after revoking depends on the StorageClass: a
- * Lustre CSI PV is kept (Retain), and the NFS directory of nfs-k8s is kept on the NFS server, so both can be restored;
+ * PV of the storage-class backend is kept (Retain), and the NFS directory of the nfs backend is kept on the NFS server, so both can be restored;
  * a Longhorn volume is deleted with its PVC (reclaimPolicy Delete), so it cannot.
  */
 public final class StoragePolicy {
@@ -18,8 +18,8 @@ public final class StoragePolicy {
     public record Grant(String type, String size) {}
 
     private static final Pattern SIZE = Pattern.compile("[1-9][0-9]{0,5}(Gi|Ti)");
-    private static final List<String> ALLOCATABLE = List.of("lustre-csi", "longhorn", "nfs-k8s");
-    private static final List<String> RESTORABLE = List.of("lustre-csi", "nfs-k8s");
+    private static final List<String> ALLOCATABLE = List.of("posix", "longhorn");
+    private static final List<String> RESTORABLE = List.of("posix");
 
     private StoragePolicy() {}
 
@@ -40,7 +40,7 @@ public final class StoragePolicy {
 
     /**
      * The default allocation from {@code k8spups.storage.default-allocation}, written {@code <type>:<size>}
-     * (e.g. {@code lustre-csi:50Gi}); empty when unset. A value that is not allocatable is an error, so a typing
+     * (e.g. {@code posix:50Gi}); empty when unset. A value that is not allocatable is an error, so a typing
      * mistake stops the controller instead of giving no one storage.
      */
     public static Optional<Grant> parseDefault(String value, List<String> offered) {

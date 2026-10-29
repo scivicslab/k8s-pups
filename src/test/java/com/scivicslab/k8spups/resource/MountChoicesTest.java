@@ -10,12 +10,12 @@ import org.junit.jupiter.api.Test;
 
 class MountChoicesTest {
 
-    static final Map<String, String> STORAGE = new LinkedHashMap<>(Map.of("lustre-csi", "Shared file storage"));
+    static final Map<String, String> STORAGE = new LinkedHashMap<>(Map.of("posix", "Shared file storage"));
 
     @Test
     void choicesCoverOwnStorageGroupsDatasetsAndFiles() {
         var c = MountChoices.of(STORAGE, Map.of("lab1", "ro"), List.of("JGAD000001"), true);
-        assertEquals(List.of("lustre-csi", "group:lab1", "dataset:JGAD000001", "dataset-files"),
+        assertEquals(List.of("posix", "group:lab1", "dataset:JGAD000001", "dataset-files"),
             c.stream().map(MountChoices.Choice::value).toList());
         assertEquals("/groups/lab1", c.get(1).path());
         assertTrue(c.get(1).label().contains("read-only"));
@@ -24,12 +24,12 @@ class MountChoicesTest {
 
     @Test
     void rememberedChoicesThatAreNoLongerAllowedAreDroppedAndCounted() {
-        String json = MountChoices.toJson("lustre-csi", List.of(
+        String json = MountChoices.toJson("posix", List.of(
             Map.of("value", "group:lab1", "path", "/groups/lab1"),
             Map.of("value", "dataset:JGAD000009", "path", "/datasets/JGAD000009")));   // grant ended
         var current = MountChoices.of(STORAGE, Map.of("lab1", "rw"), List.of(), false);
         var r = MountChoices.remembered(json, current, STORAGE.keySet());
-        assertEquals("lustre-csi", r.primary());
+        assertEquals("posix", r.primary());
         assertEquals(List.of(Map.of("value", "group:lab1", "path", "/groups/lab1")), r.mounts());
         assertEquals(1, r.dropped());
     }

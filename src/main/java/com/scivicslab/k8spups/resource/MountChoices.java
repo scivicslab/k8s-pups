@@ -10,7 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * The mounts a user can choose in the launch form, and the remembered choices of a tool checked against them.
  *
- * A choice is a value of the form field {@code extraType_<n>}: an allocated storage type ({@code lustre-csi}),
+ * A choice is a value of the form field {@code extraType_<n>}: an allocated storage type ({@code posix}),
  * {@code group:<name>} for a group's storage, {@code dataset:<name>} for a dataset, or {@code dataset-files} for the
  * files granted one by one. Each has a default mount path. The remembered choices of a tool are stored as
  * {@code {"primary": <type>, "mounts": [{"value": <choice>, "path": <mount path>}]}}; a remembered choice that is

@@ -176,11 +176,11 @@ public class StorageAllocationService {
         if (!offered.contains(a.type())) return "This storage type is not offered here any more: " + a.type();
         if (activeTypes(a.user()).containsKey(a.type())) return "The user already has this storage";
         try {
-            if ("lustre-csi".equals(a.type())) {
+            if ("posix".equals(a.type()) && !k8sClient.posixUsesNfs()) {
                 if (a.pv().isEmpty()) return "No PV was recorded when this allocation was revoked";
-                k8sClient.restoreLustreCsiPvc(a.user(), a.pv().get());
+                k8sClient.restoreStorageClassPvc(a.user(), a.pv().get());
             } else {
-                // nfs-k8s: the directory on the NFS server is named after the user, so a new PV and PVC find it again
+                // nfs backend: the directory on the NFS server is named after the user, so a new PV and PVC find it again
                 k8sClient.createAllocatedPvc(a.user(), a.type(), a.size());
             }
         } catch (Exception e) {
@@ -216,9 +216,9 @@ public class StorageAllocationService {
         return repository.memberships(user);
     }
 
-    /** Creates a group with Lustre CSI storage of the size; returns an error message, or null when done. */
+    /** Creates a group with shared file storage of the size; returns an error message, or null when done. */
     public String createGroup(String admin, String name, String size) {
-        if (!offered.contains("lustre-csi")) return "Group storage needs shared file storage (lustre-csi) on this cluster";
+        if (!offered.contains("posix")) return "Group storage needs shared file storage on this cluster";
         if (!StoragePolicy.validGroupName(name)) {
             return "A group name is 2 to 31 lowercase letters and digits, starting with a letter";
         }
@@ -263,9 +263,11 @@ public class StorageAllocationService {
     public String restoreGroup(String admin, String name) {
         var g = repository.group(name).filter(x -> !x.active()).orElse(null);
         if (g == null) return "No such group whose storage was taken away";
-        if (g.pv().isEmpty()) return "No PV was recorded when this group's storage was taken away";
+        if (!k8sClient.posixUsesNfs() && g.pv().isEmpty()) return "No PV was recorded when this group's storage was taken away";
         try {
-            k8sClient.restoreGroupPvc(name, g.pv().get());
+            // nfs backend: the directory on the NFS server is named after the group, so a new PV and PVC find it again
+            if (k8sClient.posixUsesNfs()) k8sClient.createGroupPvc(name, g.size());
+            else k8sClient.restoreGroupPvc(name, g.pv().get());
         } catch (Exception e) {
             return "The storage could not be restored: " + e.getMessage();
         }

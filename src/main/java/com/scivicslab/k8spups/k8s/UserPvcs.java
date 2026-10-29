@@ -6,7 +6,7 @@ import io.fabric8.kubernetes.api.model.Quantity;
 
 /**
  * Builds the PVC of a user for the storage types that a StorageClass provisions
- * (longhorn, lustre-csi). Pure data: nothing here talks to the cluster.
+ * (longhorn, posix). Pure data: nothing here talks to the cluster.
  */
 public final class UserPvcs {
 

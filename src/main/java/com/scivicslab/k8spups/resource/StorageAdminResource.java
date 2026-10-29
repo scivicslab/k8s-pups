@@ -134,7 +134,7 @@ public class StorageAdminResource {
                 row.put("revokedBy", a.revokedBy());
                 row.put("revokedAt", a.revokedAt() == null ? "" : a.revokedAt().toString().substring(0, 16).replace('T', ' '));
                 row.put("restorable", StoragePolicy.restorable(a.type())
-                    && ("nfs-k8s".equals(a.type()) || a.pv().isPresent()));
+                    && (actorSystem.getK8sClient().posixUsesNfs() || a.pv().isPresent()));
                 revoked.add(row);
             }
         }

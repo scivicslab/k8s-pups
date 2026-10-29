@@ -8,15 +8,15 @@ import org.junit.jupiter.api.Test;
 class UserPvcsTest {
 
     @Test
-    void lustreCsiPvcIsSharedAndUsesTheConfiguredClass() {
-        PersistentVolumeClaim pvc = UserPvcs.build("pups-alice-lustre-csi", "user-pods-with-audit", "alice",
-            "lustre-csi", "lustre-csi", "ReadWriteMany", "50Gi");
-        assertEquals("pups-alice-lustre-csi", pvc.getMetadata().getName());
+    void posixPvcIsSharedAndUsesTheConfiguredClass() {
+        PersistentVolumeClaim pvc = UserPvcs.build("pups-alice-posix", "user-pods-with-audit", "alice",
+            "posix", "lustre-csi-pups", "ReadWriteMany", "50Gi");
+        assertEquals("pups-alice-posix", pvc.getMetadata().getName());
         assertEquals("user-pods-with-audit", pvc.getMetadata().getNamespace());
-        assertEquals("lustre-csi", pvc.getSpec().getStorageClassName());
+        assertEquals("lustre-csi-pups", pvc.getSpec().getStorageClassName());
         assertEquals("ReadWriteMany", pvc.getSpec().getAccessModes().get(0));
         assertEquals("50Gi", pvc.getSpec().getResources().getRequests().get("storage").toString());
-        assertEquals("lustre-csi", pvc.getMetadata().getLabels().get("storage-type"));
+        assertEquals("posix", pvc.getMetadata().getLabels().get("storage-type"));
         assertEquals("alice", pvc.getMetadata().getLabels().get("user"));
     }
 

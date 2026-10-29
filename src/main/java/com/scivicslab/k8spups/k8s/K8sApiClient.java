@@ -51,8 +51,8 @@ public class K8sApiClient {
     private final String oidcRedirectBaseUrl;
 
     // NFS k8s-dedicated config
-    private final String nfsK8sServer;
-    private final String nfsK8sBasePath;
+    private final String posixNfsServer;
+    private final String posixNfsBasePath;
     /** Storage type key of the mount of the file-level view (added by the controller, never by the user). */
     public static final String DATASET_STORAGE_TYPE = "dataset";
     /** Storage type key of the mounts of whole datasets (subPaths of the original directory; controller only). */
@@ -73,7 +73,13 @@ public class K8sApiClient {
     private final String datasetRootStorageClass;
     private final String datasetRootStorageSize;
     private final String longhornStorageClass;
-    private final String lustreCsiStorageClass;
+    /**
+     * How the shared file storage (type {@code posix}) is provided on this cluster: {@code nfs} makes a directory on an NFS
+     * server and a static PV per user (W206); {@code storage-class} asks a StorageClass for a volume (a007: Lustre).
+     */
+    private final String posixBackend;
+    /** The StorageClass of the {@code storage-class} backend. */
+    private final String posixStorageClass;
     /** User ID and group ID that replace the plugin's user ID in the tool Pods (see ToolPodIds). Null = not configured. */
     private final Long toolPodUid;
     private final Long toolPodGid;
@@ -99,7 +105,7 @@ public class K8sApiClient {
                         String oidcIssuer, String oidcAuthorizationEndpoint, String oidcTokenEndpoint,
                         String oidcClientId, String oidcSecretName, String oidcJwksUri,
                         String oidcRedirectBaseUrl,
-                        String nfsK8sServer, String nfsK8sBasePath,
+                        String posixNfsServer, String posixNfsBasePath,
                         List<String> allowedNodes,
                         String basePath,
                         String controllerUrl) {
@@ -114,8 +120,8 @@ public class K8sApiClient {
         this.oidcSecretName = oidcSecretName;
         this.oidcJwksUri = oidcJwksUri;
         this.oidcRedirectBaseUrl = oidcRedirectBaseUrl;
-        this.nfsK8sServer = nfsK8sServer;
-        this.nfsK8sBasePath = nfsK8sBasePath;
+        this.posixNfsServer = posixNfsServer;
+        this.posixNfsBasePath = posixNfsBasePath;
         this.allowedNodes = allowedNodes;
         this.basePath = basePath;
         this.controllerUrl = controllerUrl;
@@ -127,8 +133,16 @@ public class K8sApiClient {
             .filter(v -> !v.isBlank()).orElse("100Gi");
         this.longhornStorageClass = cfg.getOptionalValue("k8spups.longhorn.storage-class", String.class)
             .filter(v -> !v.isBlank()).orElse("longhorn-single");
-        this.lustreCsiStorageClass = cfg.getOptionalValue("k8spups.lustre-csi.storage-class", String.class)
-            .filter(v -> !v.isBlank()).orElse("lustre-csi");
+        this.posixBackend = cfg.getOptionalValue("k8spups.posix.backend", String.class)
+            .filter(v -> !v.isBlank()).orElse("nfs");
+        if (!posixBackend.equals("nfs") && !posixBackend.equals("storage-class")) {
+            throw new IllegalArgumentException("k8spups.posix.backend must be nfs or storage-class: " + posixBackend);
+        }
+        this.posixStorageClass = cfg.getOptionalValue("k8spups.posix.storage-class", String.class)
+            .filter(v -> !v.isBlank()).orElse("");
+        if (posixBackend.equals("storage-class") && posixStorageClass.isEmpty()) {
+            throw new IllegalArgumentException("k8spups.posix.storage-class is required when k8spups.posix.backend is storage-class");
+        }
         this.toolPodUid = cfg.getOptionalValue("k8spups.tool-pod.uid", String.class)
             .filter(v -> !v.isBlank()).map(Long::valueOf).orElse(null);
         this.toolPodGid = cfg.getOptionalValue("k8spups.tool-pod.gid", String.class)
@@ -747,9 +761,9 @@ public class K8sApiClient {
     /** Storage type of a mount of a group's storage ({@link MountSpec#sharedFrom} names the group). */
     public static final String GROUP_STORAGE_TYPE = "group";
 
-    /** The PVC of a group's storage: one Lustre CSI PVC per group, mounted by the Pods of its members. */
+    /** The PVC of a group's storage: one shared file storage PVC per group, mounted by the Pods of its members. */
     public String groupPvcName(String group) {
-        return "pups-group-" + sanitizeUserId(group) + "-lustre-csi";
+        return "pups-group-" + sanitizeUserId(group) + "-posix";
     }
 
     /**
@@ -761,7 +775,7 @@ public class K8sApiClient {
     }
 
     /**
-     * Returns the PV name for the NFS-based storage type nfs-k8s.
+     * Returns the PV name for the shared file storage of the nfs backend.
      *
      * <p>PersistentVolume is cluster-scoped while the PVC is namespaced, so the name
      * carries the user-pods namespace. Two k8s-pups instances (for example /pups and
@@ -799,35 +813,38 @@ public class K8sApiClient {
         LOG.info("Longhorn PVC created: " + pvcName + " (" + storageSize + ")");
     }
 
+    /** Whether the shared file storage is made of directories on an NFS server (otherwise a StorageClass provides it). */
+    public boolean posixUsesNfs() {
+        return posixBackend.equals("nfs");
+    }
+
     /**
-     * Creates a Lustre CSI PVC for the user (dynamically provisioned, shared by several Pods).
-     * StorageClass: {@code k8spups.lustre-csi.storage-class} (default lustre-csi), AccessMode: ReadWriteMany.
-     * If the PVC already exists, this is a no-op. The StorageClass reclaims with Retain, so deleting the
-     * PVC leaves the PV and the data directory behind.
+     * Creates the user's PVC of the shared file storage from the StorageClass {@code k8spups.posix.storage-class}
+     * (dynamically provisioned, shared by several Pods, ReadWriteMany). If the PVC already exists, this is a no-op.
+     * The StorageClass reclaims with Retain, so deleting the PVC leaves the PV and the data directory behind.
      *
      * @param userId      the user identifier
      * @param storageSize the requested size (e.g. "100Gi")
      */
-    public void createLustreCsiPvc(String userId, String storageSize) {
-        String pvcName = userPvcName(userId, "lustre-csi");
+    public void createStorageClassPvc(String userId, String storageSize) {
+        String pvcName = userPvcName(userId, "posix");
         PersistentVolumeClaim existing = client.persistentVolumeClaims()
             .inNamespace(userPodsNamespace).withName(pvcName).get();
         if (existing != null) {
-            LOG.info("Lustre CSI PVC already exists: " + pvcName);
+            LOG.info("Shared file storage PVC already exists: " + pvcName);
             return;
         }
-        PersistentVolumeClaim pvc = UserPvcs.build(pvcName, userPodsNamespace, userId, "lustre-csi",
-            lustreCsiStorageClass, "ReadWriteMany", storageSize);
+        PersistentVolumeClaim pvc = UserPvcs.build(pvcName, userPodsNamespace, userId, "posix",
+            posixStorageClass, "ReadWriteMany", storageSize);
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
-        LOG.info("Lustre CSI PVC created: " + pvcName + " (" + storageSize + ")");
+        LOG.info("Shared file storage PVC created: " + pvcName + " (" + storageSize + ")");
     }
 
     /** Creates the user's PVC of an allocated storage type, with the allocated size; a no-op if it exists. */
     public void createAllocatedPvc(String userId, String storageType, String size) {
         switch (storageType) {
-            case "lustre-csi" -> createLustreCsiPvc(userId, size);
+            case "posix" -> { if (posixUsesNfs()) createNfsPvPvc(userId, size); else createStorageClassPvc(userId, size); }
             case "longhorn" -> createLonghornPvc(userId, size);
-            case "nfs-k8s" -> createNfsK8sPvPvc(userId, size);
             default -> throw new IllegalArgumentException("storage type cannot be allocated: " + storageType);
         }
     }
@@ -858,18 +875,18 @@ public class K8sApiClient {
     }
 
     /**
-     * Gives the user back the Lustre CSI directory of a revoked allocation: binds a new PVC (the user's usual PVC name)
+     * Gives the user back the volume of a revoked allocation of the {@code storage-class} backend: binds a new PVC (the user's usual PVC name)
      * to the PV of the record. If the PV object still exists it is reused after its old claim is removed; if it was
      * deleted, it is written again from the record (Retain, so deleting the PVC again keeps it). Checked on a007 with
      * the Lustre CSI driver exa.csi.ddn.com.
      */
-    public void restoreLustreCsiPvc(String userId, com.scivicslab.k8spups.storage.PvRecord rec) {
-        PersistentVolumeClaim pvc = UserPvcs.build(userPvcName(userId, "lustre-csi"), userPodsNamespace, userId,
-            "lustre-csi", rec.storageClass(), "ReadWriteMany", rec.capacity());
+    public void restoreStorageClassPvc(String userId, com.scivicslab.k8spups.storage.PvRecord rec) {
+        PersistentVolumeClaim pvc = UserPvcs.build(userPvcName(userId, "posix"), userPodsNamespace, userId,
+            "posix", rec.storageClass(), "ReadWriteMany", rec.capacity());
         restorePvc(pvc, rec);
     }
 
-    /** {@link #restoreLustreCsiPvc} for a group's PVC. */
+    /** {@link #restoreStorageClassPvc} for a group's PVC. */
     public void restoreGroupPvc(String group, com.scivicslab.k8spups.storage.PvRecord rec) {
         restorePvc(groupPvc(group, rec.storageClass(), rec.capacity()), rec);
     }
@@ -908,7 +925,7 @@ public class K8sApiClient {
         }
         pvc.getSpec().setVolumeName(rec.name());
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
-        LOG.info("Lustre CSI PVC restored: " + pvcName + " -> " + rec.name());
+        LOG.info("Shared file storage PVC restored: " + pvcName + " -> " + rec.name());
     }
 
     /** Whether a PVC of this name exists in the user Pods' namespace. */
@@ -916,9 +933,9 @@ public class K8sApiClient {
         return client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() != null;
     }
 
-    /** A group's PVC object: Lustre CSI, ReadWriteMany, labelled with the group instead of a user. */
+    /** A group's PVC object: shared file storage, ReadWriteMany, labelled with the group instead of a user. */
     private PersistentVolumeClaim groupPvc(String group, String storageClass, String size) {
-        PersistentVolumeClaim pvc = UserPvcs.build(groupPvcName(group), userPodsNamespace, group, "lustre-csi",
+        PersistentVolumeClaim pvc = UserPvcs.build(groupPvcName(group), userPodsNamespace, group, "posix",
             storageClass, "ReadWriteMany", size);
         Map<String, String> labels = pvc.getMetadata().getLabels();
         labels.remove("user");
@@ -926,12 +943,63 @@ public class K8sApiClient {
         return pvc;
     }
 
-    /** Creates the Lustre CSI PVC of a group's storage; a no-op if it exists. */
+    /** Creates the PVC of a group's storage; a no-op if it exists. */
     public void createGroupPvc(String group, String size) {
         if (pvcExists(groupPvcName(group))) return;
+        if (posixUsesNfs()) {
+            createNfsGroupPvPvc(group, size);
+            return;
+        }
         client.persistentVolumeClaims().inNamespace(userPodsNamespace)
-            .resource(groupPvc(group, lustreCsiStorageClass, size)).create();
+            .resource(groupPvc(group, posixStorageClass, size)).create();
         LOG.info("Group PVC created: " + groupPvcName(group) + " (" + size + ")");
+    }
+
+    /** The PV of a group's storage with the nfs backend: cluster-scoped, so its name carries the namespace like a user's. */
+    private String groupPvName(String group) {
+        return groupPvcName(group) + "-" + userPodsNamespace;
+    }
+
+    /**
+     * Makes the group's directory on the NFS server (owned by the tool Pod IDs) and the static PV and PVC for it, with the
+     * nfs backend. The directory is named after the group with a prefix that no user key has, so a group and a user of the
+     * same name never share it. Existing objects are left as they are.
+     */
+    private void createNfsGroupPvPvc(String group, String size) {
+        String dir = "_group-" + sanitizeUserId(group);
+        String pvName = groupPvName(group);
+        String pvcName = groupPvcName(group);
+        if (client.persistentVolumes().withName(pvName).get() == null) {
+            ensureNfsDirectory(dir);
+            PersistentVolume pv = new PersistentVolumeBuilder()
+                .withNewMetadata().withName(pvName)
+                    .addToLabels("app", "k8s-pups-group").addToLabels("managed-by", "k8s-pups")
+                    .addToLabels("group", UserKey.encode(group)).addToLabels("storage-type", "posix")
+                .endMetadata()
+                .withNewSpec()
+                    .withCapacity(Map.of("storage", new Quantity(size)))
+                    .withAccessModes("ReadWriteMany")
+                    .withPersistentVolumeReclaimPolicy("Retain")
+                    .withStorageClassName("")
+                    .withNewCsi().withDriver("nfs.csi.k8s.io").withVolumeHandle(pvName)
+                        .addToVolumeAttributes("server", posixNfsServer)
+                        .addToVolumeAttributes("share", posixNfsBasePath + "/" + dir)
+                    .endCsi()
+                    .withMountOptions(List.of("nfsvers=4"))
+                .endSpec().build();
+            client.persistentVolumes().resource(pv).create();
+            LOG.info("Group PV created: " + pvName + " -> " + posixNfsServer + ":" + posixNfsBasePath + "/" + dir);
+        }
+        PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+            .withNewMetadata().withName(pvcName).withNamespace(userPodsNamespace)
+                .addToLabels("app", "k8s-pups-user").addToLabels("managed-by", "k8s-pups")
+                .addToLabels("group", UserKey.encode(group)).addToLabels("storage-type", "posix")
+            .endMetadata()
+            .withNewSpec().withAccessModes("ReadWriteMany").withStorageClassName("").withVolumeName(pvName)
+                .withNewResources().addToRequests("storage", new Quantity(size)).endResources()
+            .endSpec().build();
+        client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
+        LOG.info("Group PVC created: " + pvcName + " (" + size + ")");
     }
 
     /** The Pods that mount the group's PVC. */
@@ -956,6 +1024,14 @@ public class K8sApiClient {
         if (!podsUsingGroupPvc(group).isEmpty()) return false;
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(groupPvcName(group)).delete();
         LOG.info("Group PVC deleted: " + groupPvcName(group));
+        if (posixUsesNfs()) {
+            try {
+                client.persistentVolumes().withName(groupPvName(group)).delete();
+                LOG.info("Group PV deleted: " + groupPvName(group));
+            } catch (Exception e) {
+                LOG.warning("Failed to delete PV " + groupPvName(group) + ": " + e.getMessage());
+            }
+        }
         return true;
     }
 
@@ -982,23 +1058,23 @@ public class K8sApiClient {
      * Creates a PV + PVC pair for the user's k8s-dedicated NFS storage.
      * First ensures the user directory exists on the NFS server (owned by UID 1000),
      * then creates the PV/PVC pointing to it.
-     * Uses nfs.csi.k8s.io driver with the nfsK8sServer/nfsK8sBasePath config.
+     * Uses nfs.csi.k8s.io driver with the posixNfsServer/posixNfsBasePath config.
      * If they already exist, this is a no-op.
      * Note: NFS does not enforce the declared capacity; it is used only for display.
      *
      * @param userId      the user identifier
      * @param storageSize nominal size for display (e.g. "50Gi")
      */
-    public void createNfsK8sPvPvc(String userId, String storageSize) {
-        String pvName = userPvName(userId, "nfs-k8s");
-        String pvcName = userPvcName(userId, "nfs-k8s");
+    public void createNfsPvPvc(String userId, String storageSize) {
+        String pvName = userPvName(userId, "posix");
+        String pvcName = userPvcName(userId, "posix");
         String sanitized = sanitizeUserId(userId);
-        String nfsPath = nfsK8sBasePath + "/" + sanitized;
+        String nfsPath = posixNfsBasePath + "/" + sanitized;
 
         // Ensure user directory exists on NFS server before creating PV
         PersistentVolume existingPv = client.persistentVolumes().withName(pvName).get();
         if (existingPv == null) {
-            ensureNfsK8sDirectory(sanitized);
+            ensureNfsDirectory(sanitized);
 
             PersistentVolume pv = new PersistentVolumeBuilder()
                 .withNewMetadata()
@@ -1006,7 +1082,7 @@ public class K8sApiClient {
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
                     .addToLabels("user", UserKey.encode(userId))
-                    .addToLabels("storage-type", "nfs-k8s")
+                    .addToLabels("storage-type", "posix")
                 .endMetadata()
                 .withNewSpec()
                     .withCapacity(Map.of("storage", new Quantity(storageSize)))
@@ -1016,14 +1092,14 @@ public class K8sApiClient {
                     .withNewCsi()
                         .withDriver("nfs.csi.k8s.io")
                         .withVolumeHandle(pvName)
-                        .addToVolumeAttributes("server", nfsK8sServer)
+                        .addToVolumeAttributes("server", posixNfsServer)
                         .addToVolumeAttributes("share", nfsPath)
                     .endCsi()
                     .withMountOptions(List.of("nfsvers=4"))
                 .endSpec()
                 .build();
             client.persistentVolumes().resource(pv).create();
-            LOG.info("NFS-k8s PV created: " + pvName + " -> " + nfsK8sServer + ":" + nfsPath);
+            LOG.info("Shared file storage PV created: " + pvName + " -> " + posixNfsServer + ":" + nfsPath);
         }
 
         // Create PVC if absent
@@ -1037,7 +1113,7 @@ public class K8sApiClient {
                     .addToLabels("app", "k8s-pups-user")
                     .addToLabels("managed-by", "k8s-pups")
                     .addToLabels("user", UserKey.encode(userId))
-                    .addToLabels("storage-type", "nfs-k8s")
+                    .addToLabels("storage-type", "posix")
                 .endMetadata()
                 .withNewSpec()
                     .withAccessModes("ReadWriteMany")
@@ -1049,12 +1125,12 @@ public class K8sApiClient {
                 .endSpec()
                 .build();
             client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
-            LOG.info("NFS-k8s PVC created: " + pvcName + " (" + storageSize + ")");
+            LOG.info("Shared file storage PVC created: " + pvcName + " (" + storageSize + ")");
         }
     }
 
     /**
-     * Ensures the user directory exists on the NFS server for nfs-k8s storage.
+     * Ensures the user directory exists on the NFS server for the shared file storage of the nfs backend.
      * Runs a temporary Pod that mounts the NFS base path and creates the user subdirectory
      * with ownership set recursively to the tool Pod IDs ({@code k8spups.tool-pod.uid} and
      * {@code k8spups.tool-pod.gid}, see ToolPodIds), or 1000:1000 when they are not configured.
@@ -1065,13 +1141,13 @@ public class K8sApiClient {
      * directory or its contents could remain root-owned, leaving the non-root tool
      * container unable to write and uploads failing with permission denied.
      */
-    private void ensureNfsK8sDirectory(String sanitizedUserId) {
+    private void ensureNfsDirectory(String sanitizedUserId) {
         ToolPodIds ids = ToolPodIds.resolve(1000L, toolPodUid, toolPodGid);
         String cmd = "mkdir -p /mnt/nfs-base/" + sanitizedUserId
             + " && chown -R " + ids.uid() + ":" + ids.gid() + " /mnt/nfs-base/" + sanitizedUserId
             + " && echo 'Directory ready'";
-        runNfsScriptPod("nfs-k8s-init-" + sanitizedUserId, "k8s-pups-nfs-init",
-            nfsK8sServer, nfsK8sBasePath, cmd);
+        runNfsScriptPod("posix-nfs-init-" + sanitizedUserId, "k8s-pups-nfs-init",
+            posixNfsServer, posixNfsBasePath, cmd);
     }
 
     /**
@@ -1343,8 +1419,8 @@ public class K8sApiClient {
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).delete();
         LOG.info("PVC deleted: " + pvcName);
 
-        // For NFS types, also delete the PV
-        if ("nfs-k8s".equals(storageType)) {
+        // With the nfs backend the PV is ours (static), so it goes with the PVC
+        if ("posix".equals(storageType) && posixUsesNfs()) {
             String pvName = userPvName(userId, storageType);
             try {
                 client.persistentVolumes().withName(pvName).delete();
@@ -1414,11 +1490,11 @@ public class K8sApiClient {
     }
 
     /**
-     * Returns PVC info for all storage types (lustre-csi, longhorn, nfs-k8s).
+     * Returns PVC info for all storage types (posix, longhorn).
      */
     public Map<String, Object> getAllUserPvcInfo(String userId) {
         Map<String, Object> result = new HashMap<>();
-        for (String type : List.of("lustre-csi", "longhorn", "nfs-k8s")) {
+        for (String type : List.of("posix", "longhorn")) {
             result.put(type, getUserPvcInfo(userId, type));
         }
         return result;
@@ -1548,14 +1624,14 @@ public class K8sApiClient {
 
         // Storage type determines what gets mounted at userDataMountPath:
         //   longhorn  -> Longhorn PVC (RWO block storage)
-        //   nfs-k8s   -> NFS k8s-dedicated PVC (RWX)
+        //   posix     -> shared file storage PVC (RWX)
         // Session resolves the storage type and writes it into SessionInfo before
         // creating the Pod. This fallback only covers callers that build a Pod without
         // going through Session, and must agree with Session.resolveStorageType():
         // a hardcoded "longhorn" here mounted a PVC that was never provisioned.
         String storageType = info.userStorageType() != null && !info.userStorageType().isBlank()
             ? info.userStorageType()
-            : System.getenv().getOrDefault("K8SPUPS_DEFAULT_STORAGE_TYPE", "nfs-k8s");
+            : System.getenv().getOrDefault("K8SPUPS_DEFAULT_STORAGE_TYPE", "posix");
 
         Map<String, String> labels = Map.of(
             "app", "k8s-pups-user",
@@ -1583,7 +1659,7 @@ public class K8sApiClient {
 
     /**
      * Builds the single-container Pod of a session.
-     * The user PVC of the storage type (lustre-csi / longhorn / nfs-k8s) is mounted at userDataMountPath.
+     * The user PVC of the storage type (posix / longhorn) is mounted at userDataMountPath.
      */
     private Pod buildSingleContainerPod(SessionInfo info, ToolPlugin plugin,
             List<EnvVar> envVars, Map<String, Quantity> requests, Map<String, Quantity> limits,
@@ -1678,7 +1754,7 @@ public class K8sApiClient {
         // Init container: seed PVC with /etc/skel if empty.
         // Runs as the pod-level UID (same as the main container).
         // NFS directory ownership is set to the tool Pod IDs at PVC creation time by
-        // ensureNfsK8sDirectory(), so the pod-level UID can write here without root.
+        // ensureNfsDirectory(), so the pod-level UID can write here without root.
         List<io.fabric8.kubernetes.api.model.Container> initContainers = new ArrayList<>();
         if (plugin.userDataMountPath() != null) {
             String seedCmd =

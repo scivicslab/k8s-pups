@@ -6,7 +6,7 @@ package com.scivicslab.k8spups.k8s;
  * this record describes the secondary mounts the user chose at launch. The controller checks each against the
  * user's allocations, dataset grants and group memberships before the Pod is created.
  *
- * @param storageType  storage type key: "lustre-csi", "longhorn", "nfs-k8s" (the user's own storage),
+ * @param storageType  storage type key: "posix", "longhorn" (the user's own storage),
  *                     "group" (a group's storage), "dataset-root" (one dataset), "dataset" (the files granted one by one)
  * @param mountPath    absolute path inside the container (e.g. "/data")
  * @param sharedFrom   the group name for "group"; null otherwise
