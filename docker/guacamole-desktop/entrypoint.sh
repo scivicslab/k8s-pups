@@ -1,5 +1,20 @@
 #!/bin/bash
 
+# Ensure current UID/GID exist in /etc/passwd and /etc/group.
+# Required for dbus-launch and MATE, which resolve the current user via NSS.
+# The container runs as the tool Pod ID (e.g. 1000), which may not
+# exist in the image's /etc/passwd.
+CURRENT_UID=$(id -u)
+CURRENT_GID=$(id -g)
+if ! id -un "$CURRENT_UID" >/dev/null 2>&1; then
+    echo "desktop:x:${CURRENT_UID}:${CURRENT_GID}:Desktop User:${HOME}:/bin/bash" >> /etc/passwd
+    echo "Added passwd entry for UID ${CURRENT_UID}"
+fi
+if ! getent group "$CURRENT_GID" >/dev/null 2>&1; then
+    echo "desktop:x:${CURRENT_GID}:" >> /etc/group
+    echo "Added group entry for GID ${CURRENT_GID}"
+fi
+
 # Fix PVC-mounted home directory permissions.
 # When a persistent PVC is mounted at /home/user, directories from previous sessions
 # (e.g. JupyterLab) may be owned by root, preventing MATE components from writing.
