@@ -1,0 +1,35 @@
+api_key: buildkey
+galaxy_instance: http://127.0.0.1:8080
+install_resolver_dependencies: true
+install_tool_dependencies: true
+tools:
+- name: fastqc
+  owner: devteam
+  tool_panel_section_label: Quality Control
+- name: fastp
+  owner: iuc
+  tool_panel_section_label: Quality Control
+- name: multiqc
+  owner: iuc
+  tool_panel_section_label: Quality Control
+- name: bwa
+  owner: devteam
+  tool_panel_section_label: Mapping
+- name: samtools_sort
+  owner: devteam
+  tool_panel_section_label: SAM/BAM
+- name: samtools_flagstat
+  owner: devteam
+  tool_panel_section_label: SAM/BAM
+- name: samtools_view
+  owner: iuc
+  tool_panel_section_label: SAM/BAM
+- name: bcftools_mpileup
+  owner: iuc
+  tool_panel_section_label: Variant Calling
+- name: bcftools_call
+  owner: iuc
+  tool_panel_section_label: Variant Calling
+- name: freebayes
+  owner: devteam
+  tool_panel_section_label: Variant Calling

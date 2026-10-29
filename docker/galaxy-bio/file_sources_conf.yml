@@ -1,0 +1,13 @@
+# Data the administrator has placed on the mounted storage, offered in the upload dialog (read-only).
+- type: posix
+  id: datasets
+  label: Datasets
+  doc: Datasets that the administrator has approved for this site
+  root: /datasets
+  writable: false
+- type: posix
+  id: groups
+  label: Group storage
+  doc: Storage shared by the groups that you belong to
+  root: /groups
+  writable: false

@@ -1,0 +1,3 @@
+<dependency_resolvers>
+  <conda prefix="/galaxy/conda" auto_install="false" auto_init="false"/>
+</dependency_resolvers>
