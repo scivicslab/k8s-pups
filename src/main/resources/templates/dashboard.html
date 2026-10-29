@@ -655,7 +655,7 @@
         var typeSelect = document.createElement('select');
         typeSelect.name = 'extraType_' + existingRows.length;
         typeSelect.className = 'profile-select';
-        typeSelect.style.cssText = 'flex:1;font-size:0.8rem;';
+        typeSelect.style.cssText = 'flex:3;min-width:0;font-size:0.8rem;margin-bottom:0;';
         MOUNT_CHOICES.forEach(function(c) {
             var opt = document.createElement('option');
             opt.value = c.value;
@@ -665,7 +665,7 @@
         var pathInput = document.createElement('input');
         pathInput.name = 'extraPath_' + existingRows.length;
         pathInput.className = 'profile-select';
-        pathInput.style.cssText = 'flex:1;font-size:0.8rem;';
+        pathInput.style.cssText = 'flex:2;min-width:0;font-size:0.8rem;margin-bottom:0;';
         pathInput.required = true;
         if (value) typeSelect.value = value;
         pathInput.value = path || (choiceOf(typeSelect.value) || {}).path || '/data';
@@ -677,8 +677,9 @@
         };
         var removeBtn = document.createElement('button');
         removeBtn.type = 'button';
-        removeBtn.textContent = '\u00D7';
-        removeBtn.style.cssText = 'background:none;border:none;color:#DC2626;font-size:1.1rem;cursor:pointer;padding:0 4px;';
+        removeBtn.textContent = 'Delete';
+        removeBtn.title = 'Delete this mount';
+        removeBtn.style.cssText = 'background:none;border:1px solid #DC2626;border-radius:6px;color:#DC2626;font-size:0.75rem;cursor:pointer;padding:3px 8px;white-space:nowrap;';
         removeBtn.onclick = function() { row.remove(); reindexExtraMounts(container); };
         row.appendChild(typeSelect);
         row.appendChild(pathInput);
