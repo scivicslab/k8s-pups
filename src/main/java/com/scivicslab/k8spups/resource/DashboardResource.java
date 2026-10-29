@@ -280,7 +280,12 @@ public class DashboardResource {
         data.put("storageTypeOptions", allocatedTypes);
         data.put("storageTypeNames", StorageTypes.names(allocatedTypes));
         // The mounts the user can add (own storage, group storage, datasets) and each tool's remembered choices
-        List<MountChoices.Choice> choices = mountChoices(userId, allocatedTypes);
+        // Own storage can be added as a mount only when its PVC exists (the launch of a Pod with a missing claim hangs)
+        final Map<String, Object> pvcStates = allPvcInfo;
+        List<String> existingTypes = allocatedTypes.stream()
+            .filter(t -> pvcStates.get(t) instanceof Map<?, ?> m && "true".equals(String.valueOf(m.get("exists"))))
+            .toList();
+        List<MountChoices.Choice> choices = mountChoices(userId, existingTypes);
         Map<String, String> remembered = new HashMap<>();
         try {
             ActorRef<StorageAllocationService> alloc = actorSystem.getStorageAllocations();

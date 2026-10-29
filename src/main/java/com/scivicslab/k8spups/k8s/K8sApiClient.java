@@ -1742,19 +1742,27 @@ public class K8sApiClient {
                     : userPvcName(info.userId(), extra.storageType());
                 boolean readOnly = dataset || extra.readOnly();
 
+                // The storage the Pod already mounts as its home is mounted again at the extra path from the same
+                // volume: a second volume of the same claim hangs the Pod on a CSI driver that mounts a claim once
+                // per node (Lustre on a007).
+                boolean sameAsHome = plugin.userDataMountPath() != null && !dataset
+                    && !GROUP_STORAGE_TYPE.equals(extra.storageType())
+                    && pvcName.equals(userPvcName(info.userId(), storageType));
                 var mountBuilder = new VolumeMountBuilder()
-                    .withName(volName)
+                    .withName(sameAsHome ? "user-data" : volName)
                     .withMountPath(extra.mountPath())
                     .withReadOnly(readOnly);
                 if (extra.subPath() != null) mountBuilder.withSubPath(extra.subPath());
                 mounts.add(mountBuilder.build());
 
-                volumes.add(new VolumeBuilder().withName(volName)
-                    .withNewPersistentVolumeClaim()
-                        .withClaimName(pvcName)
-                        .withReadOnly(readOnly)
-                    .endPersistentVolumeClaim()
-                    .build());
+                if (!sameAsHome) {
+                    volumes.add(new VolumeBuilder().withName(volName)
+                        .withNewPersistentVolumeClaim()
+                            .withClaimName(pvcName)
+                            .withReadOnly(readOnly)
+                        .endPersistentVolumeClaim()
+                        .build());
+                }
                 idx++;
             }
         }
