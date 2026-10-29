@@ -98,6 +98,23 @@ public class GalaxyPlugin implements ToolPlugin {
     }
 
     @Override
+    public String readinessProbePath() {
+        // Galaxy needs about two minutes to start. The session is ready, and the dashboard shows "Open",
+        // only when the API answers under the session path.
+        return SESSION_PATH_PLACEHOLDER + "/api/version";
+    }
+
+    @Override
+    public int readinessProbeInitialDelay() {
+        return 45;
+    }
+
+    @Override
+    public int readinessProbePeriod() {
+        return 5;
+    }
+
+    @Override
     public boolean singleInstance() {
         return true;
     }

@@ -1595,13 +1595,13 @@ public class K8sApiClient {
             .build();
     }
 
-    private Probe buildReadinessProbe(ToolPlugin plugin) {
+    private Probe buildReadinessProbe(ToolPlugin plugin, String sessionId) {
         if (plugin.readinessProbePath() == null) {
             return null;
         }
         return new ProbeBuilder()
             .withNewHttpGet()
-                .withPath(plugin.readinessProbePath())
+                .withPath(SessionPath.expand(plugin.readinessProbePath(), sessionId))
                 .withPort(new IntOrString(plugin.containerPort()))
             .endHttpGet()
             .withInitialDelaySeconds(plugin.readinessProbeInitialDelay())
@@ -1822,7 +1822,7 @@ public class K8sApiClient {
                     .endResources()
                     .withVolumeMounts(mounts)
                     .withSecurityContext(buildContainerSecurityContext(plugin, plugin.readOnlyRootFilesystem()))
-                    .withReadinessProbe(buildReadinessProbe(plugin))
+                    .withReadinessProbe(buildReadinessProbe(plugin, info.sessionId()))
                 .endContainer()
                 .withVolumes(volumes)
                 .withRestartPolicy("Never")

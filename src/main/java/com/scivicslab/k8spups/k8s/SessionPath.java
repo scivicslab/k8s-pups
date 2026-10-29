@@ -27,4 +27,9 @@ public final class SessionPath {
     public static String of(String id) {
         return prefix() + "/session/" + id;
     }
+
+    /** {@code template} with {@link com.scivicslab.k8spups.plugin.ToolPlugin#SESSION_PATH_PLACEHOLDER} replaced by the session path. */
+    public static String expand(String template, String id) {
+        return template.replace(com.scivicslab.k8spups.plugin.ToolPlugin.SESSION_PATH_PLACEHOLDER, of(id));
+    }
 }

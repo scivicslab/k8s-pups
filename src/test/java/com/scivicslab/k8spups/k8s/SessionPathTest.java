@@ -24,4 +24,15 @@ class SessionPathTest {
     void subToolIdIsKeptAsGiven() {
         assertEquals("/pups-with-audit/session/abc-tool-8000", SessionPath.of("abc-tool-8000"));
     }
+
+    @Test
+    void readinessProbePathTakesTheSessionPath() {
+        assertEquals("/pups-with-audit/session/abc/api/version", SessionPath.expand("{sessionPath}/api/version", "abc"));
+        assertEquals("/config", SessionPath.expand("/config", "abc"));
+    }
+
+    @Test
+    void galaxyIsNotReadyBeforeItsApiAnswersUnderTheSessionPath() {
+        assertEquals("{sessionPath}/api/version", new com.scivicslab.k8spups.plugin.GalaxyPlugin().readinessProbePath());
+    }
 }

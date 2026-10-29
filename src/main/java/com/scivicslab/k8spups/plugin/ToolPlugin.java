@@ -128,10 +128,16 @@ public interface ToolPlugin {
         return false;
     }
 
+    /** In {@link #readinessProbePath()}: replaced by the session path ({@code <prefix>/session/<id>}). */
+    String SESSION_PATH_PLACEHOLDER = "{sessionPath}";
+
     /**
      * HTTP path for the readiness probe on containerPort().
      * Return null (default) to skip the readiness probe.
-     * When set, k8s will not route traffic to the pod until this endpoint returns 200.
+     * When set, k8s will not route traffic to the pod until this endpoint returns 200, and the dashboard
+     * shows no "Open" button before that. A tool that serves under its session path (passthroughPath())
+     * writes {@link #SESSION_PATH_PLACEHOLDER} where the session path goes, for example
+     * {@code "{sessionPath}/api/version"}.
      */
     default String readinessProbePath() {
         return null;
