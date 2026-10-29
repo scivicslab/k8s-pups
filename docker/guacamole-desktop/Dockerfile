@@ -203,6 +203,9 @@ RUN sed -i 's|</head>|<script src="auto-login.js"></script></head>|' \
 
 # ---- Ownership: all files under UID 1000 ----
 RUN chown -R user:user /opt/tomcat /etc/guacamole /home/user
+# The tool Pod can run as any UID (a007 runs it as the account k8s-pups, UID 30420): let other users read and run Tomcat,
+# write its logs, temp and work directories, and write the Guacamole settings that the entrypoint generates.
+RUN chmod -R o+rX /opt/tomcat && chmod -R o+rwX /opt/tomcat/logs /opt/tomcat/temp /opt/tomcat/work /etc/guacamole
 
 # ---- fcitx5 default profile: Mozc as default input method ----
 RUN mkdir -p /etc/skel/.config/fcitx5
