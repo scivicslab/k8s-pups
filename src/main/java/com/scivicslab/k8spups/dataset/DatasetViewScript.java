@@ -44,7 +44,23 @@ public final class DatasetViewScript {
         sb.append("  [ -f \"$O/$p\" ] || { echo \"MISSING $p\"; continue; }\n");
         sb.append("  mkdir -p \"$V/$(dirname \"$p\")\"\n");
         sb.append("  [ \"$(stat -c %i \"$O/$p\")\" = \"$(stat -c %i \"$V/$p\" 2>/dev/null)\" ] || ln -f \"$O/$p\" \"$V/$p\"\n");
+        // Each directory of the view gets the owner, group and mode of the original directory. A directory that is
+        // root-owned 0755 makes Lustre refuse a read that the group of the file allows (a007); best effort, because an
+        // NFS export may squash root and refuse chown.
+        sb.append("  acc=\"\"\n");
+        sb.append("  for part in $(dirname \"$p\" | tr '/' ' '); do\n");
+        sb.append("    [ \"$part\" = . ] && continue\n");
+        sb.append("    acc=\"$acc${acc:+/}$part\"\n");
+        sb.append("    chown \"$(stat -c %u:%g \"$O/$acc\")\" \"$V/$acc\" 2>/dev/null || true\n");
+        sb.append("    chmod \"$(stat -c %a \"$O/$acc\")\" \"$V/$acc\" 2>/dev/null || true\n");
+        sb.append("  done\n");
         sb.append("done < /tmp/wanted\n");
+        // The directory of the view itself (the one a Pod mounts) is like the first dataset directory in it.
+        sb.append("first=$(sed -n 1p /tmp/wanted | cut -d/ -f1)\n");
+        sb.append("if [ -n \"$first\" ] && [ -d \"$O/$first\" ]; then\n");
+        sb.append("  chown \"$(stat -c %u:%g \"$O/$first\")\" \"$V\" 2>/dev/null || true\n");
+        sb.append("  chmod \"$(stat -c %a \"$O/$first\")\" \"$V\" 2>/dev/null || true\n");
+        sb.append("fi\n");
         // Links of files that are no longer entitled are removed, then directories left empty.
         sb.append("(cd $V && find . -type f | sed 's|^\\./||' | sort) > /tmp/have\n");
         sb.append("comm -13 /tmp/wanted /tmp/have | while read -r p; do rm -f \"$V/$p\"; done\n");

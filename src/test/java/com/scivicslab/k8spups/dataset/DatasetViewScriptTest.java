@@ -30,8 +30,12 @@ class DatasetViewScriptTest {
     @Test
     void neverChangesTheOwnerOfAFile() {
         String s = DatasetViewScript.build("original", "view", "alice", List.of("JGAD000001/sample1.txt"));
-        assertFalse(s.contains("chown"), "a hardlink is the original file: chown would change the original's owner");
-        assertFalse(s.contains("chmod"));
+        // A hardlink is the original file: chown or chmod of the link would change the original. Only the directories of
+        // the view (made by the script, never links) take the owner, group and mode of the original directories.
+        for (String line : s.split("\n")) {
+            if (line.contains("chown") || line.contains("chmod"))
+                assertFalse(line.contains("\"$V/$p\"") || line.contains("$O/$p"), "a file is never changed: " + line);
+        }
     }
 
     @Test
@@ -95,5 +99,13 @@ class DatasetViewScriptTest {
         try (var w = java.nio.file.Files.walk(view)) {
             return w.filter(java.nio.file.Files::isRegularFile).map(f -> view.relativize(f).toString()).sorted().toList();
         }
+    }
+
+    @Test
+    void theDirectoriesOfTheViewGetTheOwnerGroupAndModeOfTheOriginalDirectories() {
+        String s = DatasetViewScript.build("", "pups-view", "alice", List.of("JGAD000005/sample1.txt"));
+        assertTrue(s.contains("chown \"$(stat -c %u:%g \"$O/$acc\")\" \"$V/$acc\""));
+        assertTrue(s.contains("chmod \"$(stat -c %a \"$O/$acc\")\" \"$V/$acc\""));
+        assertTrue(s.contains("\"$V\" 2>/dev/null || true"), "the directory a Pod mounts follows the first dataset directory");
     }
 }
