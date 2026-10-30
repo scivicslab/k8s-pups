@@ -55,6 +55,8 @@ public class K8sApiClient {
     private final String posixNfsBasePath;
     /** Storage type key of the mount of the file-level view (added by the controller, never by the user). */
     public static final String DATASET_STORAGE_TYPE = "dataset";
+    /** Directory of the per-user views of the files granted one by one, at the top of the dataset root PVC. */
+    public static final String PVC_VIEW_DIR = "pups-view";
     /** Storage type key of the mounts of whole datasets (subPaths of the original directory; controller only). */
     public static final String DATASET_ROOT_STORAGE_TYPE = "dataset-root";
 
@@ -83,6 +85,8 @@ public class K8sApiClient {
     /** User ID and group ID that replace the plugin's user ID in the tool Pods (see ToolPodIds). Null = not configured. */
     private final Long toolPodUid;
     private final Long toolPodGid;
+    /** Image of the short-lived script Pods (the dataset views, the NFS directories); a cluster without internet names its own registry. */
+    private final String scriptPodImage;
     private final String datasetOriginalDir;
     private final String datasetViewDir;
     private final String datasetMountPath;
@@ -148,6 +152,8 @@ public class K8sApiClient {
         this.toolPodGid = cfg.getOptionalValue("k8spups.tool-pod.gid", String.class)
             .filter(v -> !v.isBlank()).map(Long::valueOf).orElse(null);
         ToolPodIds.resolve(1000L, toolPodUid, toolPodGid);   // refuse to start when only one of the two is set
+        this.scriptPodImage = cfg.getOptionalValue("k8spups.script-pod-image", String.class)
+            .filter(v -> !v.isBlank()).orElse("busybox:1.36");
         this.datasetOriginalDir = cfg.getOptionalValue("k8spups.dataset.original-dir", String.class).orElse("original");
         this.datasetViewDir = cfg.getOptionalValue("k8spups.dataset.view-dir", String.class).orElse("view");
         this.datasetMountPath = cfg.getOptionalValue("k8spups.dataset.mount-path", String.class).orElse("/datasets");
@@ -1163,6 +1169,17 @@ public class K8sApiClient {
      * @return true when the Pod reached the Succeeded phase
      */
     private boolean runNfsScriptPod(String namePrefix, String appLabel, String server, String basePath, String script) {
+        return runScriptPod(namePrefix, appLabel, new VolumeBuilder().withName("nfs-base")
+            .withNewNfs().withServer(server).withPath(basePath).endNfs().build(), script);
+    }
+
+    /** Runs a script in a short-lived Pod that mounts the claim read-write at /mnt/nfs-base (the dataset root PVC). */
+    private boolean runPvcScriptPod(String namePrefix, String appLabel, String claimName, String script) {
+        return runScriptPod(namePrefix, appLabel, new VolumeBuilder().withName("nfs-base")
+            .withNewPersistentVolumeClaim().withClaimName(claimName).withReadOnly(false).endPersistentVolumeClaim().build(), script);
+    }
+
+    private boolean runScriptPod(String namePrefix, String appLabel, Volume baseVolume, String script) {
         String podName = namePrefix + "-" + System.currentTimeMillis() % 100000;
         Pod initPod = new PodBuilder()
             .withNewMetadata()
@@ -1173,16 +1190,10 @@ public class K8sApiClient {
             .endMetadata()
             .withNewSpec()
                 .withRestartPolicy("Never")
-                .addNewVolume()
-                    .withName("nfs-base")
-                    .withNewNfs()
-                        .withServer(server)
-                        .withPath(basePath)
-                    .endNfs()
-                .endVolume()
+                .withVolumes(baseVolume)
                 .addNewContainer()
                     .withName("init")
-                    .withImage("busybox:1.36")
+                    .withImage(scriptPodImage)
                     .withCommand("sh", "-c", script)
                     .addNewVolumeMount()
                         .withName("nfs-base")
@@ -1324,11 +1335,11 @@ public class K8sApiClient {
      *         (the caller must then not mount it, because it may still list revoked files)
      */
     /**
-     * Whether the file-level view of datasets can be built: it is a directory on the NFS server of the datasets, so it
-     * needs that location, and it cannot be built where the dataset root is a PVC of a storage class (Lustre on a007).
+     * Whether the file-level view of datasets can be built: on the NFS server of the datasets (it needs that
+     * location), or inside the dataset root PVC when the dataset root is a PVC of a storage class (Lustre on a007).
      */
     public static boolean datasetViewSupported(String rootStorageClass, String nfsServer, String basePath) {
-        return rootStorageClass.isBlank() && !nfsServer.isBlank() && !basePath.isBlank();
+        return !rootStorageClass.isBlank() || (!nfsServer.isBlank() && !basePath.isBlank());
     }
 
     /** {@link #datasetViewSupported} for this deployment; the launch form offers the granted files only when true. */
@@ -1336,11 +1347,17 @@ public class K8sApiClient {
         return datasetViewSupported(datasetRootStorageClass, datasetNfsServer, datasetBasePath);
     }
 
+    /**
+     * Builds the user's view of the files granted one by one. On NFS it is a directory next to the original files, mounted
+     * through the user's own PV. Where the dataset root is a PVC it is the directory {@link #PVC_VIEW_DIR}/{user} inside
+     * that PVC, built in place; a tool Pod mounts only that directory (a subPath of the shared claim).
+     */
     public boolean syncDatasetView(String userId, List<String> paths) {
         if (!datasetRootStorageClass.isBlank()) {
-            LOG.warning("The file-level view of datasets needs the NFS location; not built for " + userId
-                + " because the dataset root is a PVC of the storage class " + datasetRootStorageClass);
-            return false;
+            ensureDatasetRootClaim();
+            String user = sanitizeUserId(userId);
+            String script = com.scivicslab.k8spups.dataset.DatasetViewScript.build("", PVC_VIEW_DIR, user, paths);
+            return runPvcScriptPod("dataset-view-" + user, "k8s-pups-dataset-sync", datasetRootClaimName(datasetRootStorageClass, ""), script);
         }
         if (datasetNfsServer.isBlank() || datasetBasePath.isBlank()) {
             LOG.warning("Dataset NFS location is not configured; view not built for " + userId);
@@ -1757,6 +1774,12 @@ public class K8sApiClient {
                     : GROUP_STORAGE_TYPE.equals(extra.storageType()) ? groupPvcName(extra.sharedFrom())
                     : userPvcName(info.userId(), extra.storageType());
                 boolean readOnly = dataset || extra.readOnly();
+                String subPath = extra.subPath();
+                if (DATASET_STORAGE_TYPE.equals(extra.storageType()) && !datasetRootStorageClass.isBlank()) {
+                    // The view of the granted files is a directory of the shared dataset root claim (see syncDatasetView).
+                    pvcName = datasetRootPvcName(info.userId());
+                    subPath = PVC_VIEW_DIR + "/" + sanitizeUserId(info.userId());
+                }
 
                 String volName = volumeOfClaim.get(pvcName);
                 if (volName == null) {
@@ -1773,7 +1796,7 @@ public class K8sApiClient {
                     .withName(volName)
                     .withMountPath(extra.mountPath())
                     .withReadOnly(readOnly);
-                if (extra.subPath() != null) mountBuilder.withSubPath(extra.subPath());
+                if (subPath != null) mountBuilder.withSubPath(subPath);
                 mounts.add(mountBuilder.build());
                 idx++;
             }

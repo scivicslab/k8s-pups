@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The view of the files granted one by one is a directory on the NFS server of the datasets. Where the dataset root is
- * a PVC of a storage class (a007) or the NFS location is not configured, the launch form must not offer it: a launch
- * that asks for it is refused.
+ * The view of the files granted one by one is a directory on the NFS server of the datasets, or a directory inside the
+ * dataset root PVC where that is a PVC of a storage class (a007). With neither, the launch form must not offer it: a
+ * launch that asks for it is refused.
  */
 class DatasetViewSupportedTest {
 
@@ -18,9 +18,9 @@ class DatasetViewSupportedTest {
     }
 
     @Test
-    void notSupportedWhereTheDatasetRootIsAPvc() {
-        assertFalse(K8sApiClient.datasetViewSupported("lustre-csi-pups", "", ""));
-        assertFalse(K8sApiClient.datasetViewSupported("lustre-csi-pups", "192.168.5.9", "/data/datasets"));
+    void supportedInsideThePvcWhereTheDatasetRootIsAPvc() {
+        assertTrue(K8sApiClient.datasetViewSupported("lustre-csi-pups", "", ""));
+        assertTrue(K8sApiClient.datasetViewSupported("lustre-csi-pups", "192.168.5.9", "/data/datasets"));
     }
 
     @Test

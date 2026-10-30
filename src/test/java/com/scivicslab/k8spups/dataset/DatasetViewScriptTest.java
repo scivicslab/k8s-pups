@@ -56,4 +56,44 @@ class DatasetViewScriptTest {
                 () -> DatasetViewScript.build("original", "view", bad, List.of()), bad);
         }
     }
+
+    @Test
+    void anEmptyOriginalDirectoryMeansTheTopOfTheMountedBase() {
+        String s = DatasetViewScript.build("", "pups-view", "alice", List.of("JGAD000001/sample1.txt"));
+        assertTrue(s.contains("O=$B\n"));
+        assertTrue(s.contains("V=$B/pups-view/alice\n"));
+    }
+
+    /** Runs the script on a real directory: the datasets are at the top (the dataset root PVC), the view is inside it. */
+    @Test
+    void theViewInsideTheDatasetRootHoldsHardlinksOfExactlyTheEntitledFiles(@org.junit.jupiter.api.io.TempDir java.nio.file.Path base) throws Exception {
+        java.nio.file.Files.createDirectories(base.resolve("JGAD000005"));
+        java.nio.file.Files.createDirectories(base.resolve("JGAD000002"));
+        java.nio.file.Files.writeString(base.resolve("JGAD000005/sample1.txt"), "one");
+        java.nio.file.Files.writeString(base.resolve("JGAD000005/sample2.txt"), "two");
+        java.nio.file.Files.writeString(base.resolve("JGAD000002/sample1.txt"), "other");
+
+        run(base, DatasetViewScript.build("", "pups-view", "alice", List.of("JGAD000005/sample1.txt")));
+        java.nio.file.Path view = base.resolve("pups-view/alice");
+        assertEquals(List.of("JGAD000005/sample1.txt"), files(view));
+        assertEquals(java.nio.file.Files.getAttribute(base.resolve("JGAD000005/sample1.txt"), "unix:ino"),
+            java.nio.file.Files.getAttribute(view.resolve("JGAD000005/sample1.txt"), "unix:ino"), "a hardlink of the original");
+
+        // The grant of that file ends and another is given: the view follows, and nothing else appears.
+        run(base, DatasetViewScript.build("", "pups-view", "alice", List.of("JGAD000005/sample2.txt")));
+        assertEquals(List.of("JGAD000005/sample2.txt"), files(view));
+        assertEquals("one", java.nio.file.Files.readString(base.resolve("JGAD000005/sample1.txt")), "the original stays");
+    }
+
+    private static void run(java.nio.file.Path base, String script) throws Exception {
+        Process p = new ProcessBuilder("sh", "-c", script.replace("/mnt/nfs-base", base.toString())).redirectErrorStream(true).start();
+        String out = new String(p.getInputStream().readAllBytes());
+        assertEquals(0, p.waitFor(), out);
+    }
+
+    private static List<String> files(java.nio.file.Path view) throws Exception {
+        try (var w = java.nio.file.Files.walk(view)) {
+            return w.filter(java.nio.file.Files::isRegularFile).map(f -> view.relativize(f).toString()).sorted().toList();
+        }
+    }
 }

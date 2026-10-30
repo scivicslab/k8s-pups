@@ -13,13 +13,14 @@ public final class DatasetViewScript {
     private DatasetViewScript() {}
 
     /**
-     * @param originalDir directory name of the original files, relative to the mounted base
+     * @param originalDir directory name of the original files, relative to the mounted base; empty when the original
+     *                    files are the top level of the mounted base (the dataset root is a PVC)
      * @param viewDir     directory name of the views, relative to the mounted base
      * @param user        user name (one directory under the view directory)
      * @param paths       relative paths of the entitled files, relative to {@code originalDir}
      */
     public static String build(String originalDir, String viewDir, String user, Collection<String> paths) {
-        DatasetPath.requireRelativePath(originalDir);
+        if (!originalDir.isEmpty()) DatasetPath.requireRelativePath(originalDir);
         DatasetPath.requireRelativePath(viewDir);
         DatasetPath.requireUserName(user);
         TreeSet<String> sorted = new TreeSet<>();
@@ -30,7 +31,7 @@ public final class DatasetViewScript {
         sb.append("set -e\n");
         sb.append("B=/mnt/nfs-base\n");
         sb.append("V=").append(view).append("\n");
-        sb.append("O=$B/").append(originalDir).append("\n");
+        sb.append("O=$B").append(originalDir.isEmpty() ? "" : "/" + originalDir).append("\n");
         sb.append("mkdir -p $V\n");
         // The view is updated in place, not rebuilt: a running tool keeps reading the files that
         // stay entitled while links are added and removed around them.
