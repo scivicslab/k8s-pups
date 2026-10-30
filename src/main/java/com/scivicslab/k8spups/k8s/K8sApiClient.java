@@ -1613,6 +1613,48 @@ public class K8sApiClient {
         return profiles.get(0);
     }
 
+    private static final java.util.regex.Pattern PLAIN_DIR = java.util.regex.Pattern.compile("[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*");
+
+    /**
+     * The shell commands that make ready the mount points of the extra mounts that lie under the tool's home, run by the
+     * init container as the user. A mount point that the kubelet makes itself is owned by root and stays in the home after
+     * the session, where the user cannot remove it. So: the empty directories that an earlier session left under
+     * {@code datasets/}, {@code groups/} and the like are removed (empty ones only), and this session's mount points are
+     * made as the user. Paths with anything but plain segments are left to the kubelet (they end up in a shell script).
+     *
+     * @param home       the directory the tool mounts the user's storage at (the root of the storage in the Pod)
+     * @param mountPaths the paths of the extra mounts
+     * @return the commands (the cleaning is done even when there is no extra mount now)
+     */
+    static String mountPointPrep(String home, java.util.List<String> mountPaths) {
+        String prefix = home.endsWith("/") ? home : home + "/";
+        // The default parents of the launch form are always cleaned: a session without extra mounts must not show the mount
+        // points of the last one.
+        java.util.TreeSet<String> parents = new java.util.TreeSet<>(java.util.List.of("datasets", "groups"));
+        java.util.TreeSet<String> dirs = new java.util.TreeSet<>();
+        for (String path : mountPaths) {
+            if (!path.startsWith(prefix)) continue;
+            String rel = path.substring(prefix.length());
+            if (rel.endsWith("/")) rel = rel.substring(0, rel.length() - 1);
+            if (rel.isEmpty() || !PLAIN_DIR.matcher(rel).matches() || rel.contains("..")) continue;
+            dirs.add(rel);
+            int slash = rel.indexOf('/');
+            if (slash > 0) parents.add(rel.substring(0, slash));
+        }
+        StringBuilder sb = new StringBuilder("cd /mnt/pvc");
+        for (String parent : parents) {
+            sb.append("; for s in '").append(parent).append("'/*; do [ -d \"$s\" ] && rmdir \"$s\" 2>/dev/null; done");
+        }
+        sb.append("; rmdir 'dataset-files' 'data' 2>/dev/null");
+        if (!dirs.isEmpty()) {
+            sb.append("; mkdir -p");
+            for (String d : dirs) sb.append(" '").append(d).append("'");
+        }
+        // The init container must succeed whatever was or was not there to remove (the exit status is that of the last command).
+        sb.append("; true");
+        return sb.toString();
+    }
+
     /**
      * Copies the image's /etc/passwd and /etc/group to /identity and adds the Pod's own UID and GID when the image
      * has no entry for them (it never has: the ID is the cluster's, not the image's). The tool container mounts the
@@ -1723,10 +1765,11 @@ public class K8sApiClient {
         }
         if (plugin.userDataMountPath() != null) {
             // Mount the user PVC at userDataMountPath
-            mounts.add(new VolumeMountBuilder()
+            var userDataMount = new VolumeMountBuilder()
                 .withName("user-data")
-                .withMountPath(plugin.userDataMountPath())
-                .build());
+                .withMountPath(plugin.userDataMountPath());
+            if (plugin.userDataSubPath() != null) userDataMount.withSubPath(plugin.userDataSubPath());
+            mounts.add(userDataMount.build());
         }
 
         List<Volume> volumes = new ArrayList<>();
@@ -1834,6 +1877,13 @@ public class K8sApiClient {
                 + "cp -a /etc/skel/. /mnt/pvc/ 2>/dev/null || true; "
                 + "echo 'Seed complete'; "
                 + "else echo 'PVC already has data, skipping seed'; fi";
+            // A tool with a data directory of its own (userDataSubPath) needs that directory, not the skeleton of a home.
+            if (plugin.userDataSubPath() != null) seedCmd = "mkdir -p '/mnt/pvc/" + plugin.userDataSubPath() + "'";
+            else if (plugin.extraMountsUnder() != null) {
+                java.util.List<String> extraPaths = info.additionalMounts() == null ? java.util.List.of()
+                    : info.additionalMounts().stream().map(MountSpec::mountPath).toList();
+                seedCmd = seedCmd + "; " + mountPointPrep(plugin.userDataMountPath(), extraPaths);
+            }
             initContainers.add(new io.fabric8.kubernetes.api.model.ContainerBuilder()
                 .withName("seed-home")
                 .withImage(imageResolver.resolve(plugin))

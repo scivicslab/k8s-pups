@@ -420,7 +420,7 @@
             <div class="tool-icon"><img src="{tool.icon}" alt="{tool.displayName}"></div>
             <div class="tool-name">{tool.displayName}</div>
             <div class="tool-desc">{tool.description}</div>
-            <form method="post" action="session/start" data-remembered="{rememberedMounts.get(tool.name) ?: ''}">
+            <form method="post" action="session/start" data-remembered="{rememberedMounts.get(tool.name) ?: ''}" data-mounts-under="{tool.extraMountsUnder ?: ''}">
                 <input type="hidden" name="tool" value="{tool.name}">
                 {#if tool.resourceProfiles.size > 1}
                 <select name="profile" class="profile-select">
@@ -640,6 +640,13 @@
         return null;
     }
 
+    // The default path of a choice: under the directory the tool shows (its home) when the tool has one, so that the
+    // group storage and the datasets are where the tool's own file browser can open them.
+    function defaultPathOf(form, choice) {
+        var under = (form && form.dataset.mountsUnder) || '';
+        return (under ? under.replace(/\/+$/, '') : '') + choice.path;
+    }
+
     // Add extra mount row to a tool launch form (value and path: a remembered choice, or empty)
     var extraMountCounter = 0;
     function addExtraMount(btn, value, path) {
@@ -668,12 +675,16 @@
         pathInput.style.cssText = 'flex:2;min-width:0;font-size:0.8rem;margin-bottom:0;';
         pathInput.required = true;
         if (value) typeSelect.value = value;
-        pathInput.value = path || (choiceOf(typeSelect.value) || {}).path || '/data';
-        var lastDefault = (choiceOf(typeSelect.value) || {}).path;
+        var form = btn.closest('form');
+        var chosen = choiceOf(typeSelect.value);
+        // A remembered path that is the old default (/groups/x, without the home) becomes the new default of the tool.
+        if (path && chosen && path === chosen.path) path = defaultPathOf(form, chosen);
+        pathInput.value = path || (chosen ? defaultPathOf(form, chosen) : '/data');
+        var lastDefault = chosen ? defaultPathOf(form, chosen) : undefined;
         typeSelect.onchange = function() {
             var c = choiceOf(typeSelect.value);
-            if (c && (pathInput.value === '' || pathInput.value === lastDefault)) pathInput.value = c.path;
-            lastDefault = c ? c.path : lastDefault;
+            if (c && (pathInput.value === '' || pathInput.value === lastDefault)) pathInput.value = defaultPathOf(form, c);
+            lastDefault = c ? defaultPathOf(form, c) : lastDefault;
         };
         var removeBtn = document.createElement('button');
         removeBtn.type = 'button';

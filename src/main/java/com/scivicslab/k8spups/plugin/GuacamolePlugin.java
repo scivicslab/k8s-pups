@@ -89,6 +89,12 @@ public class GuacamolePlugin implements ToolPlugin {
     }
 
     @Override
+    public String extraMountsUnder() {
+        // The screen of this tool shows the home only: the extra mounts are found there.
+        return userDataMountPath();
+    }
+
+    @Override
     public boolean readOnlyRootFilesystem() {
         // Desktop environment writes to /var/log, /run, /var/lib etc. at startup.
         return false;

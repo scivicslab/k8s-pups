@@ -77,6 +77,26 @@ public interface ToolPlugin {
     }
 
     /**
+     * A directory of the user's storage that this tool uses as its own data directory, instead of the root of the storage.
+     * The root is the home of the other tools (JupyterLab, the desktop), so a tool that keeps internal files in its data
+     * directory (Galaxy: its database, jobs and datasets) would fill their home with them. The directory is created at the
+     * start of the Pod. Null (the default): the tool mounts the root of the storage.
+     */
+    default String userDataSubPath() {
+        return null;
+    }
+
+    /**
+     * The directory under which the extra mounts of the launch form get their default paths: {@code <dir>/groups/<name>},
+     * {@code <dir>/datasets/<name>}, {@code <dir>/dataset-files}. A tool whose screen shows only the user's home (JupyterLab,
+     * the desktop, the file browser) returns its home, so that the group storage and the datasets are found there and
+     * not at a path above it that the tool cannot open. Null (the default): the paths are {@code /groups/<name>} and so on.
+     */
+    default String extraMountsUnder() {
+        return null;
+    }
+
+    /**
      * Whether to mount the container's root filesystem as read-only.
      * Default true (secure). Override to false for tools that need to write to system paths
      * (e.g. desktop environments that write to /var/log, /run, /var/lib, etc.).

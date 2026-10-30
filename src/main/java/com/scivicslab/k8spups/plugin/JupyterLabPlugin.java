@@ -97,6 +97,12 @@ public class JupyterLabPlugin implements ToolPlugin {
     }
 
     @Override
+    public String extraMountsUnder() {
+        // The screen of this tool shows the home only: the extra mounts are found there.
+        return userDataMountPath();
+    }
+
+    @Override
     public String readinessProbePath() {
         // JupyterLab serves under its session path (base_url); the session is ready, and the dashboard shows "Open",
         // only when its API answers there.

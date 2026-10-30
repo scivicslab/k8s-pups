@@ -92,6 +92,12 @@ public class GalaxyPlugin implements ToolPlugin {
     }
 
     @Override
+    public String userDataSubPath() {
+        // The database, jobs and datasets of Galaxy stay in a directory of their own, out of the home of the other tools.
+        return "galaxy";
+    }
+
+    @Override
     public boolean passthroughPath() {
         // Galaxy builds absolute URLs from its URL prefix; entrypoint.sh sets it from PUPS_SESSION_PATH.
         return true;
