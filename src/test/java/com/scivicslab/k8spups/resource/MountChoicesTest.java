@@ -42,4 +42,13 @@ class MountChoicesTest {
         assertEquals(1, r.dropped());
         assertEquals(0, MountChoices.remembered("[]", List.of(), List.of()).dropped());
     }
+
+    @Test
+    void onlyStorageWithAnExistingPvcCanBeMounted() {
+        Map<String, Object> pvcStates = Map.of(
+            "posix", Map.of("exists", "true"),
+            "longhorn", Map.of("exists", "false"));
+        assertEquals(List.of("posix"), MountChoices.withExistingPvc(List.of("posix", "longhorn", "lustre"), pvcStates));
+        assertEquals(List.of(), MountChoices.withExistingPvc(List.of("posix"), Map.of()));
+    }
 }

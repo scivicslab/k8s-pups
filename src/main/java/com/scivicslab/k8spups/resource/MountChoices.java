@@ -49,6 +49,16 @@ public final class MountChoices {
         return out;
     }
 
+    /**
+     * The allocated storage types whose PVC exists. Only these can be mounted: a Pod that names a missing claim waits
+     * for it for ever. {@code pvcStates} maps a type to its PVC state, a map with "exists" = "true" or "false".
+     */
+    public static List<String> withExistingPvc(List<String> allocatedTypes, Map<String, ?> pvcStates) {
+        return allocatedTypes.stream()
+            .filter(t -> pvcStates.get(t) instanceof Map<?, ?> m && "true".equals(String.valueOf(m.get("exists"))))
+            .toList();
+    }
+
     /** The stored JSON of a tool's choices, as {@code {"primary": ..., "mounts": [...]}}. */
     public static String toJson(String primary, List<Map<String, String>> mounts) {
         try {

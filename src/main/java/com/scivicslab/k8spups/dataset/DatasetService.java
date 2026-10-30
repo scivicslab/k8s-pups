@@ -274,7 +274,10 @@ public class DatasetService {
     public Mounts mountableDatasets(String userId) {
         if (!isAvailable()) return Mounts.NONE;
         try {
-            return new Mounts(activeDatasets(userId), !repository.activePaths(userId).isEmpty());
+            // The granted files are offered only where the view of them can be built; a launch that asked for them
+            // elsewhere would be refused.
+            return new Mounts(activeDatasets(userId),
+                !repository.activePaths(userId).isEmpty() && k8sClient.canBuildDatasetView());
         } catch (Exception e) {
             LOG.warning("Datasets of " + userId + " could not be read: " + e.getMessage());
             return Mounts.NONE;

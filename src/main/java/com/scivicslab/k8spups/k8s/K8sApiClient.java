@@ -1323,6 +1323,19 @@ public class K8sApiClient {
      * @return true when the view is in the requested state; false when it could not be built
      *         (the caller must then not mount it, because it may still list revoked files)
      */
+    /**
+     * Whether the file-level view of datasets can be built: it is a directory on the NFS server of the datasets, so it
+     * needs that location, and it cannot be built where the dataset root is a PVC of a storage class (Lustre on a007).
+     */
+    public static boolean datasetViewSupported(String rootStorageClass, String nfsServer, String basePath) {
+        return rootStorageClass.isBlank() && !nfsServer.isBlank() && !basePath.isBlank();
+    }
+
+    /** {@link #datasetViewSupported} for this deployment; the launch form offers the granted files only when true. */
+    public boolean canBuildDatasetView() {
+        return datasetViewSupported(datasetRootStorageClass, datasetNfsServer, datasetBasePath);
+    }
+
     public boolean syncDatasetView(String userId, List<String> paths) {
         if (!datasetRootStorageClass.isBlank()) {
             LOG.warning("The file-level view of datasets needs the NFS location; not built for " + userId
@@ -1730,11 +1743,14 @@ public class K8sApiClient {
                 .build());
         }
 
-        // Additional mounts (secondary PVCs at user-specified paths)
+        // Additional mounts (secondary PVCs at user-specified paths). A claim gets one volume, however many paths it is
+        // mounted at (the home storage again, or several datasets of the same dataset root): a second volume of the
+        // same claim hangs the Pod on a CSI driver that mounts a claim once per node (Lustre on a007).
         if (info.additionalMounts() != null) {
+            java.util.Map<String, String> volumeOfClaim = new java.util.HashMap<>();
+            if (plugin.userDataMountPath() != null) volumeOfClaim.put(userPvcName(info.userId(), storageType), "user-data");
             int idx = 0;
             for (MountSpec extra : info.additionalMounts()) {
-                String volName = "extra-data-" + idx;
                 boolean dataset = isDatasetStorageType(extra.storageType());
                 String pvcName = DATASET_ROOT_STORAGE_TYPE.equals(extra.storageType()) ? datasetRootPvcName(info.userId())
                     : dataset ? datasetPvcName(info.userId())
@@ -1742,20 +1758,10 @@ public class K8sApiClient {
                     : userPvcName(info.userId(), extra.storageType());
                 boolean readOnly = dataset || extra.readOnly();
 
-                // The storage the Pod already mounts as its home is mounted again at the extra path from the same
-                // volume: a second volume of the same claim hangs the Pod on a CSI driver that mounts a claim once
-                // per node (Lustre on a007).
-                boolean sameAsHome = plugin.userDataMountPath() != null && !dataset
-                    && !GROUP_STORAGE_TYPE.equals(extra.storageType())
-                    && pvcName.equals(userPvcName(info.userId(), storageType));
-                var mountBuilder = new VolumeMountBuilder()
-                    .withName(sameAsHome ? "user-data" : volName)
-                    .withMountPath(extra.mountPath())
-                    .withReadOnly(readOnly);
-                if (extra.subPath() != null) mountBuilder.withSubPath(extra.subPath());
-                mounts.add(mountBuilder.build());
-
-                if (!sameAsHome) {
+                String volName = volumeOfClaim.get(pvcName);
+                if (volName == null) {
+                    volName = "extra-data-" + idx;
+                    volumeOfClaim.put(pvcName, volName);
                     volumes.add(new VolumeBuilder().withName(volName)
                         .withNewPersistentVolumeClaim()
                             .withClaimName(pvcName)
@@ -1763,6 +1769,12 @@ public class K8sApiClient {
                         .endPersistentVolumeClaim()
                         .build());
                 }
+                var mountBuilder = new VolumeMountBuilder()
+                    .withName(volName)
+                    .withMountPath(extra.mountPath())
+                    .withReadOnly(readOnly);
+                if (extra.subPath() != null) mountBuilder.withSubPath(extra.subPath());
+                mounts.add(mountBuilder.build());
                 idx++;
             }
         }
