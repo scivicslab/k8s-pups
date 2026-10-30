@@ -1,4 +1,4 @@
-{#include dataset-base title='Users'}
+{#include admin-base title='Users' area='datasets' sub='users'}
 {#content}
 <h1>Users</h1>
 <form method="get" action="{basePath}/datasets/users">
@@ -27,7 +27,7 @@
 <p class="note">One line per access: <code>user,dataset</code> or <code>user,dataset,YYYY-MM-DD</code> (valid through that day,
     UTC). Datasets must be in the catalog. Choose a file or paste lines.</p>
 <form method="post" action="{basePath}/datasets/import/access" enctype="multipart/form-data" id="import-access">
-    <p><input type="file" name="file"></p>
+    <p><label class="file btn">Choose file<input type="file" name="file" hidden></label><span class="filename">No file chosen</span></p>
     <p><textarea name="text" rows="6" cols="60" placeholder="alice,JGAD000001&#10;bob,JGAD000002,2030-12-31"></textarea></p>
     <button type="submit">Import access</button>
 </form>

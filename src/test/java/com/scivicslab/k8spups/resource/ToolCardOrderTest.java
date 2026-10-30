@@ -12,7 +12,7 @@ class ToolCardOrderTest {
 
     @Test
     void namedCardsComeInTheFixedOrder() {
-        List<String> inOrder = List.of("Storage Settings", "File Browser", "Datasets",
+        List<String> inOrder = List.of("Storage Settings", "File Browser",
                 "Remote Desktop", "Jupyter Lab", "Jupyter AI",
                 "Chat UI with Audit Trail (Local LLM)", "AI Chat", "Program Search & Edit");
         for (int i = 1; i < inOrder.size(); i++) {
@@ -31,7 +31,7 @@ class ToolCardOrderTest {
 
     @Test
     void theRankMapHasOnlyTheNamedCards() {
-        assertEquals(9, ToolCardOrder.ranks().size());
+        assertEquals(8, ToolCardOrder.ranks().size());
         assertEquals(1, ToolCardOrder.ranks().get("Storage Settings"));
     }
 }

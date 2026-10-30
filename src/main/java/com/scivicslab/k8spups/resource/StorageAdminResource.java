@@ -5,13 +5,10 @@ import com.scivicslab.k8spups.k8s.StorageTypes;
 import com.scivicslab.k8spups.storage.StorageAllocationRepository;
 import com.scivicslab.k8spups.storage.StorageAllocationService;
 import com.scivicslab.k8spups.storage.StoragePolicy;
-import com.scivicslab.k8spups.tool.JwtRoleExtractor;
 import com.scivicslab.pojoactor.core.ActorRef;
 
-import io.quarkus.oidc.IdToken;
 import io.quarkus.qute.Template;
 import io.quarkus.security.Authenticated;
-import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.common.annotation.Blocking;
 
 import jakarta.inject.Inject;
@@ -20,7 +17,6 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.eclipse.microprofile.jwt.JsonWebToken;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -50,11 +46,7 @@ public class StorageAdminResource {
     K8sPupsActorSystem actorSystem;
 
     @Inject
-    @IdToken
-    JsonWebToken idToken;
-
-    @Inject
-    SecurityIdentity identity;
+    AdminAccess access;
 
     @Inject
     Template storageAdmin;
@@ -341,33 +333,14 @@ public class StorageAdminResource {
 
     /** Checked on every request, not only hidden in the page: a request without the link is still a request. */
     private Response requireAdmin() {
-        if (!actorSystem.isAdmin(currentUser(), roles())) {
-            LOG.warning("Storage administration refused for user " + currentUser());
-            return Response.status(Response.Status.FORBIDDEN).entity("Administrators only").build();
-        }
-        return null;
+        return access.denyUnlessAdmin("Storage administration");
     }
 
     private String currentUser() {
-        try {
-            if (idToken != null) {
-                String username = idToken.getClaim("preferred_username");
-                if (username != null) return username;
-            }
-        } catch (Exception e) {
-            // Fall back to the security identity.
-        }
-        return identity != null && !identity.isAnonymous() ? identity.getPrincipal().getName() : null;
+        return access.user();
     }
 
     private List<String> roles() {
-        try {
-            if (idToken == null) return List.of();
-            Map<String, Object> realmAccess = idToken.getClaim("realm_access");
-            Map<String, Object> resourceAccess = idToken.getClaim("resource_access");
-            return JwtRoleExtractor.extractRoles(realmAccess, resourceAccess);
-        } catch (Exception e) {
-            return List.of();
-        }
+        return access.roles();
     }
 }

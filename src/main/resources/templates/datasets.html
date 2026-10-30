@@ -1,4 +1,4 @@
-{#include dataset-base title='Datasets'}
+{#include admin-base title='Datasets' area='datasets' sub='list'}
 {#content}
 <h1>Datasets</h1>
 {#if !available}
@@ -26,7 +26,7 @@
     path segment). The path is relative to the original directory. Lines starting with # are ignored. Datasets are created
     as needed.</p>
 <form method="post" action="{basePath}/datasets/import/catalog" enctype="multipart/form-data" id="import-catalog">
-    <input type="file" name="file" required>
+    <label class="file btn">Choose file<input type="file" name="file" hidden></label><span class="filename">No file chosen</span>
     <button type="submit">Import catalog</button>
 </form>
 {/if}

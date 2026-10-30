@@ -1,4 +1,4 @@
-{#include dataset-base title=user}
+{#include admin-base title=user area='datasets' sub='users'}
 {#content}
 <h1>User <span id="user-name">{user}</span></h1>
 
@@ -20,7 +20,7 @@
 <form method="post" action="{basePath}/datasets/u/{user}/dataset/grant" id="grant-dataset">
     <p>
         <input name="dataset" placeholder="JGAD000001" required>
-        <input name="expiresOn" type="date" title="Valid through this day (UTC); empty = no expiry">
+        <input name="expiresOn" type="text" size="12" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" title="Valid through this day (UTC), as YYYY-MM-DD; empty = no expiry">
         <button type="submit">Grant a whole dataset</button>
     </p>
 </form>
@@ -48,7 +48,7 @@
 <form method="post" action="{basePath}/datasets/u/{user}/file/grant" id="grant-file">
     <p>
         <input name="path" placeholder="JGAD000001/sample1.bam" size="40" required>
-        <input name="expiresOn" type="date" title="Valid through this day (UTC); empty = no expiry">
+        <input name="expiresOn" type="text" size="12" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" title="Valid through this day (UTC), as YYYY-MM-DD; empty = no expiry">
         <button type="submit">Grant one file</button>
     </p>
 </form>

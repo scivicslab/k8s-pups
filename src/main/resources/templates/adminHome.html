@@ -1,0 +1,33 @@
+{#include admin-base title='Administration' area='home'}
+{#content}
+<style>
+    .areas { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
+    .area { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .area h2 { margin: 0 0 6px; font-size: 1.1rem; }
+    .area p { color: var(--muted); margin: 0 0 14px; font-size: .92rem; }
+</style>
+<h1>Administration</h1>
+<div class="areas" id="areas">
+    <div class="area" id="area-datasets">
+        <h2>Datasets</h2>
+        <p>Register the datasets, and give users read access to a whole dataset or to single files of it.</p>
+        <a class="btn primary" href="{basePath}/datasets">Open</a>
+    </div>
+    <div class="area" id="area-storage">
+        <h2>Storage</h2>
+        <p>Give users storage, enlarge it, take it away and give it back. Create groups and choose their members.</p>
+        <a class="btn primary" href="{basePath}/storage-admin">Open</a>
+    </div>
+    <div class="area" id="area-audit">
+        <h2>Audit</h2>
+        <p>The record of what administrators changed and which sessions mounted which dataset.</p>
+        <a class="btn primary" href="{basePath}/datasets/audit">Open</a>
+    </div>
+    <div class="area" id="area-settings">
+        <h2>Settings</h2>
+        <p>The GPU Broker URL and the default model that the AI tools share.</p>
+        <a class="btn primary" href="{basePath}/settings">Open</a>
+    </div>
+</div>
+{/content}
+{/include}

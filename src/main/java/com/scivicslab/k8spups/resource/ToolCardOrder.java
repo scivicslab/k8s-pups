@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The order of the cards in the "Launch a Tool" grid of the dashboard. The cards come from four sources (tool plugins,
- * shared services, dynamic tools, the administrator cards), so the order is given to each card as a CSS order value.
+ * The order of the cards in the "Launch a Tool" grid of the dashboard. The cards come from three sources (tool plugins,
+ * shared services, dynamic tools), so the order is given to each card as a CSS order value.
  * The named cards come first, in this order; every other card follows in the order the page builds them.
  */
 public final class ToolCardOrder {
@@ -15,7 +15,7 @@ public final class ToolCardOrder {
     public static final int OTHER = 100;
 
     private static final List<String> NAMED = List.of(
-            "Storage Settings", "File Browser", "Datasets",
+            "Storage Settings", "File Browser",
             "Remote Desktop", "Jupyter Lab", "Jupyter AI",
             "Chat UI with Audit Trail (Local LLM)", "AI Chat", "Program Search & Edit");
 

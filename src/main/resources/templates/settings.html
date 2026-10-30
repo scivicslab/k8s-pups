@@ -1,26 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Settings</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #1E293B; margin: 0; padding: 24px 32px; max-width: 760px; }
-        h1 { font-size: 1.4rem; }
-        label { display: block; margin-top: 16px; font-weight: 600; }
-        input { width: 100%; font-size: .95rem; padding: 6px 8px; box-sizing: border-box; margin-top: 4px; }
-        button { margin-top: 20px; font-size: .95rem; padding: 6px 18px; }
-        .note { color: #64748B; font-size: .85rem; margin-top: 4px; }
-        .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; }
-        .saved { background: #DCFCE7; border: 1px solid #86EFAC; padding: 8px 12px; margin: 12px 0; }
-    </style>
-</head>
-<body>
-<p><a href="{basePath}/dashboard">&larr; Dashboard</a></p>
+{#include admin-base title='Settings' area='settings'}
+{#content}
+<style>.settings { max-width: 760px; } .settings label { display: block; margin-top: 16px; font-weight: 600; } .settings input, .settings select { width: 100%; margin-top: 4px; } .settings button { margin-top: 20px; }</style>
 <h1>Settings shared by the tools</h1>
 {#if error}<div class="error" id="settings-error">Error: {error}</div>{/if}
 {#if saved}<div class="saved" id="settings-saved">Saved. Tools started from now on use these values; running sessions keep theirs.</div>{/if}
-<form method="post" action="{basePath}/settings" id="settings-form">
+<form method="post" action="{basePath}/settings" id="settings-form" class="settings">
     <label for="gpuBrokerUrl">GPU Broker URL</label>
     <input id="gpuBrokerUrl" name="gpuBrokerUrl" value="{gpuBrokerUrl}" placeholder="{defaultBrokerUrl}">
     <div class="note">Without a trailing /v1. Used by AI Chat, Jupyter AI, Chat UI with Audit Trail and Program Search &amp; Edit.
@@ -37,7 +21,7 @@
     <div class="note">The broker did not return a model list; type the model name.</div>
     {/if}
     <div class="note">The model the tools select by default.</div>
-    <button type="submit">Save</button>
+    <button type="submit" class="primary">Save</button>
 </form>
-</body>
-</html>
+{/content}
+{/include}

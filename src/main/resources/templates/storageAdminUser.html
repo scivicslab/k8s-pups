@@ -1,25 +1,5 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Storage of {user}</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #1E293B; margin: 0; padding: 24px 32px; max-width: 900px; }
-        h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 28px; }
-        table { border-collapse: collapse; width: 100%; background: white; }
-        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #E2E8F0; font-size: .95rem; vertical-align: middle; }
-        th { color: #64748B; font-size: .8rem; text-transform: uppercase; }
-        form.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
-        input, select { font-size: .9rem; padding: 4px 6px; }
-        input.size { width: 6em; }
-        .note { color: #64748B; font-size: .85rem; }
-        .none { color: #94A3B8; }
-        .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; }
-        .done { background: #DCFCE7; border: 1px solid #86EFAC; padding: 8px 12px; margin: 12px 0; }
-    </style>
-</head>
-<body>
+{#include admin-base title='Storage of user' area='storage'}
+{#content}
 <p><a href="{basePath}/storage-admin">&larr; Storage of users</a></p>
 <h1>Storage of {user}</h1>
 {#if error}<div class="error" id="admin-error">{error}</div>{/if}
@@ -80,5 +60,5 @@
     {/for}
 </table>
 {/if}
-</body>
-</html>
+{/content}
+{/include}

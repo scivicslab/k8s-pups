@@ -4,13 +4,10 @@ import com.scivicslab.k8spups.actor.K8sPupsActorSystem;
 import com.scivicslab.k8spups.dataset.DatasetPath;
 import com.scivicslab.k8spups.dataset.DatasetRepository;
 import com.scivicslab.k8spups.dataset.DatasetService;
-import com.scivicslab.k8spups.tool.JwtRoleExtractor;
 
-import io.quarkus.oidc.IdToken;
 import io.quarkus.qute.Location;
 import io.quarkus.qute.Template;
 import io.quarkus.security.Authenticated;
-import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.common.annotation.Blocking;
 
 import jakarta.inject.Inject;
@@ -19,7 +16,6 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 
@@ -56,11 +52,7 @@ public class DatasetAdminResource {
     K8sPupsActorSystem actorSystem;
 
     @Inject
-    @IdToken
-    JsonWebToken idToken;
-
-    @Inject
-    SecurityIdentity identity;
+    AdminAccess access;
 
     @Inject
     @Location("datasets")
@@ -432,33 +424,14 @@ public class DatasetAdminResource {
 
     /** Checked on every request, not only hidden in the page: a request without the link is still a request. */
     private Response requireAdmin() {
-        if (!actorSystem.isAdmin(currentUser(), roles())) {
-            LOG.warning("Dataset administration refused for user " + currentUser());
-            return Response.status(Response.Status.FORBIDDEN).entity("Administrators only").build();
-        }
-        return null;
+        return access.denyUnlessAdmin("Dataset administration");
     }
 
     private String currentUser() {
-        try {
-            if (idToken != null) {
-                String username = idToken.getClaim("preferred_username");
-                if (username != null) return username;
-            }
-        } catch (Exception e) {
-            // Fall back to the security identity.
-        }
-        return identity != null && !identity.isAnonymous() ? identity.getPrincipal().getName() : null;
+        return access.user();
     }
 
     private List<String> roles() {
-        try {
-            if (idToken == null) return List.of();
-            Map<String, Object> realmAccess = idToken.getClaim("realm_access");
-            Map<String, Object> resourceAccess = idToken.getClaim("resource_access");
-            return JwtRoleExtractor.extractRoles(realmAccess, resourceAccess);
-        } catch (Exception e) {
-            return List.of();
-        }
+        return access.roles();
     }
 }

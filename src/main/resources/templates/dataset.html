@@ -1,4 +1,4 @@
-{#include dataset-base title=name}
+{#include admin-base title=name area='datasets' sub='list'}
 {#content}
 <h1>Dataset <span id="dataset-name">{name}</span></h1>
 <form class="inline" method="post" action="{basePath}/datasets/d/{name}/delete"
@@ -24,7 +24,7 @@
 <form method="post" action="{basePath}/datasets/d/{name}/grant" id="grant-dataset">
     <p>
         <input name="user" placeholder="user name" required>
-        <input name="expiresOn" type="date" title="Valid through this day (UTC); empty = no expiry">
+        <input name="expiresOn" type="text" size="12" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" title="Valid through this day (UTC), as YYYY-MM-DD; empty = no expiry">
         <button type="submit">Grant access to the whole dataset</button>
     </p>
 </form>

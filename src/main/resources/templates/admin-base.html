@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title} - Administration</title>
+    <style>
+        :root { --orange: #F97316; --orange-dark: #EA580C; --bg: #F8FAFC; --text: #1E293B; --muted: #64748B; --border: #E2E8F0; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+        header.bar { background: linear-gradient(90deg, var(--orange-dark), var(--orange)); color: #fff; }
+        header.bar .wrap { padding-top: 12px; padding-bottom: 12px; display: flex; align-items: center; gap: 16px; }
+        header.bar a { color: #fff; text-decoration: none; font-size: .9rem; opacity: .9; }
+        header.bar a:hover { opacity: 1; text-decoration: underline; }
+        header.bar a.bar-title { font-size: 1.05rem; font-weight: 700; margin-left: 8px; opacity: 1; }
+        nav.tabs { background: #fff; border-bottom: 1px solid var(--border); }
+        nav.tabs .wrap { display: flex; gap: 4px; }
+        nav.tabs a { padding: 12px 16px; color: var(--muted); text-decoration: none; font-weight: 600; font-size: .95rem; border-bottom: 3px solid transparent; }
+        nav.tabs a:hover { color: var(--text); }
+        nav.tabs a.on { color: var(--orange-dark); border-bottom-color: var(--orange); }
+        nav.subtabs .wrap { padding-top: 10px; display: flex; gap: 18px; font-size: .9rem; }
+        nav.subtabs a { color: var(--muted); text-decoration: none; padding-bottom: 4px; }
+        nav.subtabs a.on { color: var(--text); font-weight: 600; border-bottom: 2px solid var(--border); }
+        main { padding-bottom: 48px; }
+        h1 { font-size: 1.4rem; margin: 20px 0 8px; } h2 { font-size: 1.1rem; margin-top: 28px; }
+        a { color: var(--orange-dark); }
+        table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }
+        th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: .92rem; vertical-align: middle; }
+        th { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; background: #FFF7ED; }
+        tr:last-child td { border-bottom: none; }
+        input, select, textarea { font: inherit; font-size: .9rem; padding: 6px 9px; border: 1px solid #CBD5E1; border-radius: 6px; background: #fff; color: var(--text); }
+        input:focus, select:focus, textarea:focus { outline: 2px solid #FDBA74; border-color: var(--orange); }
+        input.size { width: 6em; }
+        button, .btn { font: inherit; font-size: .9rem; padding: 6px 14px; border-radius: 6px; border: 1px solid #CBD5E1; background: #fff; color: var(--text); cursor: pointer; text-decoration: none; display: inline-block; }
+        button:hover, .btn:hover { border-color: var(--orange); }
+        button[type=submit].primary, button.primary, .btn.primary { background: var(--orange); border-color: var(--orange-dark); color: #fff; font-weight: 600; }
+        form.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+        label.file { cursor: pointer; }
+        .filename { color: var(--muted); font-size: .85rem; margin-left: 8px; }
+        .note { color: var(--muted); font-size: .85rem; } .none { color: #94A3B8; } .never { color: #B45309; }
+        .pager { margin: 10px 0; }
+        .msg { background: #E0F2FE; border: 1px solid #7DD3FC; padding: 8px 12px; margin: 12px 0; border-radius: 6px; word-break: break-word; }
+        .error { background: #FEE2E2; border: 1px solid #FCA5A5; padding: 8px 12px; margin: 12px 0; border-radius: 6px; }
+        .done, .saved { background: #DCFCE7; border: 1px solid #86EFAC; padding: 8px 12px; margin: 12px 0; border-radius: 6px; }
+        code { background: #F1F5F9; padding: 1px 4px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+<header class="bar"><div class="wrap">
+    <a href="{basePath}/dashboard">&larr; Dashboard</a>
+    <a class="bar-title" href="{basePath}/admin" id="nav-admin-home">Administration</a>
+</div></header>
+<nav class="tabs"><div class="wrap">
+    <a href="{basePath}/datasets" id="nav-area-datasets" {#if area == 'datasets'}class="on"{/if}>Datasets</a>
+    <a href="{basePath}/storage-admin" id="nav-area-storage" {#if area == 'storage'}class="on"{/if}>Storage</a>
+    <a href="{basePath}/datasets/audit" id="nav-audit" {#if area == 'audit'}class="on"{/if}>Audit</a>
+    <a href="{basePath}/settings" id="nav-area-settings" {#if area == 'settings'}class="on"{/if}>Settings</a>
+</div></nav>
+{#if area == 'datasets'}
+<nav class="subtabs"><div class="wrap">
+    <a href="{basePath}/datasets" id="nav-datasets" {#if sub == 'list'}class="on"{/if}>Datasets</a>
+    <a href="{basePath}/datasets/users" id="nav-users" {#if sub == 'users'}class="on"{/if}>Access by user</a>
+</div></nav>
+{/if}
+<main class="wrap">
+{#if msg??}<div class="msg" id="dataset-msg">{msg}</div>{/if}
+{#insert content}{/insert}
+</main>
+<script>
+    // A file chooser that reads in English whatever the language of the browser: the native button is hidden, a label stands for it.
+    document.querySelectorAll('label.file input[type=file]').forEach(function (input) {
+        var name = input.closest('label.file').querySelector('.filename');
+        input.addEventListener('change', function () { name.textContent = input.files.length ? input.files[0].name : 'No file chosen'; });
+    });
+</script>
+</body>
+</html>
