@@ -1,0 +1,25 @@
+{#include admin-base title='Users' area='users'}
+{#content}
+<h1>Users</h1>
+<p class="note">Every account of the Keycloak realm, with the storage, the groups and the datasets that the administrators have given.
+    Open a user to change them.</p>
+{#if error}<div class="error" id="list-error">{error}</div>{/if}
+<form method="get" action="{basePath}/users">
+    <input name="q" value="{q}" placeholder="Filter by user name, name or mail address" id="filter" size="40">
+    <button type="submit">Filter</button>
+</form>
+<table id="users">
+    <tr><th>User</th><th>Name</th><th>Signed in</th><th>Storage</th><th>Groups</th><th>Datasets</th></tr>
+    {#for r in rows}
+    <tr>
+        <td><a href="{basePath}/users/u/{r.user}">{r.user}</a>{#if !r.enabled} <span class="none">(disabled)</span>{/if}</td>
+        <td>{#if r.inKeycloak}{r.name}{#else}<span class="none">Not in Keycloak</span>{/if}</td>
+        <td>{#if r.signedIn == 'never'}<span class="none">never</span>{#else}{r.signedIn}{/if}</td>
+        <td>{#if r.storage}{r.storage}{#else}<span class="none">none</span>{/if}</td>
+        <td>{#if r.groups}{r.groups}{#else}<span class="none">none</span>{/if}</td>
+        <td>{r.datasets}</td>
+    </tr>
+    {/for}
+</table>
+{/content}
+{/include}

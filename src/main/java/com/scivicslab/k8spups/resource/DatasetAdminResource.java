@@ -55,20 +55,15 @@ public class DatasetAdminResource {
     AdminAccess access;
 
     @Inject
+    com.scivicslab.k8spups.security.KeycloakUserDirectory directory;
+
+    @Inject
     @Location("datasets")
     Template datasetsPage;
 
     @Inject
     @Location("dataset")
     Template datasetPage;
-
-    @Inject
-    @Location("dataset-users")
-    Template usersPage;
-
-    @Inject
-    @Location("dataset-user")
-    Template userPage;
 
     @Inject
     @Location("dataset-audit")
@@ -120,44 +115,8 @@ public class DatasetAdminResource {
         data.put("prev", files.page() - 1);
         data.put("next", files.page() + 1);
         data.put("access", call(d -> d.accessOfDataset(name)));
+        data.put("userNames", userNames());
         return html(datasetPage, data);
-    }
-
-    @GET
-    @Path("/users")
-    @Authenticated
-    @Produces(MediaType.TEXT_HTML)
-    public Response users(@QueryParam("q") String q, @QueryParam("page") int page, @QueryParam("msg") String msg) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        Map<String, Object> data = base(msg);
-        var result = call(d -> d.users(q, Math.max(page, 0), PAGE_SIZE));
-        data.put("q", q == null ? "" : q);
-        data.put("qEnc", enc(q));
-        data.put("result", result);
-        data.put("rows", result.items());
-        data.put("prev", result.page() - 1);
-        data.put("next", result.page() + 1);
-        return html(usersPage, data);
-    }
-
-    @GET
-    @Path("/u/{user}")
-    @Authenticated
-    @Produces(MediaType.TEXT_HTML)
-    public Response user(@PathParam("user") String user, @QueryParam("page") int page, @QueryParam("msg") String msg) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        if (!DatasetPath.isValidUserName(user)) return Response.status(Response.Status.NOT_FOUND).entity("No such user").build();
-        Map<String, Object> data = base(msg);
-        var exceptions = call(d -> d.exceptionsOfUser(user, Math.max(page, 0), PAGE_SIZE));
-        data.put("user", user);
-        data.put("access", call(d -> d.accessOfUser(user)));
-        data.put("result", exceptions);
-        data.put("exceptions", exceptions.items());
-        data.put("prev", exceptions.page() - 1);
-        data.put("next", exceptions.page() + 1);
-        return html(userPage, data);
     }
 
     @GET
@@ -245,13 +204,13 @@ public class DatasetAdminResource {
             content = file != null && file.size() > 0
                 ? Files.readString(file.uploadedFile(), StandardCharsets.UTF_8) : (text == null ? "" : text);
         } catch (Exception e) {
-            return back("/datasets/users", "the access file could not be read: " + e.getMessage());
+            return back("/datasets", "the access file could not be read: " + e.getMessage());
         }
         String admin = currentUser();
         var r = call(d -> d.importAccess(content, admin));
         enforceAccess();
         LOG.info("Access imported by " + admin + ": lines=" + r.linesRead() + " granted=" + r.granted() + " errors=" + r.errors().size());
-        return back("/datasets/users", summary("Access import", r.linesRead(), r.granted(), "grants set", r.errors().size(), r.errors()));
+        return back("/datasets", summary("Access import", r.linesRead(), r.granted(), "grants set", r.errors().size(), r.errors()));
     }
 
     // ── changes ────────────────────────────────────────────────────────────────
@@ -302,71 +261,18 @@ public class DatasetAdminResource {
         return back("/datasets", ok ? "dataset " + name + " deleted" : "deleted, but a user's file view could not be rebuilt");
     }
 
-    @POST
-    @Path("/u/{user}/dataset/grant")
-    @Authenticated
-    public Response grantDatasetToUser(@PathParam("user") String user, @FormParam("dataset") String dataset,
-                                       @FormParam("expiresOn") String expiresOn) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        String page = "/datasets/u/" + user;
-        if (!DatasetPath.isValidUserName(user)) return back("/datasets/users", "invalid user name");
-        if (dataset == null || !DatasetPath.isValidRelativePath(dataset) || dataset.contains("/") || !call(d -> d.datasetExists(dataset)))
-            return back(page, "no such dataset");
-        Instant expires;
-        try { expires = lastDay(expiresOn); } catch (Exception e) { return back(page, "invalid date"); }
-        String admin = currentUser();
-        call(d -> d.grantDataset(user, dataset, expires, admin));
-        LOG.info("Dataset access granted by " + admin + ": user=" + user + " dataset=" + dataset + " expires=" + expires);
-        return back(page, "granted " + dataset);
-    }
-
-    @POST
-    @Path("/u/{user}/dataset/revoke")
-    @Authenticated
-    public Response revokeDatasetOfUser(@PathParam("user") String user, @FormParam("dataset") String dataset) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        if (!DatasetPath.isValidUserName(user)) return back("/datasets/users", "invalid user name");
-        String admin = currentUser();
-        call(d -> d.revokeDataset(user, dataset, admin));
-        enforceAccess();
-        LOG.info("Dataset access revoked by " + currentUser() + ": user=" + user + " dataset=" + dataset);
-        return back("/datasets/u/" + user, "revoked " + dataset);
-    }
-
-    @POST
-    @Path("/u/{user}/file/grant")
-    @Authenticated
-    public Response grantFile(@PathParam("user") String user, @FormParam("path") String path,
-                              @FormParam("expiresOn") String expiresOn) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        String page = "/datasets/u/" + user;
-        if (!DatasetPath.isValidUserName(user)) return back("/datasets/users", "invalid user name");
-        if (!DatasetPath.isValidRelativePath(path)) return back(page, "invalid file path");
-        Instant expires;
-        try { expires = lastDay(expiresOn); } catch (Exception e) { return back(page, "invalid date"); }
-        String admin = currentUser();
-        boolean ok = call(d -> d.grantFile(user, path, expires, admin));
-        LOG.info("File access granted by " + admin + ": user=" + user + " file=" + path + " expires=" + expires);
-        return back(page, ok ? "granted " + path : "the file is not in the catalog");
-    }
-
-    @POST
-    @Path("/u/{user}/file/revoke")
-    @Authenticated
-    public Response revokeFile(@PathParam("user") String user, @FormParam("path") String path) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        if (!DatasetPath.isValidUserName(user) || !DatasetPath.isValidRelativePath(path)) return back("/datasets/users", "invalid request");
-        String admin = currentUser();
-        call(d -> d.revokeFile(user, path, admin));
-        LOG.info("File access revoked by " + currentUser() + ": user=" + user + " file=" + path);
-        return back("/datasets/u/" + user, "revoked " + path);
-    }
-
     // ── helpers ────────────────────────────────────────────────────────────────
+
+    /** The user names of the Keycloak realm, to choose a user from; empty when Keycloak cannot be read. */
+    private List<String> userNames() {
+        if (!directory.configured()) return List.of();
+        try {
+            return directory.all().stream().map(com.scivicslab.k8spups.security.KeycloakUsers.User::username).toList();
+        } catch (Exception e) {
+            LOG.warning("The Keycloak user list could not be read: " + e.getMessage());
+            return List.of();
+        }
+    }
 
     private Map<String, Object> base(String msg) {
         Map<String, Object> data = new HashMap<>();

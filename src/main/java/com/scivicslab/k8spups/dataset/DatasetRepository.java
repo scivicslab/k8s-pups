@@ -237,6 +237,21 @@ public class DatasetRepository {
             ps -> ps.setString(1, user), this::accessRow);
     }
 
+    /** How many whole datasets and how many single files a user may read now. */
+    public record GrantCount(long datasets, long files) {}
+
+    /** The grant counts of every user who has a grant that has not expired. */
+    public java.util.Map<String, GrantCount> grantCounts() {
+        java.util.Map<String, long[]> counts = new java.util.HashMap<>();
+        query("SELECT user_name, count(*) FROM dataset_access WHERE expires_at IS NULL OR expires_at > now() GROUP BY user_name",
+            ps -> {}, rs -> { counts.computeIfAbsent(rs.getString(1), k -> new long[2])[0] = rs.getLong(2); return null; });
+        query("SELECT user_name, count(*) FROM dataset_grant WHERE expires_at IS NULL OR expires_at > now() GROUP BY user_name",
+            ps -> {}, rs -> { counts.computeIfAbsent(rs.getString(1), k -> new long[2])[1] = rs.getLong(2); return null; });
+        java.util.Map<String, GrantCount> out = new java.util.TreeMap<>();
+        counts.forEach((user, c) -> out.put(user, new GrantCount(c[0], c[1])));
+        return out;
+    }
+
     /** The file-level exceptions of a user, one page. */
     public Page<String> exceptionsOfUser(String user, int page, int size) {
         long total = query("SELECT count(*) FROM dataset_grant WHERE user_name = ?", ps -> ps.setString(1, user), rs -> rs.getLong(1)).get(0);

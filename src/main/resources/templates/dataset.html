@@ -1,4 +1,4 @@
-{#include admin-base title=name area='datasets' sub='list'}
+{#include admin-base title=name area='datasets'}
 {#content}
 <h1>Dataset <span id="dataset-name">{name}</span></h1>
 <form class="inline" method="post" action="{basePath}/datasets/d/{name}/delete"
@@ -11,7 +11,7 @@
     <tr><th>User</th><th>Granted by</th><th>Expires</th><th></th></tr>
     {#for a in access}
     <tr>
-        <td><a href="{basePath}/datasets/u/{a.user}">{a.user}</a></td><td>{a.grantedBy}</td>
+        <td><a href="{basePath}/users/u/{a.user}">{a.user}</a></td><td>{a.grantedBy}</td>
         <td>{#if a.expiresAt}{a.expiresAt}{#else}never{/if}</td>
         <td>
             <form class="inline" method="post" action="{basePath}/datasets/d/{name}/revoke">
@@ -23,7 +23,8 @@
 </table>
 <form method="post" action="{basePath}/datasets/d/{name}/grant" id="grant-dataset">
     <p>
-        <input name="user" placeholder="user name" required>
+        <input name="user" list="user-names" placeholder="Choose a user" size="30" autocomplete="off" required>
+        <datalist id="user-names">{#for n in userNames}<option value="{n}"></option>{/for}</datalist>
         <input name="expiresOn" type="text" size="12" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" title="Valid through this day (UTC), as YYYY-MM-DD; empty = no expiry">
         <button type="submit">Grant access to the whole dataset</button>
     </p>

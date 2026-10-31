@@ -171,6 +171,11 @@ public class K8sApiClient {
     /** State of a shared service's Deployment as the dashboard shows it. */
     public enum SharedServiceState { RUNNING, STARTING, DOWN, UNKNOWN }
 
+    /** The namespace of the tool Pods and their Services. */
+    public String userPodsNamespace() {
+        return userPodsNamespace;
+    }
+
     /**
      * RUNNING when the Deployment has a ready replica, STARTING when it asks for replicas that are
      * not ready yet, DOWN when it is scaled to 0 or absent, UNKNOWN when the API could not be read

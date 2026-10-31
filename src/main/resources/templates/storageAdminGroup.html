@@ -1,6 +1,6 @@
 {#include admin-base title='Group storage' area='storage'}
 {#content}
-<p><a href="{basePath}/storage-admin/groups">&larr; Group storage</a></p>
+<p><a href="{basePath}/storage-admin">&larr; Group storage</a></p>
 <h1>Group {name}</h1>
 {#if error}<div class="error" id="group-error">{error}</div>{/if}
 {#if done}<div class="done" id="group-done">{done}</div>{/if}
@@ -40,7 +40,8 @@
 {/if}
 <h2>Add a member or change access</h2>
 <form method="post" action="{basePath}/storage-admin/g/{name}/member" id="add-member">
-    <input name="user" placeholder="user name" required>
+    <input name="user" list="user-names" placeholder="Choose a user" size="30" autocomplete="off" required>
+    <datalist id="user-names">{#for n in userNames}<option value="{n}"></option>{/for}</datalist>
     <select name="mode"><option value="rw">read-write</option><option value="ro">read-only</option></select>
     <button type="submit">Save</button>
 </form>

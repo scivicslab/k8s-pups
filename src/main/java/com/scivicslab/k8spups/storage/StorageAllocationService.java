@@ -211,6 +211,16 @@ public class StorageAllocationService {
         return repository.members(group);
     }
 
+    /** The time each user last opened the dashboard; users who never did are not in the map. */
+    public Map<String, java.time.Instant> logins() {
+        return repository.logins();
+    }
+
+    /** User name to (group name to mode) for every user, over the groups with storage. */
+    public Map<String, Map<String, String>> allMemberships() {
+        return repository.allMemberships();
+    }
+
     /** Group name to mode ("rw" or "ro") of the groups with storage that the user is a member of. */
     public Map<String, String> memberships(String user) {
         return repository.memberships(user);

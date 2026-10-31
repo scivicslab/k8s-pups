@@ -1,10 +1,9 @@
 package com.scivicslab.k8spups.resource;
 
 import com.scivicslab.k8spups.actor.K8sPupsActorSystem;
-import com.scivicslab.k8spups.k8s.StorageTypes;
-import com.scivicslab.k8spups.storage.StorageAllocationRepository;
+import com.scivicslab.k8spups.security.KeycloakUserDirectory;
+import com.scivicslab.k8spups.security.KeycloakUsers;
 import com.scivicslab.k8spups.storage.StorageAllocationService;
-import com.scivicslab.k8spups.storage.StoragePolicy;
 import com.scivicslab.pojoactor.core.ActorRef;
 
 import io.quarkus.qute.Template;
@@ -23,17 +22,15 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.logging.Logger;
 
 /**
- * Administrator pages for the storage given to users: the list of users with their storage, and one page per user
- * to give, enlarge, take away and give back storage. Users get storage only from here (and the default allocation
- * at their first login); they cannot create it themselves.
+ * Administrator pages for the storage shared by a group: the list of groups, and one page per group to enlarge, take
+ * away and give back its storage and to choose its members. The storage of one user is given on the page of that user
+ * (see {@link UsersAdminResource}); users cannot create storage themselves.
  */
 @Path("/storage-admin")
 @Blocking
@@ -49,10 +46,7 @@ public class StorageAdminResource {
     AdminAccess access;
 
     @Inject
-    Template storageAdmin;
-
-    @Inject
-    Template storageAdminUser;
+    KeycloakUserDirectory directory;
 
     @Inject
     Template storageAdminGroups;
@@ -63,133 +57,7 @@ public class StorageAdminResource {
     @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/pups")
     String basePath;
 
-    /** One row of the user list. */
-    public record UserRow(String user, String storage) {}
-
     @GET
-    @Produces(MediaType.TEXT_HTML)
-    public Response list(@QueryParam("q") String q) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        String filter = q == null ? "" : q.trim();
-        Map<String, List<String>> byUser = new LinkedHashMap<>();
-        String error = null;
-        TreeSet<String> users = new TreeSet<>();
-        try {
-            users.addAll(call(StorageAllocationService::knownUsers));
-        } catch (Exception e) {
-            error = "The user list could not be read from the database: " + e.getMessage();
-        }
-        List<StorageAllocationRepository.Allocation> active = call(StorageAllocationService::allActive);
-        for (var a : active) users.add(a.user());
-        for (var a : active) {
-            byUser.computeIfAbsent(a.user(), k -> new ArrayList<>()).add(StorageTypes.name(a.type()) + " " + a.size());
-        }
-        List<UserRow> rows = new ArrayList<>();
-        for (String u : users) {
-            if (!filter.isEmpty() && !u.contains(filter)) continue;
-            rows.add(new UserRow(u, String.join(", ", byUser.getOrDefault(u, List.of()))));
-        }
-        Map<String, Object> data = new HashMap<>();
-        data.put("basePath", basePath);
-        data.put("rows", rows);
-        data.put("q", filter);
-        data.put("error", error);
-        return Response.ok(storageAdmin.data(data).render()).build();
-    }
-
-    @GET
-    @Path("/u/{user}")
-    @Produces(MediaType.TEXT_HTML)
-    public Response user(@PathParam("user") String user, @QueryParam("error") String error,
-                         @QueryParam("done") String done) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        List<StorageAllocationRepository.Allocation> history = call(s -> s.history(user));
-        List<Map<String, Object>> active = new ArrayList<>();
-        List<Map<String, Object>> revoked = new ArrayList<>();
-        for (var a : history) {
-            Map<String, Object> row = new HashMap<>();
-            row.put("id", a.id());
-            row.put("type", a.type());
-            row.put("name", StorageTypes.name(a.type()));
-            row.put("storageSize", a.size());   // not "size": Qute reads map.size as the number of entries
-            row.put("grantedBy", a.grantedBy());
-            row.put("grantedAt", a.grantedAt() == null ? "" : a.grantedAt().toString().substring(0, 16).replace('T', ' '));
-            if (a.active()) {
-                Map<String, String> pvc = actorSystem.getK8sClient().getUserPvcInfo(user, a.type());
-                row.put("pvc", "true".equals(pvc.get("exists"))
-                    ? pvc.getOrDefault("phase", "") + ("true".equals(pvc.get("inUse")) ? ", in use" : "")
-                    : "not created yet");
-                active.add(row);
-            } else {
-                row.put("revokedBy", a.revokedBy());
-                row.put("revokedAt", a.revokedAt() == null ? "" : a.revokedAt().toString().substring(0, 16).replace('T', ' '));
-                row.put("restorable", StoragePolicy.restorable(a.type())
-                    && (actorSystem.getK8sClient().posixUsesNfs() || a.pv().isPresent()));
-                revoked.add(row);
-            }
-        }
-        List<Map<String, String>> types = new ArrayList<>();
-        for (String t : actorSystem.getStorageTypeOptions()) {
-            if (StoragePolicy.allocatable(t, actorSystem.getStorageTypeOptions())) {
-                types.add(Map.of("type", t, "name", StorageTypes.name(t)));
-            }
-        }
-        Map<String, Object> data = new HashMap<>();
-        data.put("basePath", basePath);
-        data.put("user", user);
-        data.put("active", active);
-        data.put("revoked", revoked);
-        data.put("types", types);
-        data.put("error", error);
-        data.put("done", done);
-        return Response.ok(storageAdminUser.data(data).render()).build();
-    }
-
-    @POST
-    @Path("/u/{user}/allocate")
-    public Response allocate(@PathParam("user") String user, @FormParam("type") String type,
-                             @FormParam("size") String size) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        String admin = currentUser();
-        String size1 = size == null ? null : size.trim();
-        return back(user, call(s -> s.allocate(admin, user, type, size1)), "Storage given");
-    }
-
-    @POST
-    @Path("/a/{id}/resize")
-    public Response resize(@PathParam("id") long id, @FormParam("user") String user, @FormParam("size") String size) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        String admin = currentUser();
-        String size1 = size == null ? null : size.trim();
-        return back(user, call(s -> s.resize(admin, id, size1)), "Storage made larger");
-    }
-
-    @POST
-    @Path("/a/{id}/revoke")
-    public Response revoke(@PathParam("id") long id, @FormParam("user") String user) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        String admin = currentUser();
-        return back(user, call(s -> s.revoke(admin, id)), "Storage taken away");
-    }
-
-    @POST
-    @Path("/a/{id}/restore")
-    public Response restore(@PathParam("id") long id, @FormParam("user") String user) {
-        Response denied = requireAdmin();
-        if (denied != null) return denied;
-        String admin = currentUser();
-        return back(user, call(s -> s.restore(admin, id)), "Storage given back");
-    }
-
-    // ── Group storage ───────────────────────────────────────────────────────
-
-    @GET
-    @Path("/groups")
     @Produces(MediaType.TEXT_HTML)
     public Response groups(@QueryParam("error") String error, @QueryParam("done") String done) {
         Response denied = requireAdmin();
@@ -212,14 +80,14 @@ public class StorageAdminResource {
     }
 
     @POST
-    @Path("/groups/create")
+    @Path("/create")
     public Response createGroup(@FormParam("name") String name, @FormParam("size") String size) {
         Response denied = requireAdmin();
         if (denied != null) return denied;
         String admin = currentUser();
         String n = name == null ? "" : name.trim(), sz = size == null ? "" : size.trim();
         String error = call(x -> x.createGroup(admin, n, sz));
-        if (error != null) return Response.seeOther(URI.create("/storage-admin/groups?error=" + enc(error))).build();
+        if (error != null) return Response.seeOther(URI.create("/storage-admin?error=" + enc(error))).build();
         return backToGroup(n, null, "Group created");
     }
 
@@ -245,9 +113,21 @@ public class StorageAdminResource {
         data.put("pvc", !g.active() ? "" : actorSystem.getK8sClient().pvcExists(pvcName)
             ? (pods.isEmpty() ? "idle" : "in use by " + String.join(", ", pods)) : "not created yet");
         data.put("members", call(x -> x.members(name)));
+        data.put("userNames", userNames());
         data.put("error", error);
         data.put("done", done);
         return Response.ok(storageAdminGroup.data(data).render()).build();
+    }
+
+    /** The user names of the Keycloak realm, to choose a member from; empty when Keycloak cannot be read. */
+    private List<String> userNames() {
+        if (!directory.configured()) return List.of();
+        try {
+            return directory.all().stream().map(KeycloakUsers.User::username).toList();
+        } catch (Exception e) {
+            LOG.warning("The Keycloak user list could not be read: " + e.getMessage());
+            return List.of();
+        }
     }
 
     @POST
@@ -312,12 +192,6 @@ public class StorageAdminResource {
         return Response.seeOther(URI.create("/storage-admin/g/" + enc(name) + q)).build();
     }
 
-    private Response back(String user, String error, String done) {
-        String q = error != null ? "?error=" + enc(error) : "?done=" + enc(done);
-        if (error != null) LOG.warning("Storage change for " + user + " refused: " + error);
-        return Response.seeOther(URI.create("/storage-admin/u/" + enc(user) + q)).build();
-    }
-
     private static String enc(String s) {
         return URLEncoder.encode(s == null ? "" : s, StandardCharsets.UTF_8).replace("+", "%20");
     }
@@ -338,9 +212,5 @@ public class StorageAdminResource {
 
     private String currentUser() {
         return access.user();
-    }
-
-    private List<String> roles() {
-        return access.roles();
     }
 }

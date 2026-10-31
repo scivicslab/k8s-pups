@@ -19,9 +19,6 @@
         nav.tabs a { padding: 12px 16px; color: var(--muted); text-decoration: none; font-weight: 600; font-size: .95rem; border-bottom: 3px solid transparent; }
         nav.tabs a:hover { color: var(--text); }
         nav.tabs a.on { color: var(--orange-dark); border-bottom-color: var(--orange); }
-        nav.subtabs .wrap { padding-top: 10px; display: flex; gap: 18px; font-size: .9rem; }
-        nav.subtabs a { color: var(--muted); text-decoration: none; padding-bottom: 4px; }
-        nav.subtabs a.on { color: var(--text); font-weight: 600; border-bottom: 2px solid var(--border); }
         main { padding-bottom: 48px; }
         h1 { font-size: 1.4rem; margin: 20px 0 8px; } h2 { font-size: 1.1rem; margin-top: 28px; }
         a { color: var(--orange-dark); }
@@ -52,17 +49,12 @@
     <a class="bar-title" href="{basePath}/admin" id="nav-admin-home">Administration</a>
 </div></header>
 <nav class="tabs"><div class="wrap">
+    <a href="{basePath}/users" id="nav-area-users" {#if area == 'users'}class="on"{/if}>Users</a>
     <a href="{basePath}/datasets" id="nav-area-datasets" {#if area == 'datasets'}class="on"{/if}>Datasets</a>
     <a href="{basePath}/storage-admin" id="nav-area-storage" {#if area == 'storage'}class="on"{/if}>Storage</a>
     <a href="{basePath}/datasets/audit" id="nav-audit" {#if area == 'audit'}class="on"{/if}>Audit</a>
     <a href="{basePath}/settings" id="nav-area-settings" {#if area == 'settings'}class="on"{/if}>Settings</a>
 </div></nav>
-{#if area == 'datasets'}
-<nav class="subtabs"><div class="wrap">
-    <a href="{basePath}/datasets" id="nav-datasets" {#if sub == 'list'}class="on"{/if}>Datasets</a>
-    <a href="{basePath}/datasets/users" id="nav-users" {#if sub == 'users'}class="on"{/if}>Access by user</a>
-</div></nav>
-{/if}
 <main class="wrap">
 {#if msg??}<div class="msg" id="dataset-msg">{msg}</div>{/if}
 {#insert content}{/insert}

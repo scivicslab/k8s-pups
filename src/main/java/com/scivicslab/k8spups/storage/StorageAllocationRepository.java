@@ -213,6 +213,24 @@ public class StorageAllocationRepository {
         return out;
     }
 
+    /** The time each user last opened the dashboard; users who never did are not in the map. */
+    public Map<String, Instant> logins() {
+        Map<String, Instant> out = new java.util.HashMap<>();
+        query("SELECT user_name, last_login FROM user_login", ps -> {},
+            rs -> out.put(rs.getString(1), instant(rs.getTimestamp(2))));
+        return out;
+    }
+
+    /** User name to (group name to mode) for every user, over the groups with active storage. */
+    public Map<String, Map<String, String>> allMemberships() {
+        Map<String, Map<String, String>> out = new java.util.HashMap<>();
+        query("SELECT m.user_name, m.group_name, m.mode FROM storage_group_member m "
+            + "JOIN storage_group g ON g.name = m.group_name WHERE g.state = 'active' ORDER BY m.user_name, m.group_name",
+            ps -> {},
+            rs -> out.computeIfAbsent(rs.getString(1), k -> new java.util.LinkedHashMap<>()).put(rs.getString(2), rs.getString(3)));
+        return out;
+    }
+
     private static Group groupRow(ResultSet rs) throws SQLException {
         String pvName = rs.getString(9);
         Optional<PvRecord> pv = pvName == null ? Optional.empty() : Optional.of(new PvRecord(pvName, rs.getString(10),

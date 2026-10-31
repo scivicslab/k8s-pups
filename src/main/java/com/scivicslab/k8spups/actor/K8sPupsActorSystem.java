@@ -257,6 +257,9 @@ public class K8sPupsActorSystem {
         scheduler = new Scheduler();
         scheduler.scheduleAtFixedRate("idle-check", sessionManager,
             sm -> sm.checkIdleSessions(sessionManager), 60, 60, TimeUnit.SECONDS);
+        // A session is ready when the Service of its Pod accepts a connection, not when the Pod is Ready
+        scheduler.scheduleAtFixedRate("service-reachable-check", sessionManager,
+            sm -> sm.confirmServicesReachable(sessionManager), 1, 1, TimeUnit.SECONDS);
         // Access to a dataset can expire; the sessions that still mount it are stopped
         scheduler.scheduleAtFixedRate("dataset-access-check", sessionManager,
             sm -> sm.enforceDatasetAccess(sessionManager), 60, 60, TimeUnit.SECONDS);

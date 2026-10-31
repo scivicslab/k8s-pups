@@ -1,6 +1,5 @@
 {#include admin-base title='Group storage' area='storage'}
 {#content}
-<p><a href="{basePath}/storage-admin">&larr; Storage of users</a></p>
 <h1>Group storage</h1>
 <p class="note">Storage that the members of a group (for example a laboratory) mount next to their own storage, at
     /groups/&lt;group&gt;. Only administrators create groups and choose their members.</p>
@@ -17,7 +16,7 @@
 </table>
 {/if}
 <h2>Create a group</h2>
-<form method="post" action="{basePath}/storage-admin/groups/create" id="create-group">
+<form method="post" action="{basePath}/storage-admin/create" id="create-group">
     <input name="name" placeholder="lab1" required>
     <input class="size" name="size" value="500Gi" required>
     <button type="submit">Create</button>

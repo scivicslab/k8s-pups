@@ -12,6 +12,7 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -38,6 +39,12 @@ public class Session {
     private Instant lastAccessTime = Instant.now();
     private Watch podWatch;
     private String memo = "";
+
+    /** When the Pod became Ready while the session was starting; null until then. */
+    private Instant podReadyAt;
+    /** How long to wait for the Service to accept a connection after the Pod is Ready, before declaring ready anyway. */
+    private static final Duration SERVICE_WAIT = Duration.ofSeconds(60);
+    private static final int PROBE_TIMEOUT_MILLIS = 1000;
 
     public Session(SessionInfo info, K8sApiClient k8sClient) {
         this.info = info;
@@ -378,14 +385,49 @@ public class Session {
         return System.getenv().getOrDefault("K8SPUPS_DEFAULT_STORAGE_TYPE", "posix");
     }
 
+    /**
+     * The Pod is Ready. The session is ready when the Service of the Pod also accepts a connection, because the
+     * controller's proxy reaches the Pod through that Service and a request before it accepts one is refused (the
+     * user would see an error on the first Open). Batch jobs listen on no port and are ready at once.
+     */
+    private void podIsReady() {
+        if (info.toolPlugin().batchMode() || k8sClient == null) {
+            state = SessionState.READY;
+            LOG.info("Session ready: " + info.sessionId());
+            return;
+        }
+        if (podReadyAt == null) podReadyAt = Instant.now();
+        confirmReachable();
+    }
+
+    /**
+     * Declares the session ready once the Service of its Pod accepts a connection. Called when the Pod becomes Ready,
+     * and every second after that by the scheduler of the session manager until it succeeds. It does nothing for a session
+     * that is not waiting for this. When no connection is accepted within a minute, the session is declared ready
+     * anyway and the reason is logged, so that a tool whose port cannot be probed is not held back for ever.
+     */
+    public void confirmReachable() {
+        if (state != SessionState.STARTING || podReadyAt == null) return;
+        String host = ServiceProbe.host(info.serviceName(), k8sClient.userPodsNamespace());
+        long waitedMillis = Duration.between(podReadyAt, Instant.now()).toMillis();
+        if (ServiceProbe.reachable(host, info.toolPlugin().containerPort(), PROBE_TIMEOUT_MILLIS)) {
+            state = SessionState.READY;
+            LOG.info("Session ready: " + info.sessionId() + " (the Service accepted a connection " + waitedMillis
+                + " ms after the Pod became Ready)");
+        } else if (waitedMillis > SERVICE_WAIT.toMillis()) {
+            state = SessionState.READY;
+            LOG.warning("Session ready without a connection to its Service: " + info.sessionId() + " (" + host + ":"
+                + info.toolPlugin().containerPort() + " accepted none within " + SERVICE_WAIT.toSeconds() + " s)");
+        }
+    }
+
     private void onPodEvent(Watcher.Action action, Pod pod) {
         if (action == Watcher.Action.MODIFIED) {
             if (pod.getStatus() != null && pod.getStatus().getConditions() != null) {
                 boolean ready = pod.getStatus().getConditions().stream()
                     .anyMatch(c -> "Ready".equals(c.getType()) && "True".equals(c.getStatus()));
                 if (ready && state == SessionState.STARTING) {
-                    state = SessionState.READY;
-                    LOG.info("Session ready: " + info.sessionId());
+                    podIsReady();
                 }
             }
             String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown";

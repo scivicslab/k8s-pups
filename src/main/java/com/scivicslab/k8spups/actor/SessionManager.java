@@ -552,6 +552,16 @@ public class SessionManager {
     }
 
     /**
+     * Asks every session to try again to reach its Service. Called every second by the Scheduler; a session that is not
+     * waiting for its Service ignores it.
+     */
+    public void confirmServicesReachable(ActorRef<SessionManager> self) {
+        for (ActorRef<Session> ref : sessions(self)) {
+            ref.tell(Session::confirmReachable);
+        }
+    }
+
+    /**
      * Check all sessions for idle timeout. Called periodically by Scheduler.
      * Fires ask() to all SessionActors in parallel (non-blocking), then collects
      * results. Sessions that should stop are destroyed via destroySession().

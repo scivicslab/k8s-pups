@@ -1,0 +1,166 @@
+{#include admin-base title=user area='users'}
+{#content}
+<p><a href="{basePath}/users" id="back-to-users">&larr; Users</a></p>
+<h1>User <span id="user-name">{user}</span></h1>
+{#if account}
+<p id="account" class="note">{#if account.name}{account.name}, {/if}{#if account.email}{account.email}, {/if}{#if account.enabled}account enabled{#else}account disabled{/if}</p>
+{/if}
+{#if notInKeycloak}
+<p id="account" class="note">Not in Keycloak: this name is known to the database only.</p>
+{/if}
+{#if error}<div class="error" id="admin-error">{error}</div>{/if}
+{#if done}<div class="done" id="admin-done">{done}</div>{/if}
+
+<section id="panel-storage">
+<h2>Storage</h2>
+{#if active.isEmpty}
+<p class="none">None.</p>
+{#else}
+<table id="active">
+    <tr><th>Storage</th><th>Size</th><th>State</th><th>Given by</th><th></th></tr>
+    {#for a in active}
+    <tr id="alloc-{a.id}">
+        <td>{a.name}</td><td>{a.storageSize}</td><td>{a.pvc}</td><td>{a.grantedBy}, {a.grantedAt}</td>
+        <td>
+            <form class="inline" method="post" action="{basePath}/users/u/{user}/storage/{a.id}/resize">
+                <input class="size" name="size" placeholder="100Gi" required>
+                <button type="submit">Enlarge</button>
+            </form>
+            <form class="inline" method="post" action="{basePath}/users/u/{user}/storage/{a.id}/revoke"
+                  onsubmit="return confirm({#if a.type == 'longhorn'}'Take this storage away? Its files are deleted and cannot be restored.'{#else}'Take this storage away? Its files stay and the storage can be given back later.'{/if})">
+                <button type="submit">Take away</button>
+            </form>
+        </td>
+    </tr>
+    {/for}
+</table>
+{/if}
+<form method="post" action="{basePath}/users/u/{user}/storage/allocate" id="allocate">
+    <select name="type">
+        {#for t in types}<option value="{t.type}">{t.name}</option>{/for}
+    </select>
+    <input class="size" name="size" value="50Gi" required>
+    <button type="submit">Give storage</button>
+</form>
+<p class="note">Sizes are whole Gi or Ti, for example 50Gi or 2Ti.</p>
+{#if !revoked.isEmpty}
+<h3>Storage taken away</h3>
+<table id="revoked">
+    <tr><th>Storage</th><th>Size</th><th>Given</th><th>Taken away</th><th></th></tr>
+    {#for a in revoked}
+    <tr id="alloc-{a.id}">
+        <td>{a.name}</td><td>{a.storageSize}</td><td>{a.grantedBy}, {a.grantedAt}</td><td>{a.revokedBy}, {a.revokedAt}</td>
+        <td>{#if a.restorable}
+            <form class="inline" method="post" action="{basePath}/users/u/{user}/storage/{a.id}/restore">
+                <button type="submit">Give back</button>
+            </form>
+        {#else}<span class="none">cannot be given back</span>{/if}</td>
+    </tr>
+    {/for}
+</table>
+{/if}
+</section>
+
+<section id="panel-groups">
+<h2>Groups</h2>
+{#if memberships.isEmpty}
+<p class="none">Not a member of any group.</p>
+{#else}
+<table id="memberships">
+    <tr><th>Group</th><th>Access</th><th></th></tr>
+    {#for m in memberships}
+    <tr id="member-{m.name}">
+        <td><a href="{basePath}/storage-admin/g/{m.name}">{m.name}</a></td>
+        <td>{#if m.mode == 'ro'}read-only{#else}read-write{/if}</td>
+        <td>
+            <form class="inline" method="post" action="{basePath}/users/u/{user}/group/{m.name}">
+                <input type="hidden" name="mode" value="{#if m.mode == 'ro'}rw{#else}ro{/if}">
+                <button type="submit">Make {#if m.mode == 'ro'}read-write{#else}read-only{/if}</button>
+            </form>
+            <form class="inline" method="post" action="{basePath}/users/u/{user}/group/{m.name}/remove"
+                  onsubmit="return confirm('Remove {user} from {m.name}? Their tools that mount this storage are stopped.')">
+                <button type="submit">Remove</button>
+            </form>
+        </td>
+    </tr>
+    {/for}
+</table>
+{/if}
+{#if groupNames.isEmpty}
+<p class="note">There is no group with storage yet. Create one under Storage.</p>
+{#else}
+<form method="post" id="add-to-group" onsubmit="this.action = '{basePath}/users/u/{user}/group/' + encodeURIComponent(this.group.value)">
+    <select name="group">{#for g in groupNames}<option value="{g}">{g}</option>{/for}</select>
+    <select name="mode"><option value="rw">read-write</option><option value="ro">read-only</option></select>
+    <button type="submit">Add to group</button>
+</form>
+{/if}
+</section>
+
+<section id="panel-datasets">
+<h2>Datasets</h2>
+{#if !datasetsAvailable}
+<p class="none">The dataset database is not in use on this deployment.</p>
+{#else}
+<h3>Datasets the user may read</h3>
+<table id="user-datasets">
+    <tr><th>Dataset</th><th>Granted by</th><th>Expires</th><th></th></tr>
+    {#for a in access}
+    <tr>
+        <td><a href="{basePath}/datasets/d/{a.dataset}">{a.dataset}</a></td><td>{a.grantedBy}</td>
+        <td>{#if a.expiresAt}{a.expiresAt}{#else}never{/if}</td>
+        <td>
+            <form class="inline" method="post" action="{basePath}/users/u/{user}/dataset/revoke">
+                <input type="hidden" name="dataset" value="{a.dataset}"><button type="submit">Revoke</button>
+            </form>
+        </td>
+    </tr>
+    {/for}
+</table>
+<form method="post" action="{basePath}/users/u/{user}/dataset/grant" id="grant-dataset">
+    <p>
+        <input name="dataset" list="dataset-names" placeholder="Choose a dataset" size="30" autocomplete="off" required>
+        <datalist id="dataset-names">{#for n in datasetNames}<option value="{n}"></option>{/for}</datalist>
+        <input name="expiresOn" type="text" size="12" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" title="Valid through this day (UTC), as YYYY-MM-DD; empty = no expiry">
+        <button type="submit">Grant a whole dataset</button>
+    </p>
+</form>
+
+<h3>Files granted one by one (exceptions)</h3>
+<p class="note">{result.total} files. Use this only for a few files of a dataset the user may not read as a whole.</p>
+<table id="user-files">
+    <tr><th>Path</th><th></th></tr>
+    {#for f in exceptions}
+    <tr>
+        <td>{f}</td>
+        <td>
+            <form class="inline" method="post" action="{basePath}/users/u/{user}/file/revoke">
+                <input type="hidden" name="path" value="{f}"><button type="submit">Revoke</button>
+            </form>
+        </td>
+    </tr>
+    {/for}
+</table>
+<div class="pager">
+    Page {result.page + 1} of {result.pages}
+    {#if result.hasPrevious}<a href="{basePath}/users/u/{user}?page={prev}" id="prev">&larr; previous</a>{/if}
+    {#if result.hasNext}<a href="{basePath}/users/u/{user}?page={next}" id="next">next &rarr;</a>{/if}
+</div>
+<form method="get" action="{basePath}/users/u/{user}" id="choose-fileset">
+    <p>
+        <input name="fileset" list="dataset-names" value="{fileset}" placeholder="Choose a dataset to list its files" size="34" autocomplete="off">
+        <button type="submit">List files</button>
+    </p>
+</form>
+<form method="post" action="{basePath}/users/u/{user}/file/grant" id="grant-file">
+    <p>
+        <input name="path" list="file-names" placeholder="Choose a file" size="40" autocomplete="off" required>
+        <datalist id="file-names">{#for n in fileNames}<option value="{n}"></option>{/for}</datalist>
+        <input name="expiresOn" type="text" size="12" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" title="Valid through this day (UTC), as YYYY-MM-DD; empty = no expiry">
+        <button type="submit">Grant one file</button>
+    </p>
+</form>
+{/if}
+</section>
+{/content}
+{/include}

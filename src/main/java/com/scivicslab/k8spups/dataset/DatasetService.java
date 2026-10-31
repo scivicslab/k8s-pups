@@ -125,6 +125,11 @@ public class DatasetService {
         return repository.accessOfUser(user);
     }
 
+    /** How many datasets and single files each user may read now; empty when the dataset database is not in use. */
+    public Map<String, DatasetRepository.GrantCount> grantCounts() {
+        return repository.isAvailable() ? repository.grantCounts() : Map.of();
+    }
+
     public DatasetRepository.Page<DatasetRepository.UserRow> users(String q, int page, int size) {
         return repository.users(q, page, size);
     }
