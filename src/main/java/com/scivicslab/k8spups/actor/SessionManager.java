@@ -516,6 +516,22 @@ public class SessionManager {
         return result;
     }
 
+    /** The status of every session of every user (for the administrators). */
+    public List<SessionStatus> getAllSessions(ActorRef<SessionManager> self) {
+        List<CompletableFuture<SessionStatus>> futures = new ArrayList<>();
+        for (ActorRef<Session> ref : sessions(self)) futures.add(ref.ask(Session::getStatus));
+        List<SessionStatus> result = new ArrayList<>();
+        for (var future : futures) {
+            try {
+                SessionStatus status = future.get();
+                if (status != null) result.add(status);
+            } catch (Exception e) {
+                LOG.warning("Failed to get session status: " + e.getMessage());
+            }
+        }
+        return result;
+    }
+
     /**
      * Update the memo text for a session.
      */

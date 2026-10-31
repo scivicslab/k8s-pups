@@ -171,6 +171,11 @@ public class K8sApiClient {
     /** State of a shared service's Deployment as the dashboard shows it. */
     public enum SharedServiceState { RUNNING, STARTING, DOWN, UNKNOWN }
 
+    /** The image a Pod of this tool runs: the override of the mounted ConfigMap if there is one, else the plugin's own, with the registry filled in. */
+    public String resolvedImage(com.scivicslab.k8spups.plugin.ToolPlugin plugin) {
+        return imageResolver.resolve(plugin);
+    }
+
     /** The namespace of the tool Pods and their Services. */
     public String userPodsNamespace() {
         return userPodsNamespace;

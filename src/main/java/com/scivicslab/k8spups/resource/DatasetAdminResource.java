@@ -135,7 +135,7 @@ public class DatasetAdminResource {
         data.put("eventTypes", List.of("dataset.grant", "dataset.revoke", "file.grant", "file.revoke", "import.catalog",
                 "import.access", "dataset.delete", "storage.allocate", "storage.resize", "storage.revoke", "storage.restore",
                 "group.create", "group.resize", "group.revoke", "group.restore", "group.member.add", "group.member.remove",
-                "settings.change", "tool.pull", "tool.config", "tool.enable", "tool.disable", "service.launch", "service.stop", "user.view",
+                "settings.change", "tool.pull", "tool.config", "tool.enable", "tool.disable", "service.launch", "service.stop", "session.admin-stop", "user.view",
                 "session.start", "session.stop"));
         data.put("filter", "user=" + enc(user) + "&dataset=" + enc(dataset) + "&type=" + enc(type));
         data.put("result", result);

@@ -1,0 +1,38 @@
+{#include admin-base title='Tools' area='tools'}
+{#content}
+<h1>Tools</h1>
+{#if error}<div class="error" id="admin-error">{error}</div>{/if}
+{#if done}<div class="done" id="admin-done">{done}</div>{/if}
+
+<h2>Tools of this deployment</h2>
+<p class="note">The tools a deployment offers are fixed when the controller starts (the environment variable
+    <code>K8SPUPS_ENABLED_PLUGINS</code> in its manifest). To add or remove a tool, change the manifest and restart the controller.</p>
+<table id="tools">
+    <tr><th>Tool</th><th>Shown to users as</th><th>Image</th></tr>
+    {#for t in tools}
+    <tr><td>{t.name}</td><td>{t.displayName}</td><td><code>{t.image}</code></td></tr>
+    {/for}
+</table>
+
+<h2>Running sessions</h2>
+<p class="note">The sessions of every user. Stopping a session ends the tool of that user at once; it is written to the audit trail.</p>
+{#if sessions.isEmpty}
+<p class="none" id="no-sessions">No session is running.</p>
+{#else}
+<table id="sessions">
+    <tr><th>User</th><th>Tool</th><th>State</th><th>Storage</th><th>Session</th><th></th></tr>
+    {#for s in sessions}
+    <tr id="session-{s.sessionId}">
+        <td>{s.user}</td><td>{s.tool}</td><td>{s.state}</td><td>{#if s.storage}{s.storage}{#else}<span class="none">none</span>{/if}</td><td><code>{s.sessionId}</code></td>
+        <td>
+            <form class="inline" method="post" action="{basePath}/tools/sessions/{s.sessionId}/stop"
+                  onsubmit="return confirm('Stop this session of {s.user}? Their unsaved work in the tool is lost.')">
+                <button type="submit">Stop</button>
+            </form>
+        </td>
+    </tr>
+    {/for}
+</table>
+{/if}
+{/content}
+{/include}
