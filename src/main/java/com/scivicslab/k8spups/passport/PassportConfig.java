@@ -52,7 +52,9 @@ public final class PassportConfig {
         VisaCheck check = new VisaCheck(Map.of(issuer, jwksUri), acceptedBy, trustedSources,
                 new CachedJwks(http, 60, Clock.systemUTC()), Clock.systemUTC());
         LOG.info("Passport support on (sources: " + sources + "): Visas of " + issuer + " grant datasets under " + prefix);
-        return Optional.of(new PassportGrants(fromIssuer ? http : null, fromUserInfo, check, prefix, cacheSeconds, Clock.systemUTC()));
+        PassportGrants grants = new PassportGrants(fromIssuer ? http : null, fromUserInfo, check, prefix, cacheSeconds, Clock.systemUTC());
+        grants.describedAs(new PassportGrants.Description(sources, issuer, jwksUri, prefix, acceptedBy, trustedSources, passportUrl, cacheSeconds));
+        return Optional.of(grants);
     }
 
     /**

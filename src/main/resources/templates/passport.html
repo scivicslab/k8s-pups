@@ -1,0 +1,44 @@
+{#include admin-base title='Passport' area='passport'}
+{#content}
+<h1>Passport</h1>
+{#if !enabled}
+<p class="none" id="passport-off">Passport support is off in this deployment: Visas grant no dataset.</p>
+{#else}
+<h2>Settings</h2>
+<p class="note">These settings decide which Visas are accepted. They are set by the variables of the controller's manifest; to change one,
+    change the variable and restart the controller.</p>
+<table id="passport-settings">
+    <tr><th>Setting</th><th>Value</th><th>Variable</th></tr>
+    {#for s in settings}
+    <tr><td>{s.name}</td><td>{s.value}</td><td><code>{s.variable}</code></td></tr>
+    {/for}
+</table>
+
+<h2>Why the Visas of a user were accepted or discarded</h2>
+<p class="note">Choose a user. The page shows the last decision about each Visa of that user since the controller started. The Visas come
+    with the login of the user, so a user who has not signed in since then has none.</p>
+<form method="get" action="{basePath}/passport" id="choose-user">
+    <input name="user" list="user-names" value="{user}" placeholder="Choose a user" size="30" autocomplete="off" required>
+    <datalist id="user-names">{#for n in userNames}<option value="{n}"></option>{/for}</datalist>
+    <button type="submit">Show</button>
+</form>
+{#if invalidUser??}
+<p class="error" id="diagnosis-error">That is not a valid user name.</p>
+{#else if hasDiagnosis}
+<p id="diagnosis-summary">Checked {at}: {how}. Datasets granted by the accepted Visas: <b id="granted">{granted}</b>.</p>
+{#if decisions.isEmpty}
+<p class="none" id="no-visas">The user presented no Visa.</p>
+{#else}
+<table id="decisions">
+    <tr><th>Visa (what it says)</th><th>Decision</th><th>Reason</th></tr>
+    {#for d in decisions}
+    <tr><td>{d.visa}</td><td>{#if d.accepted}accepted{#else}discarded{/if}</td><td>{d.reason}</td></tr>
+    {/for}
+</table>
+{/if}
+{#else if user}
+<p class="none" id="no-diagnosis">No Visa of {user} has been checked since the controller started.</p>
+{/if}
+{/if}
+{/content}
+{/include}

@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
@@ -42,6 +43,37 @@ public final class PassportGrants {
     private final Map<String, Entry> cache = new ConcurrentHashMap<>();
     private final Map<String, Entry> supplied = new ConcurrentHashMap<>();
 
+    /** The decision about one Visa: what it says, whether it was accepted, and why. */
+    public record Decision(String visa, boolean accepted, String reason) {
+    }
+
+    /** The last decisions about the Visas of one user: where the Visas came from, when, what was decided, and the datasets granted. */
+    public record Diagnosis(String how, long at, List<Decision> decisions, Set<String> datasets) {
+    }
+
+    /** The settings that decide how Visas are accepted. */
+    public record Description(Set<String> sources, String issuer, String jwksUri, String datasetPrefix, Set<String> acceptedBy,
+                              Set<String> trustedSources, String passportUrl, long cacheSeconds) {
+    }
+
+    private final Map<String, Diagnosis> lastDiagnosis = new ConcurrentHashMap<>();
+    private volatile Description description;
+
+    /** Records the settings these grants were built from, for the administrator screen. */
+    public void describedAs(Description description) {
+        this.description = description;
+    }
+
+    /** The settings these grants were built from, when they were recorded. */
+    public Optional<Description> description() {
+        return Optional.ofNullable(description);
+    }
+
+    /** The last decisions about the Visas of the user (from the login, or from the issuer), if any were made since the start. */
+    public Optional<Diagnosis> diagnosis(String user) {
+        return Optional.ofNullable(lastDiagnosis.get(user));
+    }
+
     public PassportGrants(PassportSource source, VisaCheck check, String datasetPrefix, long cacheSeconds, Clock clock) {
         this(source, false, check, datasetPrefix, cacheSeconds, clock);
     }
@@ -72,7 +104,7 @@ public final class PassportGrants {
      */
     public void supply(String user, List<String> visas) {
         long now = clock.instant().getEpochSecond();
-        Result result = evaluate(user, visas);
+        Result result = evaluate(user, visas, "the Visas of the login (UserInfo)");
         supplied.put(user, new Entry(result.datasets(), now, result.validUntil()));
     }
 
@@ -97,24 +129,40 @@ public final class PassportGrants {
     }
 
     /** Checks the Visas and returns the datasets they grant with the earliest expiry among the accepted Visas. */
-    private Result evaluate(String user, List<String> visas) {
+    private Result evaluate(String user, List<String> visas, String how) {
         Set<String> datasets = new LinkedHashSet<>();
+        List<Decision> decisions = new java.util.ArrayList<>();
         long validUntil = Long.MAX_VALUE;
         for (String visa : visas) {
             VisaCheck.Result result = check.check(visa);
+            String what = describe(VisaCheck.summarize(visa));
             if (!result.accepted()) {
                 LOG.info("Visa of " + user + " rejected: " + result.reason());
+                decisions.add(new Decision(what, false, result.reason()));
                 continue;
             }
             String dataset = datasetOf(result.value());
             if (dataset == null) {
                 LOG.info("Visa of " + user + " grants " + result.value() + ", which is not under " + datasetPrefix);
+                decisions.add(new Decision(what, false, "the dataset URL " + result.value() + " is not under " + datasetPrefix));
                 continue;
             }
             datasets.add(dataset);
+            decisions.add(new Decision(what, true, "grants the dataset " + dataset + " (" + result.reason() + ")"));
             validUntil = Math.min(validUntil, result.expiresAt());
         }
+        lastDiagnosis.put(user, new Diagnosis(how, clock.instant().getEpochSecond(), List.copyOf(decisions), Set.copyOf(datasets)));
         return new Result(datasets, validUntil);
+    }
+
+    private static String describe(VisaCheck.Summary s) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(s.value() != null ? s.value() : "(no dataset value)");
+        if (s.by() != null) sb.append(" | by ").append(s.by());
+        if (s.source() != null) sb.append(" | source ").append(s.source());
+        if (s.alg() != null) sb.append(" | alg ").append(s.alg());
+        if (s.issuer() != null) sb.append(" | issuer ").append(s.issuer());
+        return sb.toString();
     }
 
     private Set<String> fetched(String user) {
@@ -124,7 +172,7 @@ public final class PassportGrants {
             return cached.datasets();
         }
         try {
-            Result result = evaluate(user, source.visas(user));
+            Result result = evaluate(user, source.visas(user), "the Visas fetched from the issuer"); 
             Set<String> datasets = result.datasets();
             long validUntil = result.validUntil();
             cache.put(user, new Entry(datasets, now, validUntil));

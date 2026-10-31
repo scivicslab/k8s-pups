@@ -146,6 +146,28 @@ public final class VisaCheck {
         }
     }
 
+    /** What a Visa says about itself, read without checking the signature (to show an administrator why it was decided as it was). */
+    public record Summary(String alg, String issuer, String value, String by, String source) {}
+
+    /** The algorithm, issuer, value, authority and source of a Visa; the items that cannot be read are null. Nothing is verified. */
+    public static Summary summarize(String jwt) {
+        try {
+            String[] parts = jwt.split("\\.", -1);
+            Map<String, Object> header = decode(parts[0]);
+            Map<String, Object> payload = decode(parts[1]);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> visa = payload.get("ga4gh_visa_v1") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+            return new Summary(text(header.get("alg")), text(payload.get("iss")), text(visa.get("value")), text(visa.get("by")),
+                    text(visa.get("source")));
+        } catch (Exception e) {
+            return new Summary(null, null, null, null, null);
+        }
+    }
+
+    private static String text(Object o) {
+        return o instanceof String s ? s : null;
+    }
+
     private static Map<String, Object> decode(String segment) throws Exception {
         return JSON.readValue(B64URL.decode(segment), MAP);
     }

@@ -206,6 +206,21 @@ public class DatasetService {
         return union(fromDatabase, granted.stream().filter(repository::datasetExists).toList());
     }
 
+    /** Whether the Passport support is on, and the settings it was built from. */
+    public Optional<PassportGrants.Description> passportDescription() {
+        return passport.flatMap(PassportGrants::description);
+    }
+
+    /** Whether the S3 access for the datasets that Visas grant is on. */
+    public boolean s3Enabled() {
+        return s3.isPresent();
+    }
+
+    /** The last decisions about the Visas of the user; empty without Passport support or before any Visa was checked. */
+    public Optional<PassportGrants.Diagnosis> passportDiagnosis(String user) {
+        return passport.flatMap(p -> p.diagnosis(user));
+    }
+
     /** The datasets that the Visas of the user grant, whether or not they are in the catalog (empty without Passport support). */
     private Set<String> visaDatasets(String user) {
         return passport.map(p -> p.datasets(user)).orElse(Set.of());
