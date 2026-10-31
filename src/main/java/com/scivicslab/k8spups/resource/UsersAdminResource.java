@@ -117,6 +117,12 @@ public class UsersAdminResource {
         if (denied != null) return denied;
         if (!DatasetPath.isValidUserName(user)) return Response.status(Response.Status.NOT_FOUND).entity("No such user").build();
 
+        // Names, mail addresses and access of a person are shown: opening the page is recorded. The page that follows a
+        // change (it carries the message of the change) is the same view again and is not recorded a second time.
+        if (error == null && done == null && msg == null) {
+            String admin = access.user();
+            datasets(d -> { d.auditAdminChange("user.view", admin, user, ""); return null; });
+        }
         Map<String, Object> data = new HashMap<>(storagePanel.data(user));
         data.put("basePath", basePath);
         data.put("user", user);

@@ -3,6 +3,7 @@ package com.scivicslab.k8spups.resource;
 import com.scivicslab.k8spups.actor.K8sPupsActorSystem;
 import com.scivicslab.k8spups.tool.*;
 import io.quarkus.security.Authenticated;
+import io.smallrye.common.annotation.Blocking;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -13,12 +14,14 @@ import java.util.logging.Logger;
 /**
  * REST API for tool registry management.
  *
- * Admin-only endpoints for:
+ * Administrators only (checked on every request, as on the administrator pages); every change is written to the audit trail.
+ * Endpoints for:
  * - List available tools and their pull status
  * - Pull tool images and extract descriptors
  * - Configure tool parameters
  */
 @Path("/api/admin/tools")
+@Blocking
 @Authenticated
 @Produces(MediaType.APPLICATION_JSON)
 public class ToolManagementResource {
@@ -28,11 +31,31 @@ public class ToolManagementResource {
     @Inject
     K8sPupsActorSystem actorSystem;
 
+    @Inject
+    AdminAccess access;
+
+    /** Null when the caller is an administrator; otherwise the 403 response to return. */
+    private Response denied() {
+        return access.denyUnlessAdmin("Tools");
+    }
+
+    /** Appends a change of a tool to the audit trail; the detail never holds a value of the configuration. */
+    private void audit(String eventType, String detail) {
+        try {
+            String admin = access.user();
+            actorSystem.getDatasetManager().ask(d -> { d.auditAdminChange(eventType, admin, null, detail); return null; }).get();
+        } catch (Exception e) {
+            LOG.warning("The audit event " + eventType + " could not be written: " + e.getMessage());
+        }
+    }
+
     /**
      * List all registered tools with their metadata and pull status.
      */
     @GET
     public Response listTools() {
+        Response denied = denied();
+        if (denied != null) return denied;
         try {
             var k8sApiClient = actorSystem.getK8sClient();
             var namespace = actorSystem.getControllerNamespace();
@@ -64,6 +87,8 @@ public class ToolManagementResource {
     @GET
     @Path("/{toolName}")
     public Response getTool(@PathParam("toolName") String toolName) {
+        Response denied = denied();
+        if (denied != null) return denied;
         try {
             var k8sApiClient = actorSystem.getK8sClient();
             var namespace = actorSystem.getControllerNamespace();
@@ -100,6 +125,8 @@ public class ToolManagementResource {
     @POST
     @Path("/pull")
     public Response pullTool(@QueryParam("toolName") String toolName) {
+        Response denied = denied();
+        if (denied != null) return denied;
         try {
             var k8sApiClient = actorSystem.getK8sClient();
             var namespace = actorSystem.getControllerNamespace();
@@ -123,6 +150,7 @@ public class ToolManagementResource {
 
             // Save descriptor to tool-catalog ConfigMap
             k8sApiClient.saveToolCatalog(namespace, toolName, descriptor);
+            audit("tool.pull", toolName + " " + entry.image());
 
             Map<String, Object> result = new HashMap<>();
             result.put("name", toolName);
@@ -148,11 +176,14 @@ public class ToolManagementResource {
     @Path("/{toolName}/config")
     @Consumes(MediaType.APPLICATION_JSON)
     public Response saveToolConfig(@PathParam("toolName") String toolName, Map<String, String> config) {
+        Response denied = denied();
+        if (denied != null) return denied;
         try {
             var k8sApiClient = actorSystem.getK8sClient();
             var namespace = actorSystem.getControllerNamespace();
 
             k8sApiClient.saveToolConfig(namespace, toolName, config);
+            audit("tool.config", toolName + " parameters: " + String.join(", ", new TreeSet<>(config.keySet())));
 
             return Response.ok(Map.of(
                 "message", "Tool configuration saved",
@@ -175,6 +206,8 @@ public class ToolManagementResource {
     @POST
     @Path("/{toolName}/enable")
     public Response enableTool(@PathParam("toolName") String toolName) {
+        Response denied = denied();
+        if (denied != null) return denied;
         try {
             var k8sApiClient = actorSystem.getK8sClient();
             var namespace = actorSystem.getControllerNamespace();
@@ -186,6 +219,7 @@ public class ToolManagementResource {
             }
 
             k8sApiClient.saveToolEnable(namespace, toolName, true);
+            audit("tool.enable", toolName);
 
             return Response.ok(Map.of(
                 "message", "Tool enabled",
@@ -208,11 +242,14 @@ public class ToolManagementResource {
     @POST
     @Path("/{toolName}/disable")
     public Response disableTool(@PathParam("toolName") String toolName) {
+        Response denied = denied();
+        if (denied != null) return denied;
         try {
             var k8sApiClient = actorSystem.getK8sClient();
             var namespace = actorSystem.getControllerNamespace();
 
             k8sApiClient.saveToolEnable(namespace, toolName, false);
+            audit("tool.disable", toolName);
 
             return Response.ok(Map.of(
                 "message", "Tool disabled",

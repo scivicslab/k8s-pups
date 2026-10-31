@@ -82,6 +82,13 @@ public class SettingsAdminResource {
         call(s -> { s.save(next); return null; });
         LOG.info("Shared settings saved by " + currentUser() + ": gpuBrokerUrl=" + next.gpuBrokerUrl()
             + " defaultModel=" + next.defaultModel());
+        String admin = currentUser();
+        try {
+            actorSystem.getDatasetManager().ask(d -> { d.auditAdminChange("settings.change", admin, null,
+                "gpuBrokerUrl=" + next.gpuBrokerUrl() + " defaultModel=" + next.defaultModel()); return null; }).get();
+        } catch (Exception e) {
+            LOG.warning("The audit event settings.change could not be written: " + e.getMessage());
+        }
         return back(null, true);
     }
 

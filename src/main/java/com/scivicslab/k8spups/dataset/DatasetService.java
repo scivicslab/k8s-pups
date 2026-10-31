@@ -125,6 +125,14 @@ public class DatasetService {
         return repository.accessOfUser(user);
     }
 
+    /**
+     * Appends an event of an administrator's change (settings, tools) or view (the page of a user) to the audit trail;
+     * a deployment without the audit database records nothing.
+     */
+    public void auditAdminChange(String eventType, String actor, String user, String detail) {
+        if (repository.isAvailable()) repository.addAudit(eventType, actor, user, null, null, null, null, detail);
+    }
+
     /** How many datasets and single files each user may read now; empty when the dataset database is not in use. */
     public Map<String, DatasetRepository.GrantCount> grantCounts() {
         return repository.isAvailable() ? repository.grantCounts() : Map.of();

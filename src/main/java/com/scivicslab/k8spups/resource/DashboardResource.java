@@ -787,6 +787,11 @@ public class DashboardResource {
         try {
             actorSystem.getSharedServiceControl().ask(c -> { c.scale(svc.namespace(), svc.deployment(), replicas); return null; }).get();
             LOG.info("Shared service " + name + " scaled to " + replicas + " by " + userId);
+            try {
+                actorSystem.getDatasetManager().ask(d -> { d.auditAdminChange(replicas > 0 ? "service.launch" : "service.stop", userId, null, name); return null; }).get();
+            } catch (Exception e) {
+                LOG.warning("The audit event of the shared service " + name + " could not be written: " + e.getMessage());
+            }
         } catch (Exception e) {
             LOG.severe("Shared service " + name + " scale failed: " + e.getMessage());
             return Response.seeOther(URI.create("/dashboard?error=shared_service_scale_failed")).build();
