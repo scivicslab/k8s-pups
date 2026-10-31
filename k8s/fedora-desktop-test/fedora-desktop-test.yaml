@@ -1,0 +1,81 @@
+# A test of the fedora-desktop image outside k8s-pups: one Pod with the security context the controller gives the
+# Remote Desktop tool (UID 1000, seccomp Unconfined, no privilege escalation, no capabilities), an emptyDir as home.
+# Reach it with: kubectl -n fedora-desktop-test port-forward svc/fedora-desktop 8080:8080 ; http://localhost:8080/
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fedora-desktop-test
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fedora-desktop
+  namespace: fedora-desktop-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fedora-desktop
+  template:
+    metadata:
+      labels:
+        app: fedora-desktop
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        seccompProfile:
+          type: Unconfined
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values: [stonefly513, stonefly521, stonefly522]
+      containers:
+      - name: desktop
+        image: 192.168.5.13:32000/fedora-desktop:IMAGE_TAG
+        ports:
+        - containerPort: 8080
+        env:
+        - name: HOME
+          value: /home/user
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop: [ALL]
+        resources:
+          requests:
+            cpu: "1"
+            memory: 2Gi
+          limits:
+            cpu: "4"
+            memory: 6Gi
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        volumeMounts:
+        - name: home
+          mountPath: /home/user
+      volumes:
+      - name: home
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fedora-desktop
+  namespace: fedora-desktop-test
+spec:
+  selector:
+    app: fedora-desktop
+  ports:
+  - port: 8080
+    targetPort: 8080

@@ -13,3 +13,5 @@ com.scivicslab.k8spups.plugin.ComplianceTracerPlugin
 com.scivicslab.k8spups.plugin.Exdb2Plugin
 com.scivicslab.k8spups.plugin.EnglishToolkitPlugin
 com.scivicslab.k8spups.plugin.GalaxyPlugin
+com.scivicslab.k8spups.plugin.FedoraDesktopPlugin
+com.scivicslab.k8spups.plugin.DebianDesktopPlugin
