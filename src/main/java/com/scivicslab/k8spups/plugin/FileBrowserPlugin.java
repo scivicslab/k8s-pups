@@ -76,6 +76,10 @@ public class FileBrowserPlugin implements ToolPlugin {
             + "  sources:\n"
             + "    - path: \"/srv\"\n"
             + (viewOnly ? "      config:\n        readOnly: true\n" : "")
+            // No seasonal theme: on its days (Halloween) FileBrowser opens a notice that blocks the upload window.
+            + "frontend:\n"
+            + "  styling:\n"
+            + "    disableEventThemes: true\n"
             + "auth:\n"
             + "  methods:\n"
             + "    noauth: true\n"
