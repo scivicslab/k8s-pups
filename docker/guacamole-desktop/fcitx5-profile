@@ -1,13 +1,17 @@
 [Groups/0]
 Name=Default
 Default Layout=jp
-DefaultIM=mozc
+DefaultIM=llm-ime
 
 [Groups/0/Items/0]
 Name=keyboard-jp
 Layout=
 
 [Groups/0/Items/1]
+Name=llm-ime
+Layout=
+
+[Groups/0/Items/2]
 Name=mozc
 Layout=
 

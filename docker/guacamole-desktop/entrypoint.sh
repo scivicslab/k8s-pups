@@ -27,11 +27,11 @@ for dir in .config .cache .local .dbus .gvfs; do
 done
 mkdir -p "$HOME/.config" "$HOME/.cache" "$HOME/.local/share"
 
-# Copy default fcitx5 profile (Mozc) if not present
+# Copy default fcitx5 profile (SLM IME, then Mozc) if not present
 if [ ! -f "$HOME/.config/fcitx5/profile" ]; then
     mkdir -p "$HOME/.config/fcitx5"
     cp /etc/skel/.config/fcitx5/profile "$HOME/.config/fcitx5/profile"
-    echo "Copied default fcitx5 profile (Mozc)"
+    echo "Copied default fcitx5 profile (SLM IME)"
 fi
 
 DISPLAY_NUM=1
@@ -171,7 +171,7 @@ DISPLAY=:${DISPLAY_NUM} pkill -f mate-screensaver 2>/dev/null || true
 DISPLAY=:${DISPLAY_NUM} pkill -f mate-power-manager 2>/dev/null || true
 echo "Disabled screensaver and power manager"
 
-# Start fcitx5 input method daemon (Mozc)
+# Start fcitx5 input method daemon (SLM IME by default)
 DISPLAY=:${DISPLAY_NUM} fcitx5 -d --replace 2>/dev/null &
 echo "fcitx5 started"
 

@@ -1,0 +1,2 @@
+# The Debian packages of fcitx5-slm-ime are copied here before a build; they are not kept in git
+*.deb

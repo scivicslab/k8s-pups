@@ -207,7 +207,14 @@ RUN chown -R user:user /opt/tomcat /etc/guacamole /home/user
 # write its logs, temp and work directories, and write the Guacamole settings that the entrypoint generates.
 RUN chmod -R o+rX /opt/tomcat && chmod -R o+rwX /opt/tomcat/logs /opt/tomcat/temp /opt/tomcat/work /etc/guacamole
 
-# ---- fcitx5 default profile: Mozc as default input method ----
+# ---- fcitx5-slm-ime (the engine and the model) ----
+# Tool Pods cannot reach the internet, so the Debian packages of fcitx5-slm-ime (built with dpkg-buildpackage on
+# Ubuntu 24.04) are put into the image. Mozc stays installed as the second input method.
+COPY fcitx5-slm-ime_*.deb slm-ime-model_*.deb /tmp/debs/
+RUN apt-get update && apt-get install -y --no-install-recommends /tmp/debs/*.deb && \
+    rm -rf /var/lib/apt/lists/* /tmp/debs
+
+# ---- fcitx5 default profile: SLM IME as default input method, Mozc as the second ----
 RUN mkdir -p /etc/skel/.config/fcitx5
 COPY fcitx5-profile /etc/skel/.config/fcitx5/profile
 
