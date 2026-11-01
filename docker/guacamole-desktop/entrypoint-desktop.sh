@@ -29,11 +29,18 @@ for dir in .config .cache .local .dbus .gvfs; do
 done
 mkdir -p "$HOME/.config" "$HOME/.cache" "$HOME/.local/share"
 
-# Copy default fcitx5 profile (SLM IME, then Mozc) if not present
-if [ ! -f "$HOME/.config/fcitx5/profile" ]; then
+# Default fcitx5 profile: SLM IME, then Mozc. A home without a profile gets it; a home whose profile was made before
+# SLM IME was in the image (Mozc as the default) gets it once, and the old profile is kept as profile.before-slm-ime.
+# The marker file records that it was done, so a user who changes the input methods afterwards keeps the change.
+marker="$HOME/.config/fcitx5/.slm-ime-default"
+if [ ! -f "$HOME/.config/fcitx5/profile" ] || [ ! -f "$marker" ]; then
     mkdir -p "$HOME/.config/fcitx5"
+    if [ -f "$HOME/.config/fcitx5/profile" ]; then
+        cp "$HOME/.config/fcitx5/profile" "$HOME/.config/fcitx5/profile.before-slm-ime"
+    fi
     cp /etc/skel/.config/fcitx5/profile "$HOME/.config/fcitx5/profile"
-    echo "Copied default fcitx5 profile (SLM IME)"
+    touch "$marker"
+    echo "Set the default fcitx5 profile (SLM IME)"
 fi
 
 DISPLAY_NUM=1
