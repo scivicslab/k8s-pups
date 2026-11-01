@@ -4,7 +4,7 @@
 # The entrypoint is the one of guacamole-desktop (so the fix for a UID without a passwd entry is not lost while the base
 # image is not rebuilt). Build with docker/ as the context:
 #   docker build --build-arg BASE=<registry>/guacamole-desktop:<tag> -f guacamole-desktop-bio/Dockerfile -t <registry>/guacamole-desktop-bio:<tag> .
-ARG BASE=192.168.5.13:32000/guacamole-desktop:0.1.3-2610292137
+ARG BASE=192.168.5.13:32000/guacamole-desktop:0.1.4-2611011140
 FROM ${BASE}
 ARG IGV_VERSION=2.19.8
 RUN apt-get update && \
