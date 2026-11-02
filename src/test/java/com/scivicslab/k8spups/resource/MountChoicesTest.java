@@ -13,21 +13,19 @@ class MountChoicesTest {
     static final Map<String, String> STORAGE = new LinkedHashMap<>(Map.of("posix", "Shared file storage"));
 
     @Test
-    void choicesCoverOwnStorageGroupsDatasetsAndFiles() {
-        var c = MountChoices.of(STORAGE, Map.of("lab1", "ro"), List.of("JGAD000001"), true);
-        assertEquals(List.of("posix", "group:lab1", "dataset:JGAD000001", "dataset-files"),
-            c.stream().map(MountChoices.Choice::value).toList());
+    void choicesCoverOwnStorageAndGroupsOnly() {
+        var c = MountChoices.of(STORAGE, Map.of("lab1", "ro"));
+        assertEquals(List.of("posix", "group:lab1"), c.stream().map(MountChoices.Choice::value).toList());
         assertEquals("/groups/lab1", c.get(1).path());
         assertTrue(c.get(1).label().contains("read-only"));
-        assertEquals("/datasets/JGAD000001", c.get(2).path());
     }
 
     @Test
     void rememberedChoicesThatAreNoLongerAllowedAreDroppedAndCounted() {
         String json = MountChoices.toJson("posix", List.of(
             Map.of("value", "group:lab1", "path", "/groups/lab1"),
-            Map.of("value", "dataset:JGAD000009", "path", "/datasets/JGAD000009")));   // grant ended
-        var current = MountChoices.of(STORAGE, Map.of("lab1", "rw"), List.of(), false);
+            Map.of("value", "group:lab9", "path", "/groups/lab9")));   // membership ended
+        var current = MountChoices.of(STORAGE, Map.of("lab1", "rw"));
         var r = MountChoices.remembered(json, current, STORAGE.keySet());
         assertEquals("posix", r.primary());
         assertEquals(List.of(Map.of("value", "group:lab1", "path", "/groups/lab1")), r.mounts());
@@ -35,9 +33,19 @@ class MountChoicesTest {
     }
 
     @Test
+    void aRememberedDatasetChoiceIsDroppedWithoutBeingCounted() {
+        // The datasets are mounted by the controller now; a choice stored before that is neither offered nor reported.
+        String json = MountChoices.toJson("posix", List.of(
+            Map.of("value", "dataset:JGAD000001", "path", "/datasets/JGAD000001"),
+            Map.of("value", "dataset-files", "path", "/dataset-files")));
+        var r = MountChoices.remembered(json, MountChoices.of(STORAGE, Map.of()), STORAGE.keySet());
+        assertEquals(List.of(), r.mounts());
+        assertEquals(0, r.dropped());
+    }
+
+    @Test
     void aPrimaryTypeTakenAwayIsDropped() {
-        var r = MountChoices.remembered(MountChoices.toJson("longhorn", List.of()), MountChoices.of(STORAGE, Map.of(),
-            List.of(), false), STORAGE.keySet());
+        var r = MountChoices.remembered(MountChoices.toJson("longhorn", List.of()), MountChoices.of(STORAGE, Map.of()), STORAGE.keySet());
         assertEquals("", r.primary());
         assertEquals(1, r.dropped());
         assertEquals(0, MountChoices.remembered("[]", List.of(), List.of()).dropped());

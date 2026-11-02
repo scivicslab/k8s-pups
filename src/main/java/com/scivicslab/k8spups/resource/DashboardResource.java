@@ -880,27 +880,15 @@ public class DashboardResource {
         return result;
     }
 
-    /** The mounts the user can add at launch: own allocated storage, group storage, datasets, granted files. */
+    /** The mounts the user can add at launch: own allocated storage and group storage. The datasets are mounted by the controller. */
     private List<MountChoices.Choice> mountChoices(String userId, List<String> allocatedTypes) {
         Map<String, String> groups = Map.of();
-        com.scivicslab.k8spups.dataset.DatasetService.Mounts ds = com.scivicslab.k8spups.dataset.DatasetService.Mounts.NONE;
         try {
             groups = actorSystem.getStorageAllocations().ask(a -> a.memberships(userId)).get();
         } catch (Exception e) {
             LOG.warning("Group memberships of " + userId + " could not be read: " + e.getMessage());
         }
-        try {
-            // The datasets of the user's Visas count too: hand over the Visas of this login first, as a launch does.
-            // Read on the request thread: the identity is not available on the thread of the actor.
-            List<String> visas = currentVisas();
-            ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-            sm.ask(mgr -> mgr.supplyVisas(sm, userId, visas)).get();
-            ActorRef<com.scivicslab.k8spups.dataset.DatasetService> datasets = actorSystem.getDatasetManager();
-            if (datasets != null) ds = datasets.ask(d -> d.mountableDatasets(userId)).get();
-        } catch (Exception e) {
-            LOG.warning("Datasets of " + userId + " could not be read: " + e.getMessage());
-        }
-        return MountChoices.of(StorageTypes.names(allocatedTypes), groups, ds.datasets(), ds.fileView());
+        return MountChoices.of(StorageTypes.names(allocatedTypes), groups);
     }
 
     private List<MountSpec> resolveAdditionalMounts(String... typePathPairs) {
@@ -914,14 +902,9 @@ public class DashboardResource {
                 if (!path.startsWith("/")) {
                     path = "/" + path;
                 }
-                // The choice is checked when the session is created: own storage against the allocations, a dataset
-                // against the grants, a group's storage against the memberships
-                if (type.startsWith(MountChoices.DATASET)) {
-                    mounts.add(new MountSpec(K8sApiClient.DATASET_ROOT_STORAGE_TYPE, path, null,
-                        type.substring(MountChoices.DATASET.length())));
-                } else if (type.equals(MountChoices.DATASET_FILES)) {
-                    mounts.add(new MountSpec(K8sApiClient.DATASET_STORAGE_TYPE, path, null));
-                } else if (type.startsWith(MountChoices.GROUP)) {
+                // The choice is checked when the session is created: own storage against the allocations, a group's
+                // storage against the memberships
+                if (type.startsWith(MountChoices.GROUP)) {
                     mounts.add(new MountSpec(K8sApiClient.GROUP_STORAGE_TYPE, path, type.substring(MountChoices.GROUP.length())));
                 } else {
                     mounts.add(new MountSpec(type, path, null));

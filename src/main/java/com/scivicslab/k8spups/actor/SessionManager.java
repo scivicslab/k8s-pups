@@ -2,6 +2,7 @@ package com.scivicslab.k8spups.actor;
 
 import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.storage.StorageAllocationService;
+import com.scivicslab.k8spups.dataset.DatasetMountSpecs;
 import com.scivicslab.k8spups.dataset.DatasetService;
 import com.scivicslab.k8spups.settings.SettingsEnv;
 import com.scivicslab.k8spups.settings.SettingsService;
@@ -175,25 +176,14 @@ public class SessionManager {
     }
 
     /**
-     * The mounts the user chose at launch, checked: a dataset only if the user may read it now (from the database or a
-     * Visa), the file-level view only if files are granted one by one, a group's storage only if the user is a member
-     * (read-only for a read-only member). Nothing is mounted that the user did not choose. Returns null when a chosen
-     * mount is not allowed, so the session is refused instead of starting without it.
+     * The mounts the user chose at launch, checked: a group's storage only if the user is a member (read-only for a
+     * read-only member); the user's own storage is checked against the allocations in createSession. Nothing is mounted
+     * that the user did not choose. Returns null when a chosen mount is not allowed, so the session is refused instead
+     * of starting without it. The datasets are not chosen: see {@link #datasetMounts}.
      */
     private List<MountSpec> resolveMounts(ActorRef<SessionManager> self, String userId, List<MountSpec> requested) {
         List<MountSpec> mounts = new ArrayList<>();
         if (requested == null || requested.isEmpty()) return mounts;
-        boolean wantsDatasets = requested.stream().anyMatch(m -> K8sApiClient.isDatasetStorageType(m.storageType()));
-        DatasetService.Mounts granted = DatasetService.Mounts.NONE;
-        if (wantsDatasets) {
-            ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
-            try {
-                if (datasets != null) granted = datasets.ask(d -> d.prepareMounts(userId)).get();
-            } catch (Exception e) {
-                LOG.warning("Dataset mounts failed for " + userId + ": " + e.getMessage());
-                return null;
-            }
-        }
         Map<String, String> groups = Map.of();
         if (requested.stream().anyMatch(m -> K8sApiClient.GROUP_STORAGE_TYPE.equals(m.storageType()))) {
             ActorRef<StorageAllocationService> alloc = self.system().getActor(StorageAllocationService.ACTOR_NAME);
@@ -205,19 +195,7 @@ public class SessionManager {
             }
         }
         for (MountSpec m : requested) {
-            if (K8sApiClient.DATASET_ROOT_STORAGE_TYPE.equals(m.storageType())) {
-                if (m.subPath() == null || !granted.datasets().contains(m.subPath())) {
-                    LOG.warning("Refused mount of dataset " + m.subPath() + " for " + userId + ": not granted");
-                    return null;
-                }
-                mounts.add(new MountSpec(m.storageType(), m.mountPath(), null, m.subPath(), true));
-            } else if (K8sApiClient.DATASET_STORAGE_TYPE.equals(m.storageType())) {
-                if (!granted.fileView()) {
-                    LOG.warning("Refused mount of the granted files for " + userId + ": no files are granted");
-                    return null;
-                }
-                mounts.add(new MountSpec(m.storageType(), m.mountPath(), null, null, true));
-            } else if (K8sApiClient.GROUP_STORAGE_TYPE.equals(m.storageType())) {
+            if (K8sApiClient.GROUP_STORAGE_TYPE.equals(m.storageType())) {
                 String mode = groups.get(m.sharedFrom());
                 if (mode == null) {
                     LOG.warning("Refused mount of group " + m.sharedFrom() + " for " + userId + ": not a member");
@@ -229,6 +207,23 @@ public class SessionManager {
             }
         }
         return mounts;
+    }
+
+    /**
+     * Every dataset the user may read now (from the database or a Visa) and the files granted one by one, read-only,
+     * at the places that {@link DatasetMountSpecs} gives. Empty when the user may read none, or when the datasets cannot
+     * be read: the tool then starts without them.
+     */
+    private List<MountSpec> datasetMounts(ActorRef<SessionManager> self, String userId, ToolPlugin plugin) {
+        ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
+        if (datasets == null) return List.of();
+        try {
+            DatasetService.Mounts granted = datasets.ask(d -> d.prepareMounts(userId)).get();
+            return DatasetMountSpecs.of(plugin.extraMountsUnder(), granted.datasets(), granted.fileView());
+        } catch (Exception e) {
+            LOG.warning("Dataset mounts failed for " + userId + ": " + e.getMessage());
+            return List.of();
+        }
     }
 
     /** Type to size of the user's allocated storage; empty when the allocation service is missing or fails. */
@@ -343,8 +338,7 @@ public class SessionManager {
             }
             if (additionalMounts != null) {
                 for (MountSpec m : additionalMounts) {
-                    if (K8sApiClient.isDatasetStorageType(m.storageType())
-                            || K8sApiClient.GROUP_STORAGE_TYPE.equals(m.storageType())) continue;   // see resolveMounts
+                    if (K8sApiClient.GROUP_STORAGE_TYPE.equals(m.storageType())) continue;   // see resolveMounts
                     if (m.sharedFrom() != null || !allocated.containsKey(m.storageType())) {
                         LOG.warning("Rejected " + toolName + " for " + userId + ": mount " + m.storageType()
                             + " is not allocated to the user");
@@ -359,6 +353,7 @@ public class SessionManager {
             LOG.warning("Rejected " + toolName + " for " + userId + ": a chosen mount is not allowed");
             return null;
         }
+        mounts.addAll(datasetMounts(self, userId, plugin));
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType,
             mounts,

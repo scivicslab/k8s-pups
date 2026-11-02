@@ -10,16 +10,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * The mounts a user can choose in the launch form, and the remembered choices of a tool checked against them.
  *
- * A choice is a value of the form field {@code extraType_<n>}: an allocated storage type ({@code posix}),
- * {@code group:<name>} for a group's storage, {@code dataset:<name>} for a dataset, or {@code dataset-files} for the
- * files granted one by one. Each has a default mount path. The remembered choices of a tool are stored as
+ * A choice is a value of the form field {@code extraType_<n>}: an allocated storage type ({@code posix}) or
+ * {@code group:<name>} for a group's storage. Each has a default mount path. The datasets are not chosen: the
+ * controller mounts all that the user may read ({@code DatasetMountSpecs}). The remembered choices of a tool are stored as
  * {@code {"primary": <type>, "mounts": [{"value": <choice>, "path": <mount path>}]}}; a remembered choice that is
  * not among the current choices (storage taken away, membership or grant ended) is left out and counted.
  */
 public final class MountChoices {
 
-    public static final String DATASET = "dataset:";
-    public static final String DATASET_FILES = "dataset-files";
     public static final String GROUP = "group:";
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -35,17 +33,12 @@ public final class MountChoices {
     /**
      * @param storageNames type to display name of the user's allocated storage
      * @param groups       group name to mode ("rw" or "ro")
-     * @param datasets     the datasets the user may read now
-     * @param fileView     whether files are granted one by one
      */
-    public static List<Choice> of(Map<String, String> storageNames, Map<String, String> groups,
-                                  List<String> datasets, boolean fileView) {
+    public static List<Choice> of(Map<String, String> storageNames, Map<String, String> groups) {
         List<Choice> out = new ArrayList<>();
         storageNames.forEach((type, name) -> out.add(new Choice(type, name, "/data")));
         groups.forEach((g, mode) -> out.add(new Choice(GROUP + g,
             "Group storage " + g + ("ro".equals(mode) ? " (read-only)" : ""), "/groups/" + g)));
-        for (String d : datasets) out.add(new Choice(DATASET + d, "Dataset " + d + " (read-only)", "/datasets/" + d));
-        if (fileView) out.add(new Choice(DATASET_FILES, "Granted dataset files (read-only)", "/dataset-files"));
         return out;
     }
 
@@ -84,6 +77,7 @@ public final class MountChoices {
             }
             for (JsonNode m : root.path("mounts")) {
                 String v = m.path("value").asText(""), path = m.path("path").asText("");
+                if (v.startsWith("dataset")) continue;   // chosen before the controller mounted the datasets by itself
                 if (values.contains(v) && path.startsWith("/")) mounts.add(Map.of("value", v, "path", path));
                 else dropped++;
             }
