@@ -58,6 +58,32 @@ public final class PassportGrants {
 
     private final Map<String, Diagnosis> lastDiagnosis = new ConcurrentHashMap<>();
     private volatile Description description;
+    private volatile PassportSource previewSource;
+
+    /**
+     * Sets where {@link #preview} reads the Passport of a user: the Visa issuer, whichever way the Visas reach the
+     * controller at a login. Null when the address of the issuer is not known.
+     */
+    public void previewFrom(PassportSource previewSource) {
+        this.previewSource = previewSource;
+    }
+
+    /**
+     * What the Visa issuer says about the user now, decided like the Visas of a login. Nothing is remembered and nothing
+     * is granted: it is for the administrator screen, which shows a user's Visas before the user has logged in. Empty
+     * when the address of the issuer is not known.
+     */
+    public Optional<Diagnosis> preview(String user) {
+        PassportSource fetch = previewSource;
+        if (fetch == null) return Optional.empty();
+        long now = clock.instant().getEpochSecond();
+        try {
+            return Optional.of(evaluate(user, fetch.visas(user), "the Visas fetched from the issuer now", false).diagnosis());
+        } catch (Exception e) {
+            LOG.warning("Passport of " + user + " could not be fetched for the preview: " + e);
+            return Optional.of(new Diagnosis("the Visa issuer could not be reached (" + e.getMessage() + ")", now, List.of(), Set.of()));
+        }
+    }
 
     /** Records the settings these grants were built from, for the administrator screen. */
     public void describedAs(Description description) {
@@ -125,11 +151,16 @@ public final class PassportGrants {
         return all;
     }
 
-    private record Result(Set<String> datasets, long validUntil) {
+    private record Result(Set<String> datasets, long validUntil, Diagnosis diagnosis) {
     }
 
     /** Checks the Visas and returns the datasets they grant with the earliest expiry among the accepted Visas. */
     private Result evaluate(String user, List<String> visas, String how) {
+        return evaluate(user, visas, how, true);
+    }
+
+    /** As above; {@code remember} keeps the decisions as the last diagnosis of the user. */
+    private Result evaluate(String user, List<String> visas, String how, boolean remember) {
         Set<String> datasets = new LinkedHashSet<>();
         List<Decision> decisions = new java.util.ArrayList<>();
         long validUntil = Long.MAX_VALUE;
@@ -151,8 +182,9 @@ public final class PassportGrants {
             decisions.add(new Decision(what, true, "grants the dataset " + dataset + " (" + result.reason() + ")"));
             validUntil = Math.min(validUntil, result.expiresAt());
         }
-        lastDiagnosis.put(user, new Diagnosis(how, clock.instant().getEpochSecond(), List.copyOf(decisions), Set.copyOf(datasets)));
-        return new Result(datasets, validUntil);
+        Diagnosis diagnosis = new Diagnosis(how, clock.instant().getEpochSecond(), List.copyOf(decisions), Set.copyOf(datasets));
+        if (remember) lastDiagnosis.put(user, diagnosis);
+        return new Result(datasets, validUntil, diagnosis);
     }
 
     private static String describe(VisaCheck.Summary s) {

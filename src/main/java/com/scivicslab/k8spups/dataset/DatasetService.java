@@ -221,6 +221,14 @@ public class DatasetService {
         return passport.flatMap(p -> p.diagnosis(user));
     }
 
+    /**
+     * What the Visa issuer says about the user now, decided like the Visas of a login (see {@link PassportGrants#preview}).
+     * Empty without Passport support or without the address of the issuer.
+     */
+    public Optional<PassportGrants.Diagnosis> passportPreview(String user) {
+        return passport.flatMap(p -> p.preview(user));
+    }
+
     /** The datasets that the Visas of the user grant, whether or not they are in the catalog (empty without Passport support). */
     private Set<String> visaDatasets(String user) {
         return passport.map(p -> p.datasets(user)).orElse(Set.of());

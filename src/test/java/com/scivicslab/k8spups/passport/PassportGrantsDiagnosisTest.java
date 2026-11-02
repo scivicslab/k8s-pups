@@ -76,4 +76,29 @@ class PassportGrantsDiagnosisTest {
         VisaCheck.Summary none = VisaCheck.summarize("not.a.jwt");
         assertNull(none.value());
     }
+
+    @Test
+    void thePreviewReadsTheIssuerNowWithoutTouchingTheDecisionsOfTheLogin() throws Exception {
+        PassportGrants grants = grants();
+        assertTrue(grants.preview("u").isEmpty(), "no issuer address is known");
+        grants.supply("u", List.of(visa(TestIssuer.PREFIX + "JGAD000002", "dac")));
+        grants.previewFrom(user -> List.of(visa(TestIssuer.PREFIX + "JGAD000001", "dac"), visa(TestIssuer.PREFIX + "JGAD000004", "self")));
+        var preview = grants.preview("u").orElseThrow();
+        assertEquals("the Visas fetched from the issuer now", preview.how());
+        assertEquals(Set.of("JGAD000001"), preview.datasets());
+        assertEquals(2, preview.decisions().size());
+        assertFalse(preview.decisions().get(1).accepted());
+        // the decisions about the Visas of the login stay as they were
+        assertEquals(Set.of("JGAD000002"), grants.diagnosis("u").orElseThrow().datasets());
+        assertEquals(Set.of("JGAD000002"), grants.datasets("u"), "the preview grants nothing");
+    }
+
+    @Test
+    void thePreviewSaysWhenTheIssuerCannotBeReached() {
+        PassportGrants grants = grants();
+        grants.previewFrom(user -> { throw new java.io.IOException("connection refused"); });
+        var preview = grants.preview("u").orElseThrow();
+        assertTrue(preview.how().startsWith("the Visa issuer could not be reached"), preview.how());
+        assertTrue(preview.decisions().isEmpty() && preview.datasets().isEmpty());
+    }
 }

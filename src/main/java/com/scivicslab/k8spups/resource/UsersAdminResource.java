@@ -157,6 +157,12 @@ public class UsersAdminResource {
         // Datasets: whole datasets, single files, and the names to pick from.
         boolean available = datasets(DatasetService::isAvailable);
         data.put("datasetsAvailable", available);
+        // The Visas that the issuer holds for the user count too, though they are in no table of the database.
+        var visas = available ? datasets(d -> d.passportPreview(user)) : java.util.Optional.<com.scivicslab.k8spups.passport.PassportGrants.Diagnosis>empty();
+        data.put("hasVisaPreview", visas.isPresent());
+        data.put("visaHow", visas.map(g -> g.how()).orElse(""));
+        data.put("visaDecisions", visas.map(g -> g.decisions()).orElse(List.of()));
+        data.put("visaGranted", visas.map(g -> g.datasets().isEmpty() ? "none" : String.join(", ", new TreeSet<>(g.datasets()))).orElse(""));
         if (available) {
             var exceptions = datasets(d -> d.exceptionsOfUser(user, Math.max(page, 0), PAGE_SIZE));
             data.put("access", datasets(d -> d.accessOfUser(user)));

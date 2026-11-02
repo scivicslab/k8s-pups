@@ -102,7 +102,7 @@
 {#if !datasetsAvailable}
 <p class="none">The dataset database is not in use on this deployment.</p>
 {#else}
-<h3>Datasets the user may read</h3>
+<h3>Datasets granted in the database</h3>
 <table id="user-datasets">
     <tr><th>Dataset</th><th>Granted by</th><th>Expires</th><th></th></tr>
     {#for a in access}
@@ -117,6 +117,20 @@
     </tr>
     {/for}
 </table>
+{#if hasVisaPreview}
+<h3>Datasets granted by Visas</h3>
+<p class="note" id="visa-summary">Source: {visaHow}. The Visas are checked like the Visas of a login, and the user gets them at the next login. Datasets granted by the accepted Visas: <b id="visa-granted">{visaGranted}</b>.</p>
+{#if visaDecisions.isEmpty}
+<p class="none" id="no-visa">The issuer holds no Visa for this user.</p>
+{#else}
+<table id="user-visa-datasets">
+    <tr><th>Visa (what it says)</th><th>Decision</th><th>Reason</th></tr>
+    {#for d in visaDecisions}
+    <tr><td>{d.visa}</td><td>{#if d.accepted}accepted{#else}discarded{/if}</td><td>{d.reason}</td></tr>
+    {/for}
+</table>
+{/if}
+{/if}
 <form method="post" action="{basePath}/users/u/{user}/dataset/grant" id="grant-dataset">
     <p>
         <input name="dataset" list="dataset-names" placeholder="Choose a dataset" size="30" autocomplete="off" required>
