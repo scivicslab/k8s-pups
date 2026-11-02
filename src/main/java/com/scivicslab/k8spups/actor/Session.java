@@ -573,9 +573,15 @@ public class Session {
                 return;
             }
             if ("Failed".equals(phase) || "Unknown".equals(phase)) {
-                LOG.warning("Pod failed: " + info.podName() + " phase=" + phase);
-                state = SessionState.FAILED;
-                recordEnded("Pod failed: phase=" + phase);
+                String reason = PodEndReason.of(pod);
+                if (PodEndReason.DELETED_EXTERNALLY.equals(reason)) {
+                    LOG.info("Pod deleted externally: " + info.podName());
+                    state = SessionState.STOPPED;
+                } else {
+                    LOG.warning("Pod failed: " + info.podName() + " phase=" + phase);
+                    state = SessionState.FAILED;
+                }
+                recordEnded(reason);
             }
         } else if (action == Watcher.Action.DELETED) {
             LOG.info("Pod deleted externally: " + info.podName());
