@@ -61,6 +61,13 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
     /** The session's idle timer is touched this often while a connection stays open. */
     private static final long TOUCH_INTERVAL_MS = 60_000;
 
+    /**
+     * The WebSocket sub-protocols that the proxy passes on. A tool that needs one answers only a connection opened with it:
+     * ttyd (the terminal) with {@code tty}. The browser offers it, the tool is opened with it, and the browser is given it
+     * back. Every other sub-protocol is left out, as it always was: a tool then falls back to its plain protocol.
+     */
+    static final List<String> SUB_PROTOCOLS = List.of("tty");
+
     /** Headers that describe one connection and must not be copied to the next. */
     private static final Set<String> NOT_COPIED = Set.of(
         "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer",
@@ -85,6 +92,7 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
     public void customizeHttpServer(HttpServerOptions options) {
         options.setMaxWebSocketFrameSize(MAX_FRAME_BYTES);
         options.setMaxWebSocketMessageSize(4 * MAX_FRAME_BYTES);
+        options.setWebSocketSubProtocols(SUB_PROTOCOLS);
     }
 
     void register(@Observes Router router) {
@@ -168,6 +176,8 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
         WebSocketConnectOptions options = new WebSocketConnectOptions()
             .setAbsoluteURI(target.url())
             .setHeaders(headers);
+        List<String> subProtocols = subProtocolsFor(request.getHeader("Sec-WebSocket-Protocol"));
+        if (!subProtocols.isEmpty()) options.setSubProtocols(subProtocols);
         client().connect(options).onFailure(e -> {
             LOG.warning("WebSocket to " + target.what() + " failed: [" + e.getClass().getSimpleName() + "] " + e.getMessage());
             reject(ctx, 502, "The tool did not accept the WebSocket connection");
@@ -237,6 +247,12 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
             }
         }
         return false;
+    }
+
+    /** The sub-protocols the browser offered (the header {@code Sec-WebSocket-Protocol}) that the proxy passes on. */
+    static List<String> subProtocolsFor(String header) {
+        if (header == null || header.isBlank()) return List.of();
+        return java.util.Arrays.stream(header.split(",")).map(String::trim).filter(SUB_PROTOCOLS::contains).toList();
     }
 
     /** The user name as the dashboard reads it: the ID token's {@code preferred_username}, else the principal's name. */

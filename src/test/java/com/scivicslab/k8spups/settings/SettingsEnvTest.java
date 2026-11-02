@@ -33,8 +33,15 @@ class SettingsEnvTest {
     }
 
     @Test
+    void theTerminalGetsTheV1UrlForHermesAgent() {
+        var terminal = SettingsEnv.forTool("terminal", S);
+        assertEquals("http://broker:28005/v1", terminal.get("HERMES_BASE_URL"));
+        assertEquals("m/x", terminal.get("HERMES_MODEL"));
+    }
+
+    @Test
     void emptySettingsOverrideNothing() {
-        for (String tool : new String[] {"ai-chat", "jupyter-ai", "chat-ui-with-audit-trail-local-llm", "code-raptor"})
+        for (String tool : new String[] {"ai-chat", "jupyter-ai", "chat-ui-with-audit-trail-local-llm", "code-raptor", "terminal"})
             assertTrue(SettingsEnv.forTool(tool, SystemSettings.EMPTY).isEmpty(), tool);
     }
 

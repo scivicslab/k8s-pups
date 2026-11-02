@@ -1,0 +1,4 @@
+
+  Ubuntu 24.04 terminal. Your files are in ~/works.
+  Type  hermes  to start the AI agent (Hermes Agent). It talks to the local LLM of this deployment.
+

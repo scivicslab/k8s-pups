@@ -87,4 +87,14 @@ class SessionWebSocketProxyTest {
         assertEquals(1001, WebSocketRelay.closeStatus((short) 1001));
         assertEquals(4000, WebSocketRelay.closeStatus((short) 4000));
     }
+
+    @Test
+    void onlyTheSubProtocolsThatTheProxyKnowsAreCarriedToTheTool() {
+        // ttyd (the terminal) answers a WebSocket only when it is opened with the sub-protocol tty
+        assertEquals(List.of("tty"), SessionWebSocketProxy.subProtocolsFor("tty"));
+        assertEquals(List.of("tty"), SessionWebSocketProxy.subProtocolsFor("v1.kernel.websocket.jupyter.org, tty"));
+        assertEquals(List.of(), SessionWebSocketProxy.subProtocolsFor("v1.kernel.websocket.jupyter.org"));
+        assertEquals(List.of(), SessionWebSocketProxy.subProtocolsFor(null));
+        assertEquals(List.of(), SessionWebSocketProxy.subProtocolsFor("  "));
+    }
 }

@@ -29,6 +29,10 @@ public final class SettingsEnv {
                 put(env, "CHAT_UI_SERVERS", url);
                 put(env, "CHAT_UI_DEFAULT_MODEL", model);
             }
+            case "terminal" -> {
+                put(env, "HERMES_BASE_URL", url.isEmpty() ? "" : url + "/v1");
+                put(env, "HERMES_MODEL", model);
+            }
             case "code-raptor" -> {
                 put(env, "CODE_RAPTOR_BROKER_URL", url);
                 put(env, "CODE_RAPTOR_MODEL", model);

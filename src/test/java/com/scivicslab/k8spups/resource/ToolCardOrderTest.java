@@ -14,7 +14,7 @@ class ToolCardOrderTest {
     void namedCardsComeInTheFixedOrder() {
         List<String> inOrder = List.of("Storage Settings", "File Browser",
                 "Remote Desktop", "Jupyter Lab", "Jupyter AI",
-                "Chat UI with Audit Trail (Local LLM)", "AI Chat", "Code Editor", "Program Search & Edit");
+                "Chat UI with Audit Trail (Local LLM)", "AI Chat", "Code Editor", "Terminal", "Program Search & Edit");
         for (int i = 1; i < inOrder.size(); i++) {
             assertTrue(ToolCardOrder.rank(inOrder.get(i - 1)) < ToolCardOrder.rank(inOrder.get(i)),
                     inOrder.get(i - 1) + " must come before " + inOrder.get(i));
@@ -31,7 +31,7 @@ class ToolCardOrderTest {
 
     @Test
     void theRankMapHasOnlyTheNamedCards() {
-        assertEquals(9, ToolCardOrder.ranks().size());
+        assertEquals(10, ToolCardOrder.ranks().size());
         assertEquals(1, ToolCardOrder.ranks().get("Storage Settings"));
     }
 }
