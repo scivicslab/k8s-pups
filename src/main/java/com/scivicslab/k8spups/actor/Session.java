@@ -7,6 +7,10 @@ import com.scivicslab.k8spups.k8s.SessionInfo;
 import com.scivicslab.k8spups.plugin.ConnectionType;
 import com.scivicslab.k8spups.plugin.ResourceProfile;
 import com.scivicslab.k8spups.plugin.ToolPlugin;
+import com.scivicslab.k8spups.usage.CpuQuantity;
+import com.scivicslab.k8spups.usage.PodCores;
+import com.scivicslab.k8spups.usage.PodUsageRepository;
+import com.scivicslab.k8spups.usage.PodUsageService;
 import com.scivicslab.pojoactor.core.ActorRef;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.Watch;
@@ -46,9 +50,20 @@ public class Session {
     private static final Duration SERVICE_WAIT = Duration.ofSeconds(60);
     private static final int PROBE_TIMEOUT_MILLIS = 1000;
 
+    /** Keeps the billing records of the Pods; null when there is none (the session then records nothing). */
+    private final ActorRef<PodUsageService> usage;
+
     public Session(SessionInfo info, K8sApiClient k8sClient) {
+        this(info, k8sClient, null);
+    }
+
+    /**
+     * @param usage the actor that records how long the Pod of this session ran; null to record nothing
+     */
+    public Session(SessionInfo info, K8sApiClient k8sClient, ActorRef<PodUsageService> usage) {
         this.info = info;
         this.k8sClient = k8sClient;
+        this.usage = usage;
     }
 
     /**
@@ -146,6 +161,7 @@ public class Session {
 
             // Wait for Pod object to exist before setting up the watch.
             podFuture.get();
+            recordCreated();
 
             // Route pod watch events through the actor message queue via self.tell(),
             // ensuring onPodEvent runs on the actor's virtual thread (not fabric8's watch thread).
@@ -182,6 +198,7 @@ public class Session {
             state = SessionState.FAILED;
             return;
         }
+        recordAttached(pod, ready);
 
         // Restore memo from Pod annotation
         if (pod.getMetadata().getAnnotations() != null) {
@@ -211,10 +228,17 @@ public class Session {
         }
     }
 
+    /** Stop the session: delete HTTPRoute, Service, and Pod. */
+    public void stop() {
+        stop("stopped");
+    }
+
     /**
      * Stop the session: delete HTTPRoute, Service, and Pod.
+     *
+     * @param reason why the session ends; it is kept with the billing record of the Pod
      */
-    public void stop() {
+    public void stop(String reason) {
         if (state == SessionState.STOPPING || state == SessionState.STOPPED) {
             return;
         }
@@ -236,6 +260,7 @@ public class Session {
         } catch (Exception e) {
             LOG.warning("Failed to delete Pod for " + info.sessionId() + ": " + e.getMessage());
         }
+        recordEnded(reason);
 
         state = SessionState.STOPPED;
         LOG.info("Session stopped: " + info.sessionId());
@@ -356,6 +381,92 @@ public class Session {
 
     // -- Internal --
 
+    // -- Billing records: the Pod of this session, from its creation to its end (see PodUsageService) --
+
+    /** The session is ready, so the user can use the tool: billing of the Pod starts. */
+    private void becomeReady() {
+        state = SessionState.READY;
+        if (usage == null) return;
+        String sessionId = info.sessionId();
+        Instant at = Instant.now();
+        usage.tell(u -> u.ready(sessionId, at));
+    }
+
+    /** Kubernetes accepted the Pod of this session. */
+    private void recordCreated() {
+        if (usage == null) return;
+        PodCores cores;
+        try {
+            cores = PodCores.of(info.toolPlugin().resourceProfiles(), info.resourceProfile());
+        } catch (IllegalArgumentException e) {
+            // A resource profile with an unreadable CPU quantity must not stop a user from working.
+            LOG.severe("Pod usage: the CPU of the resource profile of session " + info.sessionId()
+                + " is unreadable and is recorded as unknown: " + e.getMessage());
+            cores = PodCores.UNKNOWN;
+        }
+        PodUsageRepository.Start start = new PodUsageRepository.Start(info.sessionId(), info.userId(),
+            info.toolPlugin().name(), info.podName(), cores, Instant.now());
+        usage.tell(u -> u.created(start));
+    }
+
+    /**
+     * The controller took over the Pod of this session after a restart. For a Pod that has no billing row yet (it was
+     * created before billing records existed), the row is made from the Pod itself: its creation time and the CPU of
+     * its tool container.
+     */
+    private void recordAttached(Pod pod, boolean ready) {
+        if (usage == null) return;
+        Instant created = parseTime(pod.getMetadata().getCreationTimestamp());
+        if (created == null) created = Instant.now();
+        Instant readyAt = null;
+        if (ready) {
+            readyAt = pod.getStatus().getConditions().stream()
+                .filter(c -> "Ready".equals(c.getType()) && "True".equals(c.getStatus()))
+                .map(c -> parseTime(c.getLastTransitionTime()))
+                .filter(java.util.Objects::nonNull)
+                .findFirst().orElse(Instant.now());
+        }
+        PodUsageRepository.Start start = new PodUsageRepository.Start(info.sessionId(), info.userId(),
+            info.toolPlugin().name(), info.podName(), coresOf(pod), created);
+        Instant at = readyAt;
+        usage.tell(u -> u.attached(start, at));
+    }
+
+    /** The Pod of this session is gone (stopped, failed, or deleted by someone else). */
+    private void recordEnded(String reason) {
+        if (usage == null) return;
+        String sessionId = info.sessionId();
+        Instant at = Instant.now();
+        usage.tell(u -> u.ended(sessionId, at, reason));
+    }
+
+    /** The CPU request and the CPU limit of the tool container of a Pod; unknown when they cannot be read. */
+    private static PodCores coresOf(Pod pod) {
+        if (pod.getSpec() == null || pod.getSpec().getContainers() == null) return PodCores.UNKNOWN;
+        try {
+            for (io.fabric8.kubernetes.api.model.Container c : pod.getSpec().getContainers()) {
+                if (!"tool".equals(c.getName()) || c.getResources() == null) continue;
+                return new PodCores(null, cpuOf(c.getResources().getRequests()), cpuOf(c.getResources().getLimits()));
+            }
+        } catch (IllegalArgumentException e) {
+            LOG.severe("Pod usage: the CPU of Pod " + pod.getMetadata().getName() + " is unreadable: " + e.getMessage());
+        }
+        return PodCores.UNKNOWN;
+    }
+
+    private static Integer cpuOf(Map<String, io.fabric8.kubernetes.api.model.Quantity> resources) {
+        io.fabric8.kubernetes.api.model.Quantity cpu = resources == null ? null : resources.get("cpu");
+        return cpu == null ? null : CpuQuantity.toMillicores(cpu.toString());
+    }
+
+    private static Instant parseTime(String text) {
+        try {
+            return text == null ? null : Instant.parse(text);
+        } catch (java.time.format.DateTimeParseException e) {
+            return null;
+        }
+    }
+
     private String resolveStorageSize() {
         if (info.userStoragePreference() != null && !info.userStoragePreference().isBlank()) {
             return info.userStoragePreference();
@@ -392,7 +503,7 @@ public class Session {
      */
     private void podIsReady() {
         if (info.toolPlugin().batchMode() || k8sClient == null) {
-            state = SessionState.READY;
+            becomeReady();
             LOG.info("Session ready: " + info.sessionId());
             return;
         }
@@ -411,11 +522,11 @@ public class Session {
         String host = ServiceProbe.host(info.serviceName(), k8sClient.userPodsNamespace());
         long waitedMillis = Duration.between(podReadyAt, Instant.now()).toMillis();
         if (ServiceProbe.reachable(host, info.toolPlugin().containerPort(), PROBE_TIMEOUT_MILLIS)) {
-            state = SessionState.READY;
+            becomeReady();
             LOG.info("Session ready: " + info.sessionId() + " (the Service accepted a connection " + waitedMillis
                 + " ms after the Pod became Ready)");
         } else if (waitedMillis > SERVICE_WAIT.toMillis()) {
-            state = SessionState.READY;
+            becomeReady();
             LOG.warning("Session ready without a connection to its Service: " + info.sessionId() + " (" + host + ":"
                 + info.toolPlugin().containerPort() + " accepted none within " + SERVICE_WAIT.toSeconds() + " s)");
         }
@@ -433,16 +544,18 @@ public class Session {
             String phase = pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown";
             if ("Succeeded".equals(phase) && info.toolPlugin().batchMode()) {
                 LOG.info("Batch job completed: " + info.podName() + " — auto-stopping session");
-                stop();
+                stop("batch job completed");
                 return;
             }
             if ("Failed".equals(phase) || "Unknown".equals(phase)) {
                 LOG.warning("Pod failed: " + info.podName() + " phase=" + phase);
                 state = SessionState.FAILED;
+                recordEnded("Pod failed: phase=" + phase);
             }
         } else if (action == Watcher.Action.DELETED) {
             LOG.info("Pod deleted externally: " + info.podName());
             state = SessionState.STOPPED;
+            recordEnded("Pod deleted externally");
         }
     }
 }

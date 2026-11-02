@@ -14,6 +14,7 @@ import com.scivicslab.k8spups.tool.DynamicToolPlugin;
 import com.scivicslab.k8spups.tool.ToolMetadata;
 import com.scivicslab.k8spups.tool.ToolRegistryEntry;
 import com.scivicslab.k8spups.tool.ToolRoleFilter;
+import com.scivicslab.k8spups.usage.PodUsageService;
 import com.scivicslab.pojoactor.core.ActorRef;
 import io.fabric8.kubernetes.api.model.Pod;
 
@@ -55,6 +56,11 @@ public class SessionManager {
         this.idleTimeoutMinutes = idleTimeoutMinutes;
         this.maxLifetimeMinutes = maxLifetimeMinutes;
         this.unlimitedUsers = unlimitedUsers;
+    }
+
+    /** The actor that keeps the billing records of the Pods; null when the controller runs without it. */
+    private ActorRef<PodUsageService> podUsage(ActorRef<SessionManager> self) {
+        return self.system().getActor(PodUsageService.ACTOR_NAME);
     }
 
     /** All sessions: the children of this actor. */
@@ -358,7 +364,7 @@ public class SessionManager {
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType,
             mounts,
             withS3Access(self, userId, withSharedSettings(self, toolName, toolConfigEnv)));
-        Session actor = new Session(info, k8sClient);
+        Session actor = new Session(info, k8sClient, podUsage(self));
 
         // Create as child actor
         ActorRef<Session> childRef = self.createChild(CHILD_PREFIX + sessionId, actor);
@@ -427,7 +433,7 @@ public class SessionManager {
 
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, null, null, null,
             Collections.emptyMap(), null, storageType);
-        Session actor = new Session(info, k8sClient);
+        Session actor = new Session(info, k8sClient, podUsage(self));
 
         ActorRef<Session> childRef = self.createChild(CHILD_PREFIX + sessionId, actor);
 
@@ -475,7 +481,7 @@ public class SessionManager {
             auditSessionStop(self, ref, reason);
             try {
                 // Wait for stop() to complete before closing the actor
-                ref.tell(Session::stop).get();
+                ref.tell(sa -> sa.stop(reason)).get();
             } catch (Exception e) {
                 LOG.warning("Error stopping session " + sessionId + ": " + e.getMessage());
             }
@@ -583,6 +589,13 @@ public class SessionManager {
         for (ActorRef<Session> ref : sessions(self)) {
             futures.put(sessionIdOf(ref),
                 ref.ask(sa -> sa.shouldStop(idleTimeoutMinutes, maxLifetimeMinutes)));
+        }
+        // Tell the billing records that these sessions are alive now: a session whose Pod vanishes while no controller
+        // runs is ended at this time (see PodUsageService.endOpenExcept)
+        ActorRef<PodUsageService> usage = podUsage(self);
+        if (usage != null) {
+            Set<String> alive = new java.util.HashSet<>(futures.keySet());
+            usage.tell(u -> u.seen(alive));
         }
         // Collect results
         List<String> toRemove = new ArrayList<>();

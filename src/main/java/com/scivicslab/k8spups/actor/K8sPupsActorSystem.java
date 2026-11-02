@@ -113,6 +113,9 @@ public class K8sPupsActorSystem {
     @Inject
     com.scivicslab.k8spups.storage.StorageAllocationRepository storageAllocationRepository;
 
+    @Inject
+    com.scivicslab.k8spups.usage.PodUsageRepository podUsageRepository;
+
     // The allocation a user gets at the first login, <type>:<size> (e.g. posix:50Gi); empty = none
     // Empty (unset) is allowed: Quarkus refuses an empty value for a String, so this is Optional
     @ConfigProperty(name = "k8spups.storage.default-allocation")
@@ -247,6 +250,10 @@ public class K8sPupsActorSystem {
         actorSystem.actorOf(com.scivicslab.k8spups.k8s.SharedServiceControl.ACTOR_NAME,
             new com.scivicslab.k8spups.k8s.SharedServiceControl(k8sClient));
 
+        // Billing records of the Pods: one actor, so the records of a session are written in the order they happen
+        actorSystem.actorOf(com.scivicslab.k8spups.usage.PodUsageService.ACTOR_NAME,
+            new com.scivicslab.k8spups.usage.PodUsageService(podUsageRepository));
+
         // Create SessionManager
         SessionManager manager = new SessionManager(
             k8sClient, plugins, controllerNamespace, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
@@ -312,6 +319,7 @@ public class K8sPupsActorSystem {
             // Restore Running Pods, delete non-Running Pods
             int restored = 0;
             int deleted = 0;
+            Set<String> takenOver = new HashSet<>();
             for (Pod pod : managedPods) {
                 Map<String, String> labels = pod.getMetadata().getLabels();
                 String sessionId = labels.get("session");
@@ -331,6 +339,7 @@ public class K8sPupsActorSystem {
                     // Restore this session
                     ActorRef<SessionManager> sessionManager = getSessionManager();
                     sessionManager.tell(sm -> sm.restoreSession(sessionManager, sessionId, userId, toolName, pod));
+                    takenOver.add(sessionId);
                     restored++;
                 } else {
                     // Non-running Pod — delete all associated resources
@@ -351,6 +360,12 @@ public class K8sPupsActorSystem {
                     deleted++;
                 }
             }
+
+            // The billing record of a session whose Pod is gone is closed here, at the last time it was seen alive: the
+            // Pod ended while no controller was watching it. The sessions just taken over keep their open records.
+            ActorRef<com.scivicslab.k8spups.usage.PodUsageService> usage =
+                actorSystem.getActor(com.scivicslab.k8spups.usage.PodUsageService.ACTOR_NAME);
+            if (usage != null) usage.tell(u -> u.endOpenExcept(takenOver));
 
             // Clean up orphaned Services/HTTPRoutes/SecurityPolicies that have no corresponding Pod
             Set<String> orphanedNonPodSessions = new HashSet<>();
