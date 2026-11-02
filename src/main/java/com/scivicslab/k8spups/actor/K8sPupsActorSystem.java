@@ -157,6 +157,17 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.admin-roles", defaultValue = "admin")
     String adminRoles;
 
+    /** Developers, by user id. Optional for the same reason as the fields above. */
+    @ConfigProperty(name = "k8spups.developer-users")
+    Optional<String> developerUsers;
+
+    @ConfigProperty(name = "k8spups.developer-roles", defaultValue = "developer")
+    String developerRoles;
+
+    /** Names of the tools this deployment keeps for developers, comma-separated, besides the tools that say so themselves. */
+    @ConfigProperty(name = "k8spups.developer-tools")
+    Optional<String> developerTools;
+
     private List<com.scivicslab.k8spups.plugin.SharedService> sharedServices = List.of();
 
     private ActorSystem actorSystem;
@@ -454,6 +465,23 @@ public class K8sPupsActorSystem {
     /** Whether this user may Launch / Stop shared services (k8spups.admin-users / admin-roles). */
     public boolean isAdmin(String userId, List<String> roles) {
         return com.scivicslab.k8spups.tool.SharedServiceAccess.isAdmin(userId, roles, adminUsers.orElse(""), adminRoles);
+    }
+
+    /** Whether the user is a developer: named in {@code k8spups.developer-users}, or holding a role of {@code k8spups.developer-roles}. */
+    public boolean isDeveloper(String userId, List<String> roles) {
+        return com.scivicslab.k8spups.tool.ToolAudienceAccess.isDeveloper(userId, roles, developerUsers.orElse(""), developerRoles);
+    }
+
+    /** Who this deployment offers the tool to: what the tool declares, narrowed to developers by {@code k8spups.developer-tools}. */
+    public com.scivicslab.k8spups.plugin.ToolAudience audienceOf(com.scivicslab.k8spups.plugin.ToolPlugin plugin) {
+        return com.scivicslab.k8spups.tool.ToolAudienceAccess.effective(plugin.audience(), plugin.name(),
+            com.scivicslab.k8spups.tool.ToolAudienceAccess.names(developerTools.orElse("")));
+    }
+
+    /** Whether the user may be offered the tool and may start it. Applied where a tool is started, not only in the page. */
+    public boolean canUse(com.scivicslab.k8spups.plugin.ToolPlugin plugin, String userId, List<String> roles) {
+        return com.scivicslab.k8spups.tool.ToolAudienceAccess.allowed(audienceOf(plugin),
+            isAdmin(userId, roles), isDeveloper(userId, roles));
     }
 
     public String getControllerNamespace() {

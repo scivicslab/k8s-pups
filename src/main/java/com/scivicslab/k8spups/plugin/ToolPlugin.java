@@ -36,6 +36,14 @@ public interface ToolPlugin {
         return "";
     }
 
+    /**
+     * Who the dashboard offers this tool to and who may start it. Everyone unless the tool says otherwise; a
+     * deployment can narrow it further with {@code k8spups.developer-tools}, and never widen it.
+     */
+    default ToolAudience audience() {
+        return ToolAudience.EVERYONE;
+    }
+
     /** Environment variables to inject into the container. */
     default Map<String, String> environmentVariables() {
         return Collections.emptyMap();

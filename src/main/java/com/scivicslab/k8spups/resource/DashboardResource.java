@@ -232,6 +232,8 @@ public class DashboardResource {
         List<ToolPlugin> tools;
         try { tools = toolsFuture.get(); }
         catch (Exception e) { tools = Collections.emptyList(); }
+        // Only the tools offered to this user
+        tools = tools.stream().filter(t -> actorSystem.canUse(t, userId, userRoles)).toList();
 
         List<ToolMetadata> dynamicTools;
         try { dynamicTools = dynamicToolsFuture.get(); }
@@ -332,6 +334,13 @@ public class DashboardResource {
                                   @FormParam("userParam_2") String userParam2) {
         String userId = getCurrentUsername();
         ActorRef<SessionManager> sm = actorSystem.getSessionManager();
+
+        // A tool is offered to some users only (developers, administrators); the page hides it from the others, and
+        // this check is what stops a request that names it anyway.
+        if (!mayStart(sm, userId, toolName)) {
+            LOG.warning("Session start refused: " + userId + " may not use tool " + toolName);
+            return Response.seeOther(URI.create("/dashboard?error=forbidden")).build();
+        }
 
         // Resolve user-provided parameters to env var name -> value map
         Map<String, String> userParams = resolveUserParams(
@@ -608,6 +617,23 @@ public class DashboardResource {
         sm.tell(mgr -> mgr.touchSession(sm, target.sessionId()));
 
         return forward(target.url(), method, body, inHeaders, target.what());
+    }
+
+    /**
+     * Whether the user may start the tool. A tool that no plugin has is let through, because starting it fails anyway;
+     * when the tools cannot be listed the answer is no.
+     */
+    private boolean mayStart(ActorRef<SessionManager> sm, String userId, String toolName) {
+        try {
+            List<String> roles = getCurrentUserRoles();
+            for (ToolPlugin t : sm.ask(SessionManager::listAvailableTools).get()) {
+                if (t.name().equals(toolName)) return actorSystem.canUse(t, userId, roles);
+            }
+            return true;
+        } catch (Exception e) {
+            LOG.warning("Could not check whether " + userId + " may start " + toolName + ": " + e.getMessage());
+            return false;
+        }
     }
 
     /** Finds a tool plugin by display name; a lookup that fails answers null, which means the default settings. */
