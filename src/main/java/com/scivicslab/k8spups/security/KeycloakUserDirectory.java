@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -39,13 +40,17 @@ public class KeycloakUserDirectory {
     @ConfigProperty(name = "k8spups.users-reader.client-id", defaultValue = "k8s-pups-users-reader")
     String clientId;
 
-    /** The file that holds the client secret; empty when no reader client is configured. */
-    @ConfigProperty(name = "k8spups.users-reader.secret-file", defaultValue = "")
-    String secretFile;
+    /**
+     * The file that holds the client secret; empty when no reader client is configured. An Optional, because Quarkus
+     * refuses an empty default value for a String: with {@code defaultValue = ""} the controller did not start in a
+     * deployment that sets none.
+     */
+    @ConfigProperty(name = "k8spups.users-reader.secret-file")
+    Optional<String> secretFile = Optional.empty();
 
     /** Whether a reader client is configured. When it is not, the administrator screens show the users of the database only. */
     public boolean configured() {
-        return !secretFile.isBlank() && Files.isReadable(Path.of(secretFile));
+        return secretFile.filter(f -> !f.isBlank()).map(f -> Files.isReadable(Path.of(f))).orElse(false);
     }
 
     /** All accounts of the realm, sorted by user name. Throws when Keycloak cannot be reached or refuses the client. */
@@ -79,7 +84,8 @@ public class KeycloakUserDirectory {
     }
 
     private String accessToken() throws Exception {
-        String secret = Files.readString(Path.of(secretFile)).trim();
+        String secret = Files.readString(Path.of(secretFile.filter(f -> !f.isBlank()).orElseThrow(
+                () -> new IllegalStateException("no reader client is configured (k8spups.users-reader.secret-file)")))).trim();
         HttpResponse<String> r = HTTP.send(HttpRequest.newBuilder(URI.create(KeycloakUsers.tokenUrl(realmUrl)))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/x-www-form-urlencoded")
