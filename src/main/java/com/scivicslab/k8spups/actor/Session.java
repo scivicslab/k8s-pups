@@ -46,6 +46,8 @@ public class Session {
 
     /** When the Pod became Ready while the session was starting; null until then. */
     private Instant podReadyAt;
+    /** True when the session was offered to the user before the Service accepted a connection; billing waits for one. */
+    private boolean billingPending;
     /** How long to wait for the Service to accept a connection after the Pod is Ready, before declaring ready anyway. */
     private static final Duration SERVICE_WAIT = Duration.ofSeconds(60);
     private static final int PROBE_TIMEOUT_MILLIS = 1000;
@@ -386,6 +388,11 @@ public class Session {
     /** The session is ready, so the user can use the tool: billing of the Pod starts. */
     private void becomeReady() {
         state = SessionState.READY;
+        startBilling();
+    }
+
+    /** The Service of the Pod accepted a connection (or the Pod is a batch job): the billing of the Pod starts. */
+    private void startBilling() {
         if (usage == null) return;
         String sessionId = info.sessionId();
         Instant at = Instant.now();
@@ -518,17 +525,35 @@ public class Session {
      * anyway and the reason is logged, so that a tool whose port cannot be probed is not held back for ever.
      */
     public void confirmReachable() {
-        if (state != SessionState.STARTING || podReadyAt == null) return;
+        boolean waitingForReady = state == SessionState.STARTING;
+        if ((!waitingForReady && !billingPending) || podReadyAt == null) return;
         String host = ServiceProbe.host(info.serviceName(), k8sClient.userPodsNamespace());
         long waitedMillis = Duration.between(podReadyAt, Instant.now()).toMillis();
-        if (ServiceProbe.reachable(host, info.toolPlugin().containerPort(), PROBE_TIMEOUT_MILLIS)) {
-            becomeReady();
-            LOG.info("Session ready: " + info.sessionId() + " (the Service accepted a connection " + waitedMillis
-                + " ms after the Pod became Ready)");
-        } else if (waitedMillis > SERVICE_WAIT.toMillis()) {
-            becomeReady();
-            LOG.warning("Session ready without a connection to its Service: " + info.sessionId() + " (" + host + ":"
-                + info.toolPlugin().containerPort() + " accepted none within " + SERVICE_WAIT.toSeconds() + " s)");
+        boolean reachable = ServiceProbe.reachable(host, info.toolPlugin().containerPort(), PROBE_TIMEOUT_MILLIS);
+        if (!waitingForReady) {
+            // The session was offered to the user without a connection; the billing starts with the first one.
+            if (reachable) {
+                billingPending = false;
+                startBilling();
+                LOG.info("Billing started: " + info.sessionId() + " (the Service accepted a connection " + waitedMillis
+                    + " ms after the Pod became Ready)");
+            }
+            return;
+        }
+        switch (ReadinessPolicy.decide(reachable, waitedMillis, SERVICE_WAIT.toMillis())) {
+            case READY -> {
+                becomeReady();
+                LOG.info("Session ready: " + info.sessionId() + " (the Service accepted a connection " + waitedMillis
+                    + " ms after the Pod became Ready)");
+            }
+            case READY_BILLING_PENDING -> {
+                state = SessionState.READY;
+                billingPending = true;
+                LOG.warning("Session ready without a connection to its Service, not billed until one is accepted: "
+                    + info.sessionId() + " (" + host + ":" + info.toolPlugin().containerPort()
+                    + " accepted none within " + SERVICE_WAIT.toSeconds() + " s)");
+            }
+            case KEEP_WAITING -> { }
         }
     }
 
