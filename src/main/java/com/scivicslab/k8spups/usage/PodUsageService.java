@@ -1,6 +1,8 @@
 package com.scivicslab.k8spups.usage;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -10,8 +12,12 @@ import java.util.logging.Logger;
  * sessions tell it what happened to their Pods; an actor handles its messages in the order they arrive, so the
  * creation, the ready time and the end of one session are written in that order.
  *
- * <p>A failure to write a record is logged at SEVERE and does not reach the session: a database that is down must not
- * stop a user from working, and an exception in an actor's message is not reported to the sender anyway.
+ * <p>A failure to write a record does not reach the session: a database that is down must not stop a user from
+ * working, and an exception in an actor's message is not reported to the sender anyway. The write is kept and done
+ * again, in the original order, at the next message and at the next minute tick, until the database takes it. Every
+ * write can be done twice without harm (the repository ignores what it already has), so a write whose answer was lost
+ * is safe to repeat. The writes that wait are kept in memory only: when the controller stops they are gone, and the
+ * rows of the Pods that still run are made again from the Pods when the next controller takes them over.
  */
 public class PodUsageService {
 
@@ -21,31 +27,35 @@ public class PodUsageService {
     /** End reason of a session whose Pod was gone when the controller started. */
     public static final String REASON_CONTROLLER_LOST = "the Pod was gone when the controller started";
 
+    /** How many failed writes are kept for another try; the oldest are given up beyond this. */
+    static final int DEFAULT_MAX_WAITING = 10_000;
+
     private static final Logger LOG = Logger.getLogger(PodUsageService.class.getName());
 
+    private record Waiting(String what, Runnable write) {}
+
     private final PodUsageRepository repository;
+    private final int maxWaiting;
+    private final Deque<Waiting> waiting = new ArrayDeque<>();
 
     public PodUsageService(PodUsageRepository repository) {
+        this(repository, DEFAULT_MAX_WAITING);
+    }
+
+    PodUsageService(PodUsageRepository repository, int maxWaiting) {
         this.repository = repository;
+        this.maxWaiting = maxWaiting;
     }
 
     /** A Pod was created for a session. */
     public void created(PodUsageRepository.Start start) {
-        try {
-            repository.open(start);
-        } catch (RuntimeException e) {
-            LOG.severe("Pod usage: the creation of session " + start.sessionId() + " (user " + start.user()
-                + ") was not recorded: " + e.getMessage());
-        }
+        record("the creation of session " + start.sessionId() + " (user " + start.user() + ")",
+            () -> repository.open(start));
     }
 
     /** A session of a user became ready: billing of its Pod starts at {@code at}. */
     public void ready(String sessionId, Instant at) {
-        try {
-            repository.ready(sessionId, at);
-        } catch (RuntimeException e) {
-            LOG.severe("Pod usage: the ready time of session " + sessionId + " was not recorded: " + e.getMessage());
-        }
+        record("the ready time of session " + sessionId, () -> repository.ready(sessionId, at));
     }
 
     /**
@@ -61,15 +71,15 @@ public class PodUsageService {
 
     /** The Pod of a session is gone (stopped, failed, deleted by someone else): billing of it ends at {@code at}. */
     public void ended(String sessionId, Instant at, String reason) {
-        try {
-            repository.end(sessionId, at, reason);
-        } catch (RuntimeException e) {
-            LOG.severe("Pod usage: the end of session " + sessionId + " was not recorded: " + e.getMessage());
-        }
+        record("the end of session " + sessionId, () -> repository.end(sessionId, at, reason));
     }
 
-    /** The controller saw these sessions alive just now. Called every minute with every session it has. */
+    /**
+     * The controller saw these sessions alive just now. Called every minute with every session it has; it also tries
+     * again the writes that failed.
+     */
     public void seen(Set<String> sessionIds) {
+        flush();
         try {
             repository.seen(sessionIds);
         } catch (RuntimeException e) {
@@ -82,12 +92,35 @@ public class PodUsageService {
      * time the previous controller saw it alive.
      */
     public void endOpenExcept(Set<String> takenOverSessionIds) {
-        try {
+        record("the sessions that ended while no controller was watching", () -> {
             int n = repository.endOpenExcept(takenOverSessionIds, REASON_CONTROLLER_LOST);
             if (n > 0) LOG.warning("Pod usage: " + n + " session(s) ended while no controller was watching");
-        } catch (RuntimeException e) {
-            LOG.severe("Pod usage: the sessions that ended while no controller was watching were not recorded: "
-                + e.getMessage());
+        });
+    }
+
+    /** Puts a write behind the writes that wait and tries them all. */
+    private void record(String what, Runnable write) {
+        waiting.addLast(new Waiting(what, write));
+        while (waiting.size() > maxWaiting) {
+            Waiting given = waiting.removeFirst();
+            LOG.severe("Pod usage: " + given.what() + " is given up, because " + maxWaiting
+                + " writes wait for the database");
+        }
+        flush();
+    }
+
+    /** Does the waiting writes in order; stops at the first one the database refuses, which stays first. */
+    private void flush() {
+        while (!waiting.isEmpty()) {
+            Waiting next = waiting.peekFirst();
+            try {
+                next.write().run();
+            } catch (RuntimeException e) {
+                LOG.severe("Pod usage: " + next.what() + " was not recorded and will be tried again ("
+                    + waiting.size() + " write(s) wait): " + e.getMessage());
+                return;
+            }
+            waiting.removeFirst();
         }
     }
 }
