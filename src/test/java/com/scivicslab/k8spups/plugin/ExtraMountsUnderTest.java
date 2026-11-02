@@ -17,6 +17,7 @@ class ExtraMountsUnderTest {
         assertEquals("/home/jovyan", new JupyterAiPlugin().extraMountsUnder());
         assertEquals("/home/user", new GuacamolePlugin().extraMountsUnder());
         assertEquals("/srv", new FileBrowserPlugin().extraMountsUnder());
+        assertEquals("/home/devteam/works", new CodeServerPlugin().extraMountsUnder(), "the editor opens the workspace");
     }
 
     @Test
