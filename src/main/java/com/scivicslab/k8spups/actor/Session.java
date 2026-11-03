@@ -48,6 +48,8 @@ public class Session {
     private Instant podReadyAt;
     /** True when the session was offered to the user before the Service accepted a connection; billing waits for one. */
     private boolean billingPending;
+    /** True when somebody other than this session deleted its Pod. */
+    private boolean podDeletedExternally;
     /** How long to wait for the Service to accept a connection after the Pod is Ready, before declaring ready anyway. */
     private static final Duration SERVICE_WAIT = Duration.ofSeconds(60);
     private static final int PROBE_TIMEOUT_MILLIS = 1000;
@@ -557,7 +559,39 @@ public class Session {
         }
     }
 
-    private void onPodEvent(Watcher.Action action, Pod pod) {
+    /**
+     * Somebody other than this session deleted its Pod (for example an administrator with {@code kubectl delete pod}).
+     * The session deletes the Service of the Pod, ends the billing record, and marks itself so that the
+     * {@code SessionManager} actor removes it at its next periodic check ({@link #podWasDeletedExternally()}).
+     */
+    private void podDeletedByOthers() {
+        if (podDeletedExternally) return;
+        podDeletedExternally = true;
+        LOG.info("Pod deleted externally: " + info.podName());
+        if (podWatch != null) {
+            podWatch.close();
+            podWatch = null;
+        }
+        state = SessionState.STOPPED;
+        deleteServiceOfGonePod();
+        recordEnded(PodEndReason.DELETED_EXTERNALLY);
+    }
+
+    /** Deletes the Service of the Pod that is gone. Kubernetes does not report an error when the Service does not exist. */
+    void deleteServiceOfGonePod() {
+        try {
+            k8sClient.deleteService(info.serviceName());
+        } catch (Exception e) {
+            LOG.warning("Failed to delete Service for " + info.sessionId() + ": " + e.getMessage());
+        }
+    }
+
+    /** True when somebody other than this session deleted its Pod; the {@code SessionManager} actor removes such a session. */
+    public boolean podWasDeletedExternally() {
+        return podDeletedExternally;
+    }
+
+    void onPodEvent(Watcher.Action action, Pod pod) {
         if (action == Watcher.Action.MODIFIED) {
             if (pod.getStatus() != null && pod.getStatus().getConditions() != null) {
                 boolean ready = pod.getStatus().getConditions().stream()
@@ -575,18 +609,15 @@ public class Session {
             if ("Failed".equals(phase) || "Unknown".equals(phase)) {
                 String reason = PodEndReason.of(pod);
                 if (PodEndReason.DELETED_EXTERNALLY.equals(reason)) {
-                    LOG.info("Pod deleted externally: " + info.podName());
-                    state = SessionState.STOPPED;
+                    podDeletedByOthers();
                 } else {
                     LOG.warning("Pod failed: " + info.podName() + " phase=" + phase);
                     state = SessionState.FAILED;
+                    recordEnded(reason);
                 }
-                recordEnded(reason);
             }
         } else if (action == Watcher.Action.DELETED) {
-            LOG.info("Pod deleted externally: " + info.podName());
-            state = SessionState.STOPPED;
-            recordEnded("Pod deleted externally");
+            podDeletedByOthers();
         }
     }
 }
