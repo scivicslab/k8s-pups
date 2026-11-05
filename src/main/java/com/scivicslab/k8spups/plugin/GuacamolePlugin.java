@@ -24,7 +24,7 @@ public class GuacamolePlugin implements ToolPlugin {
 
     @Override
     public String displayName() {
-        return "Remote Desktop";
+        return "Remote Desktop (Ubuntu MATE 24.04)";
     }
 
     @Override

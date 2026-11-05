@@ -16,7 +16,7 @@ public final class ToolCardOrder {
 
     private static final List<String> NAMED = List.of(
             "Storage Settings", "File Browser",
-            "Remote Desktop", "Jupyter Lab", "Jupyter AI",
+            "Remote Desktop (Ubuntu MATE 24.04)", "Jupyter Lab", "Jupyter AI",
             "AI Agent (Local LLM)", "AI Chat", "Code Editor", "Terminal", "Program Search & Edit");
 
     private ToolCardOrder() {
