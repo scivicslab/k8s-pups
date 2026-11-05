@@ -18,7 +18,7 @@ import java.util.Map;
 public class CodeServerPlugin implements ToolPlugin {
 
     /** The directory the editor opens, and where the user's storage is mounted. */
-    static final String WORKSPACE = "/home/devteam/works";
+    static final String WORKSPACE = "/home/pod-user/works";
 
     @Override
     public String name() {
@@ -37,7 +37,7 @@ public class CodeServerPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/code-server:4.141.0-2611060534";
+        return "${REGISTRY}/code-server:4.141.0-2611060614";
     }
 
     @Override
@@ -58,7 +58,7 @@ public class CodeServerPlugin implements ToolPlugin {
     public Map<String, String> environmentVariables() {
         var cfg = ConfigProvider.getConfig();
         var env = new LinkedHashMap<String, String>();
-        env.put("HOME", "/home/devteam");
+        env.put("HOME", "/home/pod-user");
         cfg.getOptionalValue("k8spups.code-server.broker-url", String.class)
             .filter(v -> !v.isBlank()).ifPresent(v -> env.put("CODE_SERVER_AI_BASE_URL", v.replaceAll("/+$", "") + "/v1"));
         cfg.getOptionalValue("k8spups.code-server.model", String.class)
@@ -88,12 +88,12 @@ public class CodeServerPlugin implements ToolPlugin {
 
     /**
      * Where the editor keeps its settings and its extensions. A tool Pod runs as the number of the cluster (on a007 not the
-     * 1000 that owns /home/devteam in the image), so the editor cannot create these in the image; each gets a directory of
+     * 1000 that owns /home/pod-user in the image), so the editor cannot create these in the image; each gets a directory of
      * the Pod that every user can write. They last as long as the session; the files of the user are in the workspace.
      */
     @Override
     public List<String> writablePaths() {
-        return List.of("/home/devteam/.config", "/home/devteam/.local");
+        return List.of("/home/pod-user/.config", "/home/pod-user/.local");
     }
 
     @Override

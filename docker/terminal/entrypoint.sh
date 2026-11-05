@@ -7,8 +7,8 @@
 # by the running user, that holds the settings and the sessions (they last as long as the session) and links to the large
 # install (the code, the tools, the install state) in the image.
 # HERMES_BASE_URL and HERMES_MODEL select the local LLM (GPU broker base URL with /v1, and the model name).
-INSTALL=/home/devteam/.hermes
-export HERMES_HOME=/home/devteam/.hermes-run
+INSTALL=/home/pod-user/.hermes
+export HERMES_HOME=/home/pod-user/.hermes-run
 mkdir -p "$HERMES_HOME"
 for e in hermes-agent tools installs cache skills; do
   [ -e "$HERMES_HOME/$e" ] || ln -s "$INSTALL/$e" "$HERMES_HOME/$e"

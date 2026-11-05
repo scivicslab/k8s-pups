@@ -17,7 +17,7 @@ ENV LANG=C.UTF-8
 
 # The AI assistant of the editor: Continue, talking to the GPU broker (an OpenAI-compatible server) whose address the
 # controller passes in. The built-in chat of the editor is GitHub Copilot, which needs a GitHub account; it is hidden.
-# The extension sits in the image, not under /home/devteam/.local: the Pod mounts a fresh directory there. The directory
+# The extension sits in the image, not under /home/pod-user/.local: the Pod mounts a fresh directory there. The directory
 # is writable by every user, as the Pod runs as the number of the cluster, and the editor writes its list of extensions.
 ENV CONTINUE_VERSION=2.0.0
 ENV CONTINUE_SHA256=e06893353f943dd4ed87d5438474d77ea850e6033abdf2c0694e42cb754c4c22
@@ -31,11 +31,11 @@ RUN curl -fsSL "https://open-vsx.org/api/Continue/continue/linux-x64/${CONTINUE_
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 755 /usr/local/bin/entrypoint.sh \
- && mkdir -p /home/devteam/works \
- && chown -R 1000:1000 /home/devteam
+ && mkdir -p /home/pod-user/works \
+ && chown -R 1000:1000 /home/pod-user
 
-ENV HOME=/home/devteam
-WORKDIR /home/devteam/works
+ENV HOME=/home/pod-user
+WORKDIR /home/pod-user/works
 USER 1000
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -18,7 +18,7 @@ import java.util.Map;
 public class TerminalPlugin implements ToolPlugin {
 
     /** The directory the shell starts in, and where the user's storage is mounted. */
-    static final String WORKSPACE = "/home/devteam/works";
+    static final String WORKSPACE = "/home/pod-user/works";
 
     @Override
     public String name() {
@@ -37,7 +37,7 @@ public class TerminalPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/terminal:24.04-2611022031";
+        return "${REGISTRY}/terminal:24.04-2611060615";
     }
 
     @Override
@@ -54,7 +54,7 @@ public class TerminalPlugin implements ToolPlugin {
     public Map<String, String> environmentVariables() {
         var cfg = ConfigProvider.getConfig();
         var env = new LinkedHashMap<String, String>();
-        env.put("HOME", "/home/devteam");
+        env.put("HOME", "/home/pod-user");
         cfg.getOptionalValue("k8spups.terminal.broker-url", String.class)
             .filter(v -> !v.isBlank()).ifPresent(v -> env.put("HERMES_BASE_URL", v.replaceAll("/+$", "") + "/v1"));
         cfg.getOptionalValue("k8spups.terminal.model", String.class)

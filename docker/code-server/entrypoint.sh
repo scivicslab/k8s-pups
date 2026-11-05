@@ -6,8 +6,8 @@
 # CODE_SERVER_AI_BASE_URL is the OpenAI-compatible base URL of the GPU broker (ending in /v1) and CODE_SERVER_AI_MODEL
 # the model; the controller passes both. Continue keeps its settings and chats in CONTINUE_GLOBAL_DIR, a directory of
 # the Pod (the image's home is not writable by the user of the Pod).
-DATA=/home/devteam/.local/share/code-server
-export CONTINUE_GLOBAL_DIR=/home/devteam/.local/continue
+DATA=/home/pod-user/.local/share/code-server
+export CONTINUE_GLOBAL_DIR=/home/pod-user/.local/continue
 mkdir -p "$DATA/User" "$CONTINUE_GLOBAL_DIR"
 
 # Telemetry off: nothing leaves the cluster. The built-in chat (GitHub Copilot) is hidden, with the side bar it sits in.
@@ -51,4 +51,4 @@ exec code-server \
   --disable-file-downloads \
   --disable-file-uploads \
   --disable-getting-started-override \
-  /home/devteam/works
+  /home/pod-user/works

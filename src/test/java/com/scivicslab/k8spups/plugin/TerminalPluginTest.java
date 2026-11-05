@@ -18,8 +18,8 @@ class TerminalPluginTest {
     void theShellRunsAsTheNonRootUserOnTheStorageOfTheUser() {
         var p = new TerminalPlugin();
         assertEquals("Terminal", p.displayName());
-        assertEquals("/home/devteam/works", p.userDataMountPath());
-        assertEquals("/home/devteam/works", p.extraMountsUnder());
+        assertEquals("/home/pod-user/works", p.userDataMountPath());
+        assertEquals("/home/pod-user/works", p.extraMountsUnder());
         assertEquals(1000L, p.runAsUser());
         assertTrue(p.runAsNonRoot());
         assertTrue(p.containerImage().startsWith("${REGISTRY}/terminal:"), p.containerImage());

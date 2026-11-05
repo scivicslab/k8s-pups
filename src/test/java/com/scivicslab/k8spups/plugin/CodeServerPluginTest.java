@@ -19,12 +19,12 @@ class CodeServerPluginTest {
     void theEditorOpensTheStorageOfTheUserAsTheNonRootUser() {
         var p = new CodeServerPlugin();
         assertEquals("Code Editor", p.displayName());
-        assertEquals("/home/devteam/works", p.userDataMountPath());
+        assertEquals("/home/pod-user/works", p.userDataMountPath());
         assertEquals(1000L, p.runAsUser());
         assertTrue(p.runAsNonRoot());
         assertEquals("/healthz", p.readinessProbePath());
         // the editor writes under HOME/.config and HOME/.local, which the user of the Pod may not own
-        assertEquals(java.util.List.of("/home/devteam/.config", "/home/devteam/.local"), p.writablePaths());
+        assertEquals(java.util.List.of("/home/pod-user/.config", "/home/pod-user/.local"), p.writablePaths());
         assertTrue(p.containerImage().startsWith("${REGISTRY}/code-server:"), p.containerImage());
     }
 
