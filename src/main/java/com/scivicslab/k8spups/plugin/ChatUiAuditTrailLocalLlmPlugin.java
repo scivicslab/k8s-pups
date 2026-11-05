@@ -28,7 +28,7 @@ public class ChatUiAuditTrailLocalLlmPlugin implements ToolPlugin {
 
     @Override
     public String displayName() {
-        return "Chat UI with Audit Trail (Local LLM)";
+        return "AI Agent (Local LLM)";
     }
 
     @Override
