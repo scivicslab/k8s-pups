@@ -263,15 +263,49 @@ public class SessionManager {
                                        Map<String, String> userParams,
                                        String overrideStorageType,
                                        List<MountSpec> additionalMounts) {
-        // Check global limit
+        return createSession(self, userId, toolName, allowedProjects, labId, resourceProfile, userParams,
+            overrideStorageType, additionalMounts, false);
+    }
+
+    /** Why the user may not start another session now, or null when they may. */
+    public enum LaunchRefusal { USER_LIMIT, CLUSTER_FULL }
+
+    /**
+     * Whether the user may start one more session: the per-user limit (unless the user is exempt: listed in
+     * k8spups.unlimited-users, or {@code limitExempt}, which the caller sets for an administrator) and the
+     * limit of the whole cluster.
+     */
+    public LaunchRefusal launchRefusal(ActorRef<SessionManager> self, String userId, boolean limitExempt) {
         if (sessions(self).size() >= maxSessions) {
-            LOG.warning("Max sessions reached: " + maxSessions);
-            return null;
+            return LaunchRefusal.CLUSTER_FULL;
         }
-        // Check per-user limit (-1 means unlimited, unlimitedUsers bypass the check)
-        int userCount = sessionsOfUser(self, userId).size();
-        if (!unlimitedUsers.contains(userId) && maxSessionsPerUser >= 0 && userCount >= maxSessionsPerUser) {
-            LOG.warning("User " + userId + " reached max sessions: " + maxSessionsPerUser);
+        boolean exempt = limitExempt || unlimitedUsers.contains(userId) || maxSessionsPerUser < 0;
+        if (!exempt && sessionsOfUser(self, userId).size() >= maxSessionsPerUser) {
+            return LaunchRefusal.USER_LIMIT;
+        }
+        return null;
+    }
+
+    /** How many sessions one user may have at a time; -1 for no limit. */
+    public int sessionsPerUser() {
+        return maxSessionsPerUser;
+    }
+
+    /**
+     * As above; {@code limitExempt} lifts the per-user limit (an administrator).
+     */
+    public SessionStatus createSession(ActorRef<SessionManager> self,
+                                       String userId, String toolName,
+                                       List<String> allowedProjects, String labId,
+                                       String resourceProfile,
+                                       Map<String, String> userParams,
+                                       String overrideStorageType,
+                                       List<MountSpec> additionalMounts,
+                                       boolean limitExempt) {
+        LaunchRefusal refusal = launchRefusal(self, userId, limitExempt);
+        if (refusal != null) {
+            LOG.warning("Session refused for " + userId + ": " + refusal
+                + (refusal == LaunchRefusal.USER_LIMIT ? " (" + maxSessionsPerUser + " per user)" : " (" + maxSessions + " in all)"));
             return null;
         }
 
@@ -389,7 +423,7 @@ public class SessionManager {
         childRef.tell(sa -> sa.start(childRef));
 
         LOG.info("Session created: user=" + userId + ", tool=" + toolName
-            + ", session=" + sessionId + " (user total: " + (userCount + 1) + ")");
+            + ", session=" + sessionId + " (user total: " + sessionsOfUser(self, userId).size() + ")");
 
         return new SessionStatus(sessionId, userId, plugin.displayName(), SessionState.STARTING, info.podName(), null, autoMemo);
     }

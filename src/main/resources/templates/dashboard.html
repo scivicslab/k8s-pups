@@ -289,8 +289,11 @@
 <main>
 
     <div class="error-banner" id="error-banner">
-        Failed to start session. You may have reached the limit, or please try again later.
+        Failed to start session. Please try again later.
     </div>
+    {#if launchRefused}
+    <div class="error-banner" id="limit-banner" style="display:block">{launchRefusedReason}</div>
+    {/if}
 
     {#if clusterResources.get('nodeCount') != null}
     {#let cr=clusterResources}
@@ -442,7 +445,7 @@
                 <button type="button" class="btn-add-mount" onclick="addExtraMount(this)"
                         style="font-size:0.75rem;color:#6366f1;background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px;">+ Attach storage</button>
                 {/if}
-                <button type="submit" class="btn btn-primary">Launch</button>
+                <button type="submit" class="btn btn-primary"{#if launchRefused} disabled title="{launchRefusedReason}"{/if}>Launch</button>
             </form>
         </div>
         {/for}
@@ -479,7 +482,7 @@
             <div class="tool-desc">{#if dt.descriptor != null}{dt.descriptor.description}{/if}</div>
             <form method="post" action="session/start">
                 <input type="hidden" name="tool" value="{dt.name}">
-                <button type="submit" class="btn btn-primary">Launch</button>
+                <button type="submit" class="btn btn-primary"{#if launchRefused} disabled title="{launchRefusedReason}"{/if}>Launch</button>
             </form>
         </div>
         {/for}
@@ -510,8 +513,17 @@
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') document.getElementById('user-menu').open = false;
     });
-    if (new URLSearchParams(location.search).get('error')) {
-        document.getElementById('error-banner').style.display = 'block';
+    var errorCode = new URLSearchParams(location.search).get('error');
+    // The limits are shown by the page itself (limit-banner) while they hold; the generic banner is for the rest
+    if (errorCode && !document.getElementById('limit-banner')) {
+        var messages = {
+            session_limit: 'You have reached the number of tools you can have open at a time. Stop one to launch another.',
+            cluster_full: 'The system has no room for another tool right now. Try again later.',
+            forbidden: 'You may not use this tool.'
+        };
+        var banner = document.getElementById('error-banner');
+        if (messages[errorCode]) banner.textContent = messages[errorCode];
+        banner.style.display = 'block';
     }
 
     // Poll session status via fetch() and update DOM without full page reload

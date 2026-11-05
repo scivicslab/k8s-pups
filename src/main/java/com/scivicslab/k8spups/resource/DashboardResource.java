@@ -311,7 +311,22 @@ public class DashboardResource {
                 actorSystem.getK8sClient().sharedServiceState(svc.namespace(), svc.deployment())));
         }
         data.put("sharedServices", sharedServices);
-        data.put("isAdmin", actorSystem.isAdmin(userId, userRoles));
+        boolean admin = actorSystem.isAdmin(userId, userRoles);
+        data.put("isAdmin", admin);
+        // A user at the limit is not offered Launch: the page says why instead
+        SessionManager.LaunchRefusal refusal = null;
+        int perUser = -1;
+        try {
+            refusal = sm.ask(mgr -> mgr.launchRefusal(sm, userId, admin)).get();
+            perUser = sm.ask(SessionManager::sessionsPerUser).get();
+        } catch (Exception e) {
+            LOG.warning("Could not read the session limit of " + userId + ": " + e.getMessage());
+        }
+        data.put("launchRefused", refusal != null);
+        data.put("launchRefusedReason", refusal == SessionManager.LaunchRefusal.USER_LIMIT
+            ? "You can have up to " + perUser + " tools open at a time. Stop one to launch another."
+            : refusal == SessionManager.LaunchRefusal.CLUSTER_FULL
+                ? "The system has no room for another tool right now. Try again later." : "");
 
         return dashboard.data(data).render();
     }
@@ -347,13 +362,26 @@ public class DashboardResource {
         List<String> extraTypes = MountChoices.distinctValues(extraType0, extraType1, extraType2);
         List<MountSpec> additionalMounts = resolveAdditionalMounts(extraTypes, extraMountsUnderOf(sm, toolName));
 
+        // Checked before anything is prepared: a user at the limit is told so, not shown a generic failure
+        boolean limitExempt = actorSystem.isAdmin(userId, getCurrentUserRoles());
+        try {
+            SessionManager.LaunchRefusal refusal = sm.ask(mgr -> mgr.launchRefusal(sm, userId, limitExempt)).get();
+            if (refusal != null) {
+                return Response.seeOther(URI.create("/dashboard?error="
+                    + (refusal == SessionManager.LaunchRefusal.USER_LIMIT ? "session_limit" : "cluster_full"))).build();
+            }
+        } catch (Exception e) {
+            LOG.warning("Could not check the session limit of " + userId + ": " + e.getMessage());
+        }
+
         try {
             // Visas in the UserInfo response of the login (claim ga4gh_passport_v1), when the Passport support takes them from there.
             // Read on the request thread: the identity is not available on the thread of the actor.
             List<String> visas = currentVisas();
             sm.ask(mgr -> mgr.supplyVisas(sm, userId, visas)).get();
             SessionStatus status = sm.ask(mgr ->
-                mgr.createSession(sm, userId, toolName, Collections.emptyList(), null, profile, userParams, storageType, additionalMounts)
+                mgr.createSession(sm, userId, toolName, Collections.emptyList(), null, profile, userParams, storageType, additionalMounts,
+                    limitExempt)
             ).get();
 
             if (status == null) {

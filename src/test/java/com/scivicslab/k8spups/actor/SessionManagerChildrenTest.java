@@ -54,6 +54,25 @@ class SessionManagerChildrenTest {
     }
 
     @Test
+    void aUserAtTheLimitIsRefusedBeforeTryingUnlessExempt() throws Exception {
+        // The manager allows 2 per user and 10 in all
+        addSession("s1", "alice");
+        assertNull(self.ask(m -> m.launchRefusal(self, "alice", false)).get());
+        addSession("s2", "alice");
+        assertEquals(SessionManager.LaunchRefusal.USER_LIMIT, self.ask(m -> m.launchRefusal(self, "alice", false)).get());
+        // an administrator (exempt by role) is not held to the per-user limit
+        assertNull(self.ask(m -> m.launchRefusal(self, "alice", true)).get());
+        assertNull(self.ask(m -> m.launchRefusal(self, "bob", false)).get());
+        assertEquals(2, self.ask(SessionManager::sessionsPerUser).get());
+    }
+
+    @Test
+    void noOneStartsASessionWhenTheClusterIsFull() throws Exception {
+        for (int i = 0; i < 10; i++) addSession("s" + i, "user" + i);
+        assertEquals(SessionManager.LaunchRefusal.CLUSTER_FULL, self.ask(m -> m.launchRefusal(self, "carol", true)).get());
+    }
+
+    @Test
     void sessionIdsAreTheChildren() throws Exception {
         addSession("s1", "alice");
         addSession("s2", "bob");
