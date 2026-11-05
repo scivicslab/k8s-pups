@@ -450,7 +450,7 @@
                 <div class="extra-mounts-container"></div>
                 <div class="mount-note" style="display:none;font-size:0.75rem;color:#B45309;margin-top:2px;"></div>
                 <button type="button" class="btn-add-mount" onclick="addExtraMount(this)"
-                        style="font-size:0.75rem;color:#6366f1;background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px;">+ Add mount</button>
+                        style="font-size:0.75rem;color:#6366f1;background:none;border:none;cursor:pointer;padding:2px 0;margin-top:2px;">+ Attach storage</button>
                 {/if}
                 <button type="submit" class="btn btn-primary">Launch</button>
             </form>
@@ -671,8 +671,8 @@
         typeSelect.onchange = showWhere;
         var removeBtn = document.createElement('button');
         removeBtn.type = 'button';
-        removeBtn.textContent = 'Delete';
-        removeBtn.title = 'Delete this mount';
+        removeBtn.textContent = 'Detach';
+        removeBtn.title = 'Detach this storage from the tool (the storage and its files stay)';
         removeBtn.style.cssText = 'background:none;border:1px solid #DC2626;border-radius:6px;color:#DC2626;font-size:0.75rem;cursor:pointer;padding:3px 8px;white-space:nowrap;';
         removeBtn.onclick = function() { row.remove(); reindexExtraMounts(container); };
         row.appendChild(typeSelect);
