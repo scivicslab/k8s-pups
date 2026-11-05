@@ -24,6 +24,9 @@ RUN echo '    file_sources_config_file: /galaxy/server/config/file_sources_conf.
     sed -i 's|^    static_enabled: false|    static_enabled: true|' /galaxy/server/config/galaxy.yml && \
     mv /galaxy/server/database /galaxy/seed-db && mkdir /galaxy/server/database && \
     chmod -R a+rwX /galaxy/server/config /galaxy/seed-db
+# A file of the base image that only its owner can read answers 500 to a Pod running as another UID: welcome.html, the
+# centre of the first page, is one (a007 runs the Pods as 30420). Only those files are changed, so the layer stays small.
+RUN find /galaxy/server -xdev \( -type f -o -type d \) ! -perm -o=r -exec chmod a+rX {} +
 COPY entrypoint.sh /entrypoint.sh
 USER galaxy
 ENTRYPOINT ["tini", "--", "/entrypoint.sh"]
