@@ -28,8 +28,21 @@ class MountChoicesTest {
         var current = MountChoices.of(STORAGE, Map.of("lab1", "rw"));
         var r = MountChoices.remembered(json, current, STORAGE.keySet());
         assertEquals("posix", r.primary());
-        assertEquals(List.of(Map.of("value", "group:lab1", "path", "/groups/lab1")), r.mounts());
+        assertEquals(List.of(Map.of("value", "group:lab1")), r.mounts());
         assertEquals(1, r.dropped());
+    }
+
+    @Test
+    void eachChoiceIsMountedAtItsOwnPlaceUnderTheDirectoryTheToolShows() {
+        assertEquals("/home/pod-user/works/groups/lab1", MountChoices.pathOf("group:lab1", "/home/pod-user/works/"));
+        assertEquals("/home/pod-user/works/storage/longhorn", MountChoices.pathOf("longhorn", "/home/pod-user/works"));
+        assertEquals("/groups/lab1", MountChoices.pathOf("group:lab1", null));
+        assertEquals("/storage/posix", MountChoices.of(STORAGE, Map.of()).get(0).path());
+    }
+
+    @Test
+    void aChoiceMadeTwiceIsMountedOnce() {
+        assertEquals(List.of("group:lab1", "posix"), MountChoices.distinctValues("group:lab1", null, " ", "posix", "group:lab1"));
     }
 
     @Test

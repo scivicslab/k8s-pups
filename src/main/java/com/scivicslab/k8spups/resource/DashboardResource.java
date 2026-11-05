@@ -324,11 +324,8 @@ public class DashboardResource {
                                   @FormParam("profile") String profile,
                                   @FormParam("storageType") String storageType,
                                   @FormParam("extraType_0") String extraType0,
-                                  @FormParam("extraPath_0") String extraPath0,
                                   @FormParam("extraType_1") String extraType1,
-                                  @FormParam("extraPath_1") String extraPath1,
                                   @FormParam("extraType_2") String extraType2,
-                                  @FormParam("extraPath_2") String extraPath2,
                                   @FormParam("userParam_0") String userParam0,
                                   @FormParam("userParam_1") String userParam1,
                                   @FormParam("userParam_2") String userParam2) {
@@ -346,9 +343,9 @@ public class DashboardResource {
         Map<String, String> userParams = resolveUserParams(
             toolName, userParam0, userParam1, userParam2);
 
-        // Build additional mounts from form params
-        List<MountSpec> additionalMounts = resolveAdditionalMounts(
-            extraType0, extraPath0, extraType1, extraPath1, extraType2, extraPath2);
+        // The additional mounts: what the user chose; where each goes is the controller's (MountChoices.pathOf)
+        List<String> extraTypes = MountChoices.distinctValues(extraType0, extraType1, extraType2);
+        List<MountSpec> additionalMounts = resolveAdditionalMounts(extraTypes, extraMountsUnderOf(sm, toolName));
 
         try {
             // Visas in the UserInfo response of the login (claim ga4gh_passport_v1), when the Passport support takes them from there.
@@ -365,12 +362,7 @@ public class DashboardResource {
             }
             // Remember the choices of this tool for its next launch
             List<Map<String, String>> chosen = new ArrayList<>();
-            String[][] pairs = {{extraType0, extraPath0}, {extraType1, extraPath1}, {extraType2, extraPath2}};
-            for (String[] pair : pairs) {
-                if (pair[0] != null && !pair[0].isBlank() && pair[1] != null && !pair[1].isBlank()) {
-                    chosen.add(Map.of("value", pair[0], "path", pair[1].startsWith("/") ? pair[1] : "/" + pair[1]));
-                }
-            }
+            for (String type : extraTypes) chosen.add(Map.of("value", type));
             String json = MountChoices.toJson(storageType, chosen);
             actorSystem.getStorageAllocations().tell(a -> a.saveMountPreference(userId, toolName, json));
         } catch (Exception e) {
@@ -917,27 +909,31 @@ public class DashboardResource {
         return MountChoices.of(StorageTypes.names(allocatedTypes), groups);
     }
 
-    private List<MountSpec> resolveAdditionalMounts(String... typePathPairs) {
+    private List<MountSpec> resolveAdditionalMounts(List<String> types, String under) {
         List<MountSpec> mounts = new ArrayList<>();
-        // typePathPairs are: type0, path0, type1, path1, type2, path2
-        for (int i = 0; i + 1 < typePathPairs.length; i += 2) {
-            String type = typePathPairs[i];
-            String path = typePathPairs[i + 1];
-            if (type != null && !type.isBlank() && path != null && !path.isBlank()) {
-                // Ensure mount path is absolute
-                if (!path.startsWith("/")) {
-                    path = "/" + path;
-                }
-                // The choice is checked when the session is created: own storage against the allocations, a group's
-                // storage against the memberships
-                if (type.startsWith(MountChoices.GROUP)) {
-                    mounts.add(new MountSpec(K8sApiClient.GROUP_STORAGE_TYPE, path, type.substring(MountChoices.GROUP.length())));
-                } else {
-                    mounts.add(new MountSpec(type, path, null));
-                }
+        for (String type : types) {
+            String path = MountChoices.pathOf(type, under);
+            // The choice is checked when the session is created: own storage against the allocations, a group's
+            // storage against the memberships
+            if (type.startsWith(MountChoices.GROUP)) {
+                mounts.add(new MountSpec(K8sApiClient.GROUP_STORAGE_TYPE, path, type.substring(MountChoices.GROUP.length())));
+            } else {
+                mounts.add(new MountSpec(type, path, null));
             }
         }
         return mounts;
+    }
+
+    /** The directory the tool shows, under which the additional mounts go; null when the tool has none or is unknown. */
+    private String extraMountsUnderOf(ActorRef<SessionManager> sm, String toolName) {
+        try {
+            for (ToolPlugin t : sm.ask(SessionManager::listAvailableTools).get()) {
+                if (t.name().equals(toolName)) return t.extraMountsUnder();
+            }
+        } catch (Exception e) {
+            LOG.warning("Could not read the mount directory of " + toolName + ": " + e.getMessage());
+        }
+        return null;
     }
 
     /**

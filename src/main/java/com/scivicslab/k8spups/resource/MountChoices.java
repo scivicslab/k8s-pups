@@ -11,10 +11,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * The mounts a user can choose in the launch form, and the remembered choices of a tool checked against them.
  *
  * A choice is a value of the form field {@code extraType_<n>}: an allocated storage type ({@code posix}) or
- * {@code group:<name>} for a group's storage. Each has a default mount path. The datasets are not chosen: the
+ * {@code group:<name>} for a group's storage. The user chooses what to mount, not where: each choice has one place,
+ * {@link #pathOf}, under the directory the tool shows, so that its file view opens it. The datasets are not chosen: the
  * controller mounts all that the user may read ({@code DatasetMountSpecs}). The remembered choices of a tool are stored as
- * {@code {"primary": <type>, "mounts": [{"value": <choice>, "path": <mount path>}]}}; a remembered choice that is
- * not among the current choices (storage taken away, membership or grant ended) is left out and counted.
+ * {@code {"primary": <type>, "mounts": [{"value": <choice>}]}} (a {@code path} stored by an earlier version is ignored);
+ * a remembered choice that is not among the current choices (storage taken away, membership or grant ended) is left out
+ * and counted.
  */
 public final class MountChoices {
 
@@ -36,10 +38,20 @@ public final class MountChoices {
      */
     public static List<Choice> of(Map<String, String> storageNames, Map<String, String> groups) {
         List<Choice> out = new ArrayList<>();
-        storageNames.forEach((type, name) -> out.add(new Choice(type, name, "/data")));
+        storageNames.forEach((type, name) -> out.add(new Choice(type, name, pathOf(type, null))));
         groups.forEach((g, mode) -> out.add(new Choice(GROUP + g,
-            "Group storage " + g + ("ro".equals(mode) ? " (read-only)" : ""), "/groups/" + g)));
+            "Group storage " + g + ("ro".equals(mode) ? " (read-only)" : ""), pathOf(GROUP + g, null))));
         return out;
+    }
+
+    /**
+     * Where a choice is mounted: {@code /groups/<name>} for a group's storage, {@code /storage/<type>} for the user's
+     * own storage of another type, under {@code under} (the directory the tool shows, without a trailing slash) when the
+     * tool has one. Each choice has its own place, so two choices never land on one path.
+     */
+    public static String pathOf(String value, String under) {
+        String base = under == null ? "" : under.replaceAll("/+$", "");
+        return base + (value.startsWith(GROUP) ? "/groups/" + value.substring(GROUP.length()) : "/storage/" + value);
     }
 
     /**
@@ -50,6 +62,13 @@ public final class MountChoices {
         return allocatedTypes.stream()
             .filter(t -> pvcStates.get(t) instanceof Map<?, ?> m && "true".equals(String.valueOf(m.get("exists"))))
             .toList();
+    }
+
+    /** The chosen values of the launch form, blanks left out and each once: a choice mounted twice would collide. */
+    public static List<String> distinctValues(String... values) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        for (String v : values) if (v != null && !v.isBlank()) out.add(v.trim());
+        return List.copyOf(out);
     }
 
     /** The stored JSON of a tool's choices, as {@code {"primary": ..., "mounts": [...]}}. */
@@ -76,9 +95,9 @@ public final class MountChoices {
                 if (primaries.contains(p)) primary = p; else dropped++;
             }
             for (JsonNode m : root.path("mounts")) {
-                String v = m.path("value").asText(""), path = m.path("path").asText("");
+                String v = m.path("value").asText("");
                 if (v.startsWith("dataset")) continue;   // chosen before the controller mounted the datasets by itself
-                if (values.contains(v) && path.startsWith("/")) mounts.add(Map.of("value", v, "path", path));
+                if (values.contains(v)) mounts.add(Map.of("value", v));
                 else dropped++;
             }
         } catch (Exception e) {
