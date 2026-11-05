@@ -1,5 +1,8 @@
 package com.scivicslab.k8spups.plugin;
 
+import org.eclipse.microprofile.config.ConfigProvider;
+
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -34,7 +37,7 @@ public class CodeServerPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/code-server:4.141.0-2611021914";
+        return "${REGISTRY}/code-server:4.141.0-2611060534";
     }
 
     @Override
@@ -47,9 +50,20 @@ public class CodeServerPlugin implements ToolPlugin {
         return ConnectionType.HTTP;
     }
 
+    /**
+     * The editor's AI assistant (Continue) talks to the GPU broker: its OpenAI-compatible URL and the model are deployment
+     * config ({@code K8SPUPS_CODE_SERVER_*}). Left unset, the assistant has no model and the editor works without it.
+     */
     @Override
     public Map<String, String> environmentVariables() {
-        return Map.of("HOME", "/home/devteam");
+        var cfg = ConfigProvider.getConfig();
+        var env = new LinkedHashMap<String, String>();
+        env.put("HOME", "/home/devteam");
+        cfg.getOptionalValue("k8spups.code-server.broker-url", String.class)
+            .filter(v -> !v.isBlank()).ifPresent(v -> env.put("CODE_SERVER_AI_BASE_URL", v.replaceAll("/+$", "") + "/v1"));
+        cfg.getOptionalValue("k8spups.code-server.model", String.class)
+            .filter(v -> !v.isBlank()).ifPresent(v -> env.put("CODE_SERVER_AI_MODEL", v));
+        return env;
     }
 
     @Override

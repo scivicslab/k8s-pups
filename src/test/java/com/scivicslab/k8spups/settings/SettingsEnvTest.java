@@ -40,8 +40,15 @@ class SettingsEnvTest {
     }
 
     @Test
+    void theCodeEditorGetsTheV1UrlForContinue() {
+        var editor = SettingsEnv.forTool("code-server", S);
+        assertEquals("http://broker:28005/v1", editor.get("CODE_SERVER_AI_BASE_URL"));
+        assertEquals("m/x", editor.get("CODE_SERVER_AI_MODEL"));
+    }
+
+    @Test
     void emptySettingsOverrideNothing() {
-        for (String tool : new String[] {"ai-chat", "jupyter-ai", "chat-ui-with-audit-trail-local-llm", "code-raptor", "terminal"})
+        for (String tool : new String[] {"ai-chat", "jupyter-ai", "chat-ui-with-audit-trail-local-llm", "code-raptor", "terminal", "code-server"})
             assertTrue(SettingsEnv.forTool(tool, SystemSettings.EMPTY).isEmpty(), tool);
     }
 
