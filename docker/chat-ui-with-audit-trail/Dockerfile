@@ -26,12 +26,12 @@ COPY jars/chat-ui-with-audit-trail-plugin-web-tools.jar /opt/chat-ui/chat-ui-wit
 COPY jars/chat-ui-with-audit-trail-plugin-shell.jar /opt/chat-ui/chat-ui-with-audit-trail-plugin-shell.jar
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 755 /usr/local/bin/entrypoint.sh \
- && mkdir -p /home/devteam/works \
- && chown -R 1000:1000 /home/devteam
+ && mkdir -p /home/pod-user/works \
+ && chown -R 1000:1000 /home/pod-user
 
 # The conversation reads and writes under ~/works, which the Pod mounts from the user's storage.
-ENV HOME=/home/devteam
-WORKDIR /home/devteam/works
+ENV HOME=/home/pod-user
+WORKDIR /home/pod-user/works
 USER 1000
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

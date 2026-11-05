@@ -6,7 +6,7 @@
 exec java \
   -Dquarkus.http.host=0.0.0.0 \
   -Dquarkus.http.port=8080 \
-  -Duser.home=/home/devteam \
+  -Duser.home=/home/pod-user \
   -Dchat-ui.servers="${CHAT_UI_SERVERS:-http://localhost:28005}" \
   ${CHAT_UI_DEFAULT_MODEL:+-Dchat-ui.default-model="$CHAT_UI_DEFAULT_MODEL"} \
   -Dchat-ui.plugins=/opt/chat-ui/chat-ui-with-audit-trail-plugin-web-tools.jar,/opt/chat-ui/chat-ui-with-audit-trail-plugin-shell.jar \

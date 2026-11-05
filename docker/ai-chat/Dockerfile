@@ -7,10 +7,10 @@ RUN apt-get update \
 ENV LANG=C.UTF-8
 RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir gradio openai
 COPY app.py /opt/ai-chat/app.py
-RUN mkdir -p /home/devteam/works && chown -R 1000:1000 /home/devteam
-ENV HOME=/home/devteam
+RUN mkdir -p /home/pod-user/works && chown -R 1000:1000 /home/pod-user
+ENV HOME=/home/pod-user
 ENV GRADIO_ANALYTICS_ENABLED=False
-WORKDIR /home/devteam/works
+WORKDIR /home/pod-user/works
 USER 1000
 EXPOSE 8080
 CMD ["/opt/venv/bin/python", "/opt/ai-chat/app.py"]

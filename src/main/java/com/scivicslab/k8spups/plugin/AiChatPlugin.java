@@ -35,7 +35,7 @@ public class AiChatPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/ai-chat:1.0.0-2610190654";
+        return "${REGISTRY}/ai-chat:1.0.0-2611060627";
     }
 
     @Override
@@ -52,7 +52,7 @@ public class AiChatPlugin implements ToolPlugin {
     public Map<String, String> environmentVariables() {
         var cfg = ConfigProvider.getConfig();
         var env = new LinkedHashMap<String, String>();
-        env.put("HOME", "/home/devteam");
+        env.put("HOME", "/home/pod-user");
         env.put("AI_CHAT_BASE_URL", cfg.getOptionalValue("k8spups.ai-chat.base-url", String.class)
             .orElse("http://gpu-broker:28005/v1"));
         cfg.getOptionalValue("k8spups.ai-chat.default-model", String.class)
@@ -88,7 +88,7 @@ public class AiChatPlugin implements ToolPlugin {
 
     @Override
     public String userDataMountPath() {
-        return "/home/devteam/works";
+        return "/home/pod-user/works";
     }
 
     @Override

@@ -13,7 +13,7 @@ import java.util.Map;
  * GPU broker. It is the tile {@code chat-ui-with-audit-trail-local-llm} of AI Workspace, started as a tool of
  * its own: one Pod per user, every conversation recorded in the user's own storage.
  *
- * <p>The user's {@code ~/works} is the Pod's {@code /home/devteam/works}: the conversation reads and writes
+ * <p>The user's {@code ~/works} is the Pod's {@code /home/pod-user/works}: the conversation reads and writes
  * there, and the H2 files of its records are created in the working directory, which is the same place. The
  * broker address is deployment config ({@code K8SPUPS_CHAT_UI_AUDIT_TRAIL_*}), so the public source carries no
  * internal address. The path prefix of the session is removed by the gateway, as for any tool that is not
@@ -38,7 +38,7 @@ public class ChatUiAuditTrailLocalLlmPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/chat-ui-with-audit-trail:2.1.0-2610190609";
+        return "${REGISTRY}/chat-ui-with-audit-trail:2.1.0-2611060629";
     }
 
     @Override
@@ -55,7 +55,7 @@ public class ChatUiAuditTrailLocalLlmPlugin implements ToolPlugin {
     public Map<String, String> environmentVariables() {
         var cfg = ConfigProvider.getConfig();
         var env = new LinkedHashMap<String, String>();
-        env.put("HOME", "/home/devteam");
+        env.put("HOME", "/home/pod-user");
         env.put("CHAT_UI_SERVERS", cfg.getOptionalValue("k8spups.chat-ui-audit-trail.servers", String.class)
             .orElse("http://gpu-broker:28005"));
         cfg.getOptionalValue("k8spups.chat-ui-audit-trail.default-model", String.class)
@@ -91,7 +91,7 @@ public class ChatUiAuditTrailLocalLlmPlugin implements ToolPlugin {
 
     @Override
     public String userDataMountPath() {
-        return "/home/devteam/works";
+        return "/home/pod-user/works";
     }
 
     @Override
