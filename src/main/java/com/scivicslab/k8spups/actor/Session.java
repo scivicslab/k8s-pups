@@ -41,6 +41,8 @@ public class Session {
     private SessionState state = SessionState.CREATING;
     private final Instant createdTime = Instant.now();
     private Instant lastAccessTime = Instant.now();
+    /** When the periodic check first saw the session failed; null while it is not failed. */
+    private Instant failedSince;
     private Watch podWatch;
     private String memo = "";
 
@@ -271,28 +273,21 @@ public class Session {
     }
 
     /**
-     * Check if session should be stopped due to idle timeout or max lifetime.
-     * Returns true if the session should be stopped.
+     * Why the session should be stopped now, or null to keep it: a ready session past its idle or lifetime limit, a
+     * session that did not become ready in time, or a failed one kept long enough for the user to see it.
      * Does NOT call stop() — the caller (SessionManager) is responsible
      * for sending a separate tell(stop) message to maintain actor model semantics.
      */
-    public boolean shouldStop(long idleTimeoutMinutes, long maxLifetimeMinutes) {
-        if (state != SessionState.READY) {
-            return false;
+    public String stopReason(SessionTimeouts limits) {
+        Instant now = Instant.now();
+        if (state == SessionState.FAILED && failedSince == null) {
+            failedSince = now;
         }
-        long lifetimeMinutes = java.time.Duration.between(createdTime, Instant.now()).toMinutes();
-        if (maxLifetimeMinutes > 0 && lifetimeMinutes >= maxLifetimeMinutes) {
-            LOG.info("Session max lifetime reached: " + info.sessionId()
-                + " (alive " + lifetimeMinutes + " min, limit " + maxLifetimeMinutes + " min)");
-            return true;
+        String reason = SessionExpiry.reasonToStop(state, createdTime, lastAccessTime, failedSince, now, limits);
+        if (reason != null) {
+            LOG.info("Session " + info.sessionId() + " (" + info.toolPlugin().name() + ", " + state + ") to be stopped: " + reason);
         }
-        long idleMinutes = java.time.Duration.between(lastAccessTime, Instant.now()).toMinutes();
-        if (idleTimeoutMinutes > 0 && idleMinutes >= idleTimeoutMinutes) {
-            LOG.info("Session idle timeout: " + info.sessionId()
-                + " (idle " + idleMinutes + " min)");
-            return true;
-        }
-        return false;
+        return reason;
     }
 
     /** Record user activity to reset idle timer. */

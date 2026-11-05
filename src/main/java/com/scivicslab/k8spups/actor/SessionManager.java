@@ -36,8 +36,7 @@ public class SessionManager {
     private final String controllerNamespace;
     private final int maxSessions;
     private final int maxSessionsPerUser;
-    private final long idleTimeoutMinutes;
-    private final long maxLifetimeMinutes;
+    private final SessionTimeouts timeouts;
     private final Set<String> unlimitedUsers;
 
     /** Every session is a child actor named {@code session-<sessionId>}; the library keeps the list of children. */
@@ -45,16 +44,14 @@ public class SessionManager {
 
     public SessionManager(K8sApiClient k8sClient, Map<String, ToolPlugin> plugins,
                                String controllerNamespace,
-                               int maxSessions, int maxSessionsPerUser, long idleTimeoutMinutes,
-                               long maxLifetimeMinutes,
+                               int maxSessions, int maxSessionsPerUser, SessionTimeouts timeouts,
                                Set<String> unlimitedUsers) {
         this.k8sClient = k8sClient;
         this.plugins = plugins;
         this.controllerNamespace = controllerNamespace;
         this.maxSessions = maxSessions;
         this.maxSessionsPerUser = maxSessionsPerUser;
-        this.idleTimeoutMinutes = idleTimeoutMinutes;
-        this.maxLifetimeMinutes = maxLifetimeMinutes;
+        this.timeouts = timeouts;
         this.unlimitedUsers = unlimitedUsers;
     }
 
@@ -579,11 +576,11 @@ public class SessionManager {
      */
     public void checkIdleSessions(ActorRef<SessionManager> self) {
         // Fire all ask() calls in parallel — each ask is queued in its Session's mailbox
-        Map<String, CompletableFuture<Boolean>> futures = new HashMap<>();
+        Map<String, CompletableFuture<String>> futures = new HashMap<>();
         Map<String, CompletableFuture<Boolean>> podsDeletedByOthers = new HashMap<>();
         for (ActorRef<Session> ref : sessions(self)) {
             futures.put(sessionIdOf(ref),
-                ref.ask(sa -> sa.shouldStop(idleTimeoutMinutes, maxLifetimeMinutes)));
+                ref.ask(sa -> sa.stopReason(timeouts)));
             podsDeletedByOthers.put(sessionIdOf(ref), ref.ask(Session::podWasDeletedExternally));
         }
         // Tell the billing records that these sessions are alive now: a session whose Pod vanishes while no controller
@@ -594,19 +591,19 @@ public class SessionManager {
             usage.tell(u -> u.seen(alive));
         }
         // Collect results
-        List<String> toRemove = new ArrayList<>();
+        Map<String, String> toRemove = new java.util.LinkedHashMap<>();
         for (var entry : futures.entrySet()) {
             try {
-                if (Boolean.TRUE.equals(entry.getValue().get())) {
-                    toRemove.add(entry.getKey());
+                String reason = entry.getValue().get();
+                if (reason != null) {
+                    toRemove.put(entry.getKey(), reason);
                 }
             } catch (Exception e) {
                 LOG.warning("Error checking idle for " + entry.getKey() + ": " + e.getMessage());
             }
         }
-        for (String sessionId : toRemove) {
-            destroySession(self, sessionId, "idle or lifetime limit reached");
-        }
+        // The reason goes to the log and to the audit record of the session's end
+        toRemove.forEach((sessionId, reason) -> destroySession(self, sessionId, reason));
         // A session whose Pod somebody else deleted has already deleted its Service and ended its billing record
         // (see Session.podDeletedByOthers); removing it here closes its actor, drops it from this actor's children,
         // and writes the audit record of its end.

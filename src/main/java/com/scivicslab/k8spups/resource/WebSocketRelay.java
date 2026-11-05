@@ -22,10 +22,19 @@ final class WebSocketRelay {
      * @param counter the bytes of every message relayed in either direction are added here
      */
     static void connect(WebSocketBase browser, WebSocketBase tool, LongAdder counter) {
+        connect(browser, tool, counter, new LongAdder());
+    }
+
+    /**
+     * As above, and counts the messages the browser sends: what the user does, as opposed to what the tool shows.
+     *
+     * @param fromBrowser one is added for every message relayed from the browser to the tool
+     */
+    static void connect(WebSocketBase browser, WebSocketBase tool, LongAdder counter, LongAdder fromBrowser) {
         AtomicBoolean closing = new AtomicBoolean();
         try {
-            pipe(browser, tool, counter);
-            pipe(tool, browser, counter);
+            pipe(browser, tool, counter, fromBrowser);
+            pipe(tool, browser, counter, new LongAdder());
             browser.closeHandler(v -> closeOther(browser, tool, closing));
             tool.closeHandler(v -> closeOther(tool, browser, closing));
             browser.exceptionHandler(e -> closeOther(browser, tool, closing));
@@ -56,7 +65,7 @@ final class WebSocketRelay {
         }
     }
 
-    private static void pipe(WebSocketBase from, WebSocketBase to, LongAdder counter) {
+    private static void pipe(WebSocketBase from, WebSocketBase to, LongAdder counter, LongAdder messages) {
         from.frameHandler(frame -> {
             // Each side answers the other's ping by itself; relaying them would answer twice.
             if (frame.isPing() || frame.type() == WebSocketFrameType.PONG) {
@@ -68,6 +77,7 @@ final class WebSocketRelay {
                     return;
                 }
                 counter.add(frame.binaryData().length());
+                messages.increment();
                 to.writeFrame(copyOf(frame));
                 if (!to.isClosed() && to.writeQueueFull()) {
                     from.pause();

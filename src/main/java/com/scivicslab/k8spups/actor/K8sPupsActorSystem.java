@@ -64,6 +64,12 @@ public class K8sPupsActorSystem {
     @ConfigProperty(name = "k8spups.max-lifetime-minutes", defaultValue = "10080")
     long maxLifetimeMinutes;
 
+    @ConfigProperty(name = "k8spups.start-timeout-minutes", defaultValue = "15")
+    long startTimeoutMinutes;
+
+    @ConfigProperty(name = "k8spups.failed-retention-minutes", defaultValue = "10")
+    long failedRetentionMinutes;
+
     @ConfigProperty(name = "k8spups.max-sessions", defaultValue = "100")
     int maxSessions;
 
@@ -267,8 +273,9 @@ public class K8sPupsActorSystem {
 
         // Create SessionManager
         SessionManager manager = new SessionManager(
-            k8sClient, plugins, controllerNamespace, maxSessions, maxSessionsPerUser, idleTimeoutMinutes,
-            maxLifetimeMinutes, unlimitedUsers);
+            k8sClient, plugins, controllerNamespace, maxSessions, maxSessionsPerUser,
+            new SessionTimeouts(idleTimeoutMinutes, maxLifetimeMinutes, startTimeoutMinutes, failedRetentionMinutes),
+            unlimitedUsers);
         ActorRef<SessionManager> sessionManager = actorSystem.actorOf(SESSION_MANAGER_NAME, manager);
 
         // Schedule idle timeout checks

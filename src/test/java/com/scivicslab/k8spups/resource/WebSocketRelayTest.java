@@ -29,6 +29,7 @@ class WebSocketRelayTest {
     private HttpServer relayServer;
     private WebSocketClient client;
     private final LongAdder counter = new LongAdder();
+    private final LongAdder fromBrowser = new LongAdder();
     private final CountDownLatch toolSawClose = new CountDownLatch(1);
     private final AtomicReference<Short> toolSawCloseStatus = new AtomicReference<>();
     private volatile io.vertx.core.http.ServerWebSocket toolSide;
@@ -52,7 +53,7 @@ class WebSocketRelayTest {
         relayServer = vertx.createHttpServer().webSocketHandler(browserSide -> {
             browserSide.pause();
             client.connect(toolServer.actualPort(), "localhost", "/").onSuccess(tool -> {
-                WebSocketRelay.connect(browserSide, tool, counter);
+                WebSocketRelay.connect(browserSide, tool, counter, fromBrowser);
                 browserSide.resume();
             });
         });
@@ -82,6 +83,31 @@ class WebSocketRelayTest {
         assertTrue(latch.await(5, TimeUnit.SECONDS));
         assertEquals("echo:hello", got.get());
         assertTrue(counter.sum() >= "hello".length() + "echo:hello".length());
+    }
+
+    /** What the user does counts as use of the session; what the tool shows on its own does not. */
+    @Test
+    void onlyTheMessagesOfTheBrowserAreCountedAsUse() throws Exception {
+        WebSocket browser = browser();
+        CountDownLatch connected = new CountDownLatch(1);
+        browser.textMessageHandler(m -> connected.countDown());
+        browser.writeTextMessage("first key");          // the relay is connected end to end once this is answered
+        assertTrue(connected.await(5, TimeUnit.SECONDS));
+        assertEquals(1, fromBrowser.sum());
+
+        CountDownLatch pushed = new CountDownLatch(3);
+        browser.textMessageHandler(m -> pushed.countDown());
+        toolSide.writeTextMessage("tool output 1");
+        toolSide.writeTextMessage("tool output 2");
+        toolSide.writeTextMessage("tool output 3");
+        assertTrue(pushed.await(5, TimeUnit.SECONDS));
+        assertEquals(1, fromBrowser.sum(), "what the tool shows on its own is not use");
+
+        CountDownLatch answered = new CountDownLatch(1);
+        browser.textMessageHandler(m -> answered.countDown());
+        browser.writeTextMessage("a key the user typed");
+        assertTrue(answered.await(5, TimeUnit.SECONDS));
+        assertEquals(2, fromBrowser.sum());
     }
 
     @Test

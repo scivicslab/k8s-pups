@@ -29,7 +29,7 @@ class SessionManagerChildrenTest {
     void start() {
         system = new ActorSystem("session-manager-children-test");
         self = system.actorOf("session-manager",
-            new SessionManager(null, Map.of(), "ns", 10, 2, 60, 600, Set.of()));
+            new SessionManager(null, Map.of(), "ns", 10, 2, new SessionTimeouts(60, 600, 15, 10), Set.of()));
     }
 
     @AfterEach

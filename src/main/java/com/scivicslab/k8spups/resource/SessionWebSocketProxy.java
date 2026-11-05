@@ -58,7 +58,10 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
     /** How long to wait for the tool to accept the connection; the browser gets a 502 after this, not a minute later. */
     private static final int CONNECT_TIMEOUT_MS = 10_000;
 
-    /** The session's idle timer is touched this often while a connection stays open. */
+    /**
+     * How often an open connection is looked at: the session's idle timer is touched when the browser sent a message
+     * since the last look. A connection the user left open with nothing sent does not keep the session in use.
+     */
     private static final long TOUCH_INTERVAL_MS = 60_000;
 
     /**
@@ -186,9 +189,18 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
             tool.close();
         }).onSuccess(browser -> {
             LongAdder counter = relayedBytes.computeIfAbsent(target.sessionId(), id -> new LongAdder());
-            WebSocketRelay.connect(browser, tool, counter);
-            long timer = vertx.setPeriodic(TOUCH_INTERVAL_MS, id -> touch(target.sessionId()));
-            browser.closeHandler(v -> vertx.cancelTimer(timer));
+            LongAdder fromBrowser = new LongAdder();
+            WebSocketRelay.connect(browser, tool, counter, fromBrowser);
+            // The relay owns the close handlers (a close of one side closes the other), so the timer stops itself
+            long[] seen = {0};
+            vertx.setPeriodic(TOUCH_INTERVAL_MS, id -> {
+                long sent = fromBrowser.sum();
+                if (sent != seen[0]) {
+                    seen[0] = sent;
+                    touch(target.sessionId());
+                }
+                if (browser.isClosed()) vertx.cancelTimer(id);
+            });
             LOG.info("WebSocket relay opened: " + target.what() + " -> " + request.path());
         }));
     }
