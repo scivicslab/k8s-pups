@@ -33,6 +33,10 @@ public final class SettingsEnv {
                 put(env, "HERMES_BASE_URL", url.isEmpty() ? "" : url + "/v1");
                 put(env, "HERMES_MODEL", model);
             }
+            case "galaxy" -> {
+                put(env, "GALAXY_AI_BASE_URL", url.isEmpty() ? "" : url + "/v1");
+                put(env, "GALAXY_AI_MODEL", model);
+            }
             case "code-server" -> {
                 put(env, "CODE_SERVER_AI_BASE_URL", url.isEmpty() ? "" : url + "/v1");
                 put(env, "CODE_SERVER_AI_MODEL", model);

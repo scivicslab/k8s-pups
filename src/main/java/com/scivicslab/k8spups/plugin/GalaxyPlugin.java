@@ -1,6 +1,9 @@
 package com.scivicslab.k8spups.plugin;
 
+import org.eclipse.microprofile.config.ConfigProvider;
+
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -34,7 +37,7 @@ public class GalaxyPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/galaxy-bio:26.1.2-2611060644";
+        return "${REGISTRY}/galaxy-bio:26.1.2-2611060712";
     }
 
     @Override
@@ -48,11 +51,20 @@ public class GalaxyPlugin implements ToolPlugin {
     }
 
     @Override
+    /**
+     * Galaxy's AI features (GalaxyAI, the explanation of a failed job) talk to the GPU broker: its OpenAI-compatible
+     * URL and the model are deployment config ({@code K8SPUPS_GALAXY_*}). Left unset, Galaxy shows no AI feature.
+     */
     public Map<String, String> environmentVariables() {
-        return Map.of(
-            // Gravity keeps its state under HOME; the root filesystem is writable but HOME must exist.
-            "HOME", "/tmp"
-        );
+        var cfg = ConfigProvider.getConfig();
+        var env = new LinkedHashMap<String, String>();
+        // Gravity keeps its state under HOME; the root filesystem is writable but HOME must exist.
+        env.put("HOME", "/tmp");
+        cfg.getOptionalValue("k8spups.galaxy.broker-url", String.class)
+            .filter(v -> !v.isBlank()).ifPresent(v -> env.put("GALAXY_AI_BASE_URL", v.replaceAll("/+$", "") + "/v1"));
+        cfg.getOptionalValue("k8spups.galaxy.model", String.class)
+            .filter(v -> !v.isBlank()).ifPresent(v -> env.put("GALAXY_AI_MODEL", v));
+        return env;
     }
 
     @Override

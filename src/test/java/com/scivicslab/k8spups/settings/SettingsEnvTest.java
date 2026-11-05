@@ -47,8 +47,15 @@ class SettingsEnvTest {
     }
 
     @Test
+    void galaxyGetsTheV1UrlForItsAiFeatures() {
+        var galaxy = SettingsEnv.forTool("galaxy", S);
+        assertEquals("http://broker:28005/v1", galaxy.get("GALAXY_AI_BASE_URL"));
+        assertEquals("m/x", galaxy.get("GALAXY_AI_MODEL"));
+    }
+
+    @Test
     void emptySettingsOverrideNothing() {
-        for (String tool : new String[] {"ai-chat", "jupyter-ai", "chat-ui-with-audit-trail-local-llm", "code-raptor", "terminal", "code-server"})
+        for (String tool : new String[] {"ai-chat", "jupyter-ai", "chat-ui-with-audit-trail-local-llm", "code-raptor", "terminal", "code-server", "galaxy"})
             assertTrue(SettingsEnv.forTool(tool, SystemSettings.EMPTY).isEmpty(), tool);
     }
 
