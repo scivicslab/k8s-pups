@@ -290,8 +290,14 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
                 }
             }
             // The tool builds absolute URLs and checks the Origin against the host it is told; tell it the browser's.
-            if (!hasForwardedHost && browserHost != null) {
-                out.add("X-Forwarded-Host", browserHost);
+            // Both headers carry it: code-server reads X-Forwarded-Host, Jupyter Server reads only Host and refuses
+            // every WebSocket with 403 when it is the Service of the Pod. The Origin stays: without one the WebSocket
+            // client makes up its own from the address it connects to, and code-server refuses that with 403.
+            if (browserHost != null) {
+                out.set("Host", browserHost);
+                if (!hasForwardedHost) {
+                    out.add("X-Forwarded-Host", browserHost);
+                }
             }
             return out;
         }

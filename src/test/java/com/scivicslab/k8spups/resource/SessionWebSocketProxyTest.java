@@ -1,10 +1,15 @@
 package com.scivicslab.k8spups.resource;
 
 import io.vertx.core.MultiMap;
+import io.vertx.core.Vertx;
+import io.vertx.core.http.HttpServer;
+import io.vertx.core.http.WebSocketConnectOptions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -63,12 +68,36 @@ class SessionWebSocketProxyTest {
         assertEquals("a=1", out.get("cookie"));
         assertEquals("https://192.168.5.25", out.get("origin"));
         assertEquals("192.168.5.25", out.get("x-forwarded-host"));
-        assertNull(out.get("host"));
+        assertEquals(List.of("192.168.5.25"), out.getAll("host"));
         assertNull(out.get("upgrade"));
         assertNull(out.get("connection"));
         assertNull(out.get("sec-websocket-key"));
         assertNull(out.get("sec-websocket-version"));
         assertNull(out.get("content-length"));
+    }
+
+    @Test
+    void theToolReceivesTheBrowsersHostAndOriginOverARealConnection() throws Exception {
+        // The headers are handed to the Vert.x WebSocket client; the Host must survive it, not be replaced by the
+        // address the client connects to, or Jupyter Server refuses the connection with 403.
+        Vertx vertx = Vertx.vertx();
+        try {
+            CompletableFuture<MultiMap> seen = new CompletableFuture<>();
+            HttpServer tool = vertx.createHttpServer().webSocketHandler(ws -> seen.complete(ws.headers()));
+            tool.listen(0).toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            MultiMap headers = SessionWebSocketProxy.UpstreamHeaders.of(Map.of(
+                "Origin", List.of("https://sc.example.org"),
+                "Host", List.of("sc.example.org")), "sc.example.org");
+            vertx.createWebSocketClient().connect(new WebSocketConnectOptions()
+                .setAbsoluteURI("ws://127.0.0.1:" + tool.actualPort() + "/session/x/api/events/subscribe")
+                .setHeaders(headers)).toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            MultiMap got = seen.get(5, TimeUnit.SECONDS);
+            assertEquals("sc.example.org", got.get("host"));
+            assertEquals("https://sc.example.org", got.get("origin"));
+            assertEquals("sc.example.org", got.get("x-forwarded-host"));
+        } finally {
+            vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
     }
 
     @Test
