@@ -330,18 +330,6 @@ public class K8sApiClient {
         LOG.info("Service deleted: " + serviceName);
     }
 
-    public String getPodLogs(String podName, int tailLines) {
-        try {
-            return client.pods().inNamespace(userPodsNamespace)
-                .withName(podName)
-                .tailingLines(tailLines)
-                .getLog();
-        } catch (Exception e) {
-            LOG.warning("Failed to get logs for pod " + podName + ": " + e.getMessage());
-            return "";
-        }
-    }
-
     // -- HTTPRoute operations (Gateway API) --
 
     /**

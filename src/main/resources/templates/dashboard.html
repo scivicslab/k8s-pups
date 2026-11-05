@@ -121,12 +121,6 @@
         .badge-STOPPED::before, .badge-STOPPING::before { background: #94A3B8; }
         @keyframes blink { 0%,100%{ opacity:1; } 50%{ opacity:.5; } }
 
-        .btn-logs { background:#F1F5F9; color:#475569; border:1px solid #CBD5E1; }
-        .btn-logs:hover { background:#E2E8F0; }
-        .log-panel { margin-top:8px; background:#0F172A; border-radius:8px; padding:12px; }
-        .log-content { color:#94A3B8; font-size:11px; font-family:monospace;
-                       max-height:300px; overflow-y:auto; white-space:pre-wrap;
-                       word-break:break-all; margin:0; }
 
         .session-meta {
             display: grid; grid-template-columns: max-content 1fr;
@@ -393,14 +387,10 @@
                 {#if s.accessUrl}
                 <a class="btn btn-open" href="{s.accessUrl}" target="_blank">Open Tool</a>
                 {/if}
-                <button class="btn btn-logs" onclick="toggleLogs('{s.sessionId}')">Logs</button>
                 <form method="post" action="session/stop">
                     <input type="hidden" name="sessionId" value="{s.sessionId}">
                     <button type="submit" class="btn btn-stop">Stop</button>
                 </form>
-            </div>
-            <div id="log-panel-{s.sessionId}" class="log-panel" style="display:none">
-                <pre id="log-content-{s.sessionId}" class="log-content"></pre>
             </div>
         </div>
         {/for}
@@ -525,42 +515,6 @@
     }
 
     // Poll session status via fetch() and update DOM without full page reload
-    var logPollers = {};
-
-    function toggleLogs(sessionId) {
-        var panel = document.getElementById('log-panel-' + sessionId);
-        if (!panel) return;
-        if (panel.style.display === 'none') {
-            panel.style.display = 'block';
-            fetchLogs(sessionId);
-            logPollers[sessionId] = setInterval(function() { fetchLogs(sessionId); }, 3000);
-        } else {
-            panel.style.display = 'none';
-            stopLogPolling(sessionId);
-        }
-    }
-
-    function stopLogPolling(sessionId) {
-        if (logPollers[sessionId]) {
-            clearInterval(logPollers[sessionId]);
-            delete logPollers[sessionId];
-        }
-    }
-
-    function fetchLogs(sessionId) {
-        fetch('session/' + sessionId + '/logs', { credentials: 'same-origin' })
-            .then(function(r) { return r.ok ? r.json() : null; })
-            .then(function(data) {
-                if (!data) return;
-                var el = document.getElementById('log-content-' + sessionId);
-                if (!el) return;
-                var atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 20;
-                el.textContent = data.logs || '(no output yet)';
-                if (atBottom) el.scrollTop = el.scrollHeight;
-            })
-            .catch(function() {});
-    }
-
     function pollSessionStatus() {
         fetch('session/status', { credentials: 'same-origin' })
             .then(function(r) { return r.ok ? r.json() : []; })
@@ -604,7 +558,6 @@
                     var card = el.closest('.session-card');
                     if (!card || card.dataset.removing) return;
                     card.dataset.removing = '1';
-                    stopLogPolling(sid);
                     card.style.transition = 'opacity 0.5s';
                     card.style.opacity = '0';
                     setTimeout(function() { card.remove(); }, 500);

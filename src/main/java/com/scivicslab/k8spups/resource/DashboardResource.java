@@ -420,27 +420,6 @@ public class DashboardResource {
         }
     }
 
-    @GET
-    @Path("/session/{sessionId}/logs")
-    @Authenticated
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response getSessionLogs(
-            @PathParam("sessionId") String sessionId,
-            @QueryParam("lines") @DefaultValue("200") int lines) {
-        String userId = getCurrentUsername();
-        ActorRef<SessionManager> sm = actorSystem.getSessionManager();
-        try {
-            List<SessionStatus> statuses = sm.ask(mgr -> mgr.getUserSessions(sm, userId)).get();
-            boolean owned = statuses != null && statuses.stream()
-                .anyMatch(s -> s.sessionId().equals(sessionId));
-            if (!owned) return Response.status(Response.Status.FORBIDDEN).build();
-            String logs = sm.ask(mgr -> mgr.getSessionLogs(sm, sessionId, lines)).get();
-            return Response.ok(Map.of("logs", logs == null ? "" : logs)).build();
-        } catch (Exception e) {
-            return Response.ok(Map.of("logs", "")).build();
-        }
-    }
-
     // ── Session proxy ──────────────────────────────────────────────────────────
     // All traffic to /session/{id}/... reaches the controller via the catch-all
     // HTTPRoute in gateway.yaml. The controller verifies ownership, then proxies

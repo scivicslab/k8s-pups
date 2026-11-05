@@ -326,10 +326,6 @@ public class Session {
         return info.sessionId();
     }
 
-    public String getPodLogs(int tailLines) {
-        return k8sClient.getPodLogs(info.podName(), tailLines);
-    }
-
     public String getToolName() {
         return info.toolPlugin().name();
     }

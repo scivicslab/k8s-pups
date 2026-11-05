@@ -543,12 +543,6 @@ public class SessionManager {
         }
     }
 
-    public String getSessionLogs(ActorRef<SessionManager> self, String sessionId, int tailLines) {
-        ActorRef<Session> ref = session(self, sessionId);
-        if (ref == null) return "";
-        return ref.ask(sa -> sa.getPodLogs(tailLines)).join();
-    }
-
     /**
      * Touch a session to reset idle timer.
      */
