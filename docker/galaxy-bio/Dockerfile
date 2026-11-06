@@ -27,6 +27,11 @@ RUN echo '    file_sources_config_file: /galaxy/server/config/file_sources_conf.
 # A file of the base image that only its owner can read answers 500 to a Pod running as another UID: welcome.html, the
 # centre of the first page, is one (a007 runs the Pods as 30420). Only those files are changed, so the layer stays small.
 RUN find /galaxy/server -xdev \( -type f -o -type d \) ! -perm -o=r -exec chmod a+rX {} +
+# The tutorial search of Galaxy's AI (GTN) reads a database that Galaxy downloads on first use; the Pod has no way out
+# to the internet, so it is put where Galaxy looks for it, at build time.
+RUN mkdir -p /galaxy/server/lib/galaxy/agents/gtn/data && \
+    curl -fsSL https://depot.galaxyproject.org/chatgxy/gtn_search.db -o /galaxy/server/lib/galaxy/agents/gtn/data/gtn_search.db && \
+    chmod -R a+rX /galaxy/server/lib/galaxy/agents/gtn/data
 COPY entrypoint.sh /entrypoint.sh
 USER galaxy
 ENTRYPOINT ["tini", "--", "/entrypoint.sh"]
