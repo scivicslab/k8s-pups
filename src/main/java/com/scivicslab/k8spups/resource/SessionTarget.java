@@ -21,10 +21,12 @@ final class SessionTarget {
      * @param sessionId  the session whose idle timer to touch (null when forbidden)
      * @param url        the address inside the cluster to send the request to (null when forbidden)
      * @param what       the target in words, for the log
+     * @param tool       the name of the session's tool plugin ({@link ToolPlugin#name()}), which decides what of the
+     *                   traffic is use of the session ({@link UseRules}); null when unknown
      */
-    record Resolution(Kind kind, String sessionId, String url, String what) {
+    record Resolution(Kind kind, String sessionId, String url, String what, String tool) {
         static Resolution forbidden() {
-            return new Resolution(Kind.FORBIDDEN, null, null, null);
+            return new Resolution(Kind.FORBIDDEN, null, null, null, null);
         }
     }
 
@@ -70,7 +72,7 @@ final class SessionTarget {
             }
             String url = scheme + "://" + subTool.serviceName() + "." + podsNamespace
                 + ".svc.cluster.local:" + subTool.port() + "/" + subPath + query;
-            return new Resolution(Kind.SUB_TOOL, subTool.sessionId(), url, "sub-tool " + first);
+            return new Resolution(Kind.SUB_TOOL, subTool.sessionId(), url, "sub-tool " + first, null);
         }
 
         // The tool plugin's settings decide whether the session prefix stays in the path, and the port.
@@ -83,6 +85,6 @@ final class SessionTarget {
             : "/" + subPath;
         String url = scheme + "://pups-svc-" + first + "." + podsNamespace + ".svc.cluster.local:" + containerPort
             + targetPath + query;
-        return new Resolution(Kind.SESSION, first, url, "session " + first);
+        return new Resolution(Kind.SESSION, first, url, "session " + first, tool != null ? tool.name() : null);
     }
 }

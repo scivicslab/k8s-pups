@@ -25,6 +25,7 @@ class SessionTargetTest {
         return (ToolPlugin) Proxy.newProxyInstance(ToolPlugin.class.getClassLoader(), new Class<?>[] { ToolPlugin.class },
             (proxy, method, args) -> switch (method.getName()) {
                 case "displayName" -> displayName;
+                case "name" -> displayName.toLowerCase().replace(' ', '-');
                 case "passthroughPath" -> passthrough;
                 case "containerPort" -> port;
                 default -> throw new UnsupportedOperationException(method.getName());

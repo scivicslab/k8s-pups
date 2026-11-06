@@ -39,7 +39,8 @@ public class Session {
     private final K8sApiClient k8sClient;
 
     private SessionState state = SessionState.CREATING;
-    private final Instant createdTime = Instant.now();
+    /** When the session started; a restored session takes it from its Pod, so a restart does not reset the lifetime. */
+    private Instant createdTime = Instant.now();
     private Instant lastAccessTime = Instant.now();
     /** When the periodic check first saw the session failed; null while it is not failed. */
     private Instant failedSince;
@@ -205,6 +206,7 @@ public class Session {
             return;
         }
         recordAttached(pod, ready);
+        createdTime = startedAt(pod, createdTime);
 
         // Restore memo from Pod annotation
         if (pod.getMetadata().getAnnotations() != null) {
@@ -231,6 +233,16 @@ public class Session {
         } catch (Exception ex) {
             LOG.severe("Failed to set up pod watch for restored session " + info.sessionId() + ": " + ex.getMessage());
             state = SessionState.FAILED;
+        }
+    }
+
+    /** When the Pod was created, which is when its session started; {@code fallback} when the Pod does not say. */
+    static Instant startedAt(Pod pod, Instant fallback) {
+        try {
+            String created = pod.getMetadata() != null ? pod.getMetadata().getCreationTimestamp() : null;
+            return created != null ? Instant.parse(created) : fallback;
+        } catch (Exception e) {
+            return fallback;
         }
     }
 

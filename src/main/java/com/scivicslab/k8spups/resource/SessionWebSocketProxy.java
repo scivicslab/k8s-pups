@@ -190,7 +190,9 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
         }).onSuccess(browser -> {
             LongAdder counter = relayedBytes.computeIfAbsent(target.sessionId(), id -> new LongAdder());
             LongAdder fromBrowser = new LongAdder();
-            WebSocketRelay.connect(browser, tool, counter, fromBrowser);
+            String toolName = target.tool();
+            WebSocketRelay.connect(browser, tool, counter, fromBrowser, frame -> UseRules.webSocketIsUse(toolName,
+                frame.isText() ? frame.textData() : null, frame.isBinary() ? frame.binaryData().getBytes() : null));
             // The relay owns the close handlers (a close of one side closes the other), so the timer stops itself
             long[] seen = {0};
             vertx.setPeriodic(TOUCH_INTERVAL_MS, id -> {

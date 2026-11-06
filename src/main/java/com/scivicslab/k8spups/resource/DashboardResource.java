@@ -612,8 +612,10 @@ public class DashboardResource {
                 .entity("You do not own this session").build();
         }
 
-        // Update idle timer
-        sm.tell(mgr -> mgr.touchSession(sm, target.sessionId()));
+        // Only what the user does keeps the session in use; what an open page polls by itself does not (UseRules)
+        if (UseRules.httpIsUse(target.tool(), method, subPath, inHeaders.getHeaderString("Sec-Fetch-Mode"))) {
+            sm.tell(mgr -> mgr.touchSession(sm, target.sessionId()));
+        }
 
         return forward(target.url(), method, body, inHeaders, target.what());
     }

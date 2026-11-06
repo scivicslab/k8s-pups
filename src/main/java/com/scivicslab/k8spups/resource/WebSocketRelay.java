@@ -31,10 +31,19 @@ final class WebSocketRelay {
      * @param fromBrowser one is added for every message relayed from the browser to the tool
      */
     static void connect(WebSocketBase browser, WebSocketBase tool, LongAdder counter, LongAdder fromBrowser) {
+        connect(browser, tool, counter, fromBrowser, frame -> true);
+    }
+
+    /**
+     * As above; only the messages of the browser that {@code isUse} accepts are counted in {@code fromBrowser} (the
+     * first frame of each message is judged; continuation frames are not counted).
+     */
+    static void connect(WebSocketBase browser, WebSocketBase tool, LongAdder counter, LongAdder fromBrowser,
+                        java.util.function.Predicate<WebSocketFrame> isUse) {
         AtomicBoolean closing = new AtomicBoolean();
         try {
-            pipe(browser, tool, counter, fromBrowser);
-            pipe(tool, browser, counter, new LongAdder());
+            pipe(browser, tool, counter, fromBrowser, isUse);
+            pipe(tool, browser, counter, new LongAdder(), frame -> false);
             browser.closeHandler(v -> closeOther(browser, tool, closing));
             tool.closeHandler(v -> closeOther(tool, browser, closing));
             browser.exceptionHandler(e -> closeOther(browser, tool, closing));
@@ -65,7 +74,8 @@ final class WebSocketRelay {
         }
     }
 
-    private static void pipe(WebSocketBase from, WebSocketBase to, LongAdder counter, LongAdder messages) {
+    private static void pipe(WebSocketBase from, WebSocketBase to, LongAdder counter, LongAdder messages,
+                             java.util.function.Predicate<WebSocketFrame> isUse) {
         from.frameHandler(frame -> {
             // Each side answers the other's ping by itself; relaying them would answer twice.
             if (frame.isPing() || frame.type() == WebSocketFrameType.PONG) {
@@ -77,7 +87,7 @@ final class WebSocketRelay {
                     return;
                 }
                 counter.add(frame.binaryData().length());
-                messages.increment();
+                if ((frame.isText() || frame.isBinary()) && isUse.test(frame)) messages.increment();
                 to.writeFrame(copyOf(frame));
                 if (!to.isClosed() && to.writeQueueFull()) {
                     from.pause();
