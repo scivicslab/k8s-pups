@@ -159,15 +159,17 @@ public class SessionManager {
     }
 
     /**
-     * Adds to the environment the credentials of the S3 server for the datasets that the user's Visas grant, when the
+     * Adds to the environment the credentials of the S3 server for the datasets of it that the user attached, when the
      * S3 access is on. A Pod that gets them is stopped when the user loses one of these datasets, like a Pod that
      * mounts a dataset.
      */
-    private Map<String, String> withS3Access(ActorRef<SessionManager> self, String userId, Map<String, String> env) {
+    private Map<String, String> withS3Access(ActorRef<SessionManager> self, String userId, Map<String, String> env,
+                                             java.util.Set<String> chosen) {
+        if (chosen.isEmpty()) return env;
         ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
         if (datasets == null) return env;
         try {
-            Map<String, String> s3Env = datasets.ask(d -> d.s3Env(userId)).get();
+            Map<String, String> s3Env = datasets.ask(d -> d.s3Env(userId, chosen)).get();
             if (s3Env.isEmpty()) return env;
             Map<String, String> merged = new HashMap<>(env);
             merged.putAll(s3Env);
@@ -212,20 +214,41 @@ public class SessionManager {
         return mounts;
     }
 
-    /**
-     * Every dataset the user may read now (from the database or a Visa) and the files granted one by one, read-only,
-     * at the places that {@link DatasetMountSpecs} gives. Empty when the user may read none, or when the datasets cannot
-     * be read: the tool then starts without them.
-     */
-    private List<MountSpec> datasetMounts(ActorRef<SessionManager> self, String userId, ToolPlugin plugin) {
+    /** Whether every dataset the user attached is one the user may read now, read the way it was attached. */
+    private boolean mayReadChosen(ActorRef<SessionManager> self, String userId, ChosenDatasets chosen) {
         ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
-        if (datasets == null) return List.of();
+        if (datasets == null) return false;
+        try {
+            java.util.Set<String> files = new java.util.HashSet<>();
+            java.util.Set<String> s3 = new java.util.HashSet<>();
+            for (DatasetService.Readable r : datasets.ask(d -> d.readableDatasets(userId)).get()) {
+                (r.s3() ? s3 : files).add(r.name());
+            }
+            boolean grantedFiles = !chosen.grantedFiles() || datasets.ask(d -> d.hasGrantedFiles(userId)).get();
+            return files.containsAll(chosen.files()) && s3.containsAll(chosen.s3()) && grantedFiles;
+        } catch (Exception e) {
+            LOG.warning("Datasets of " + userId + " could not be checked: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * The datasets the user attached and, when attached, the files granted one by one, read-only, at the places that
+     * {@link DatasetMountSpecs} gives. Nothing is mounted that the user did not attach. Null when they cannot be mounted,
+     * so the session is refused instead of starting without them.
+     */
+    private List<MountSpec> datasetMounts(ActorRef<SessionManager> self, String userId, ToolPlugin plugin, ChosenDatasets chosen) {
+        if (chosen.files().isEmpty() && !chosen.grantedFiles()) return List.of();
+        ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
+        if (datasets == null) return null;
         try {
             DatasetService.Mounts granted = datasets.ask(d -> d.prepareMounts(userId)).get();
-            return DatasetMountSpecs.of(plugin.extraMountsUnder(), granted.datasets(), granted.fileView());
+            if (!granted.datasets().containsAll(chosen.files())) return null;
+            return DatasetMountSpecs.of(plugin.extraMountsUnder(), List.copyOf(chosen.files()),
+                chosen.grantedFiles() && granted.fileView());
         } catch (Exception e) {
             LOG.warning("Dataset mounts failed for " + userId + ": " + e.getMessage());
-            return List.of();
+            return null;
         }
     }
 
@@ -306,6 +329,13 @@ public class SessionManager {
         if (refusal != null) {
             LOG.warning("Session refused for " + userId + ": " + refusal
                 + (refusal == LaunchRefusal.USER_LIMIT ? " (" + maxSessionsPerUser + " per user)" : " (" + maxSessions + " in all)"));
+            return null;
+        }
+        // The datasets the user attached, apart from the storage; each must be one the user may read now
+        ChosenDatasets chosen = ChosenDatasets.split(additionalMounts);
+        additionalMounts = chosen.storage();
+        if (chosen.any() && !mayReadChosen(self, userId, chosen)) {
+            LOG.warning("Rejected " + toolName + " for " + userId + ": an attached dataset is not one the user may read");
             return null;
         }
 
@@ -390,11 +420,16 @@ public class SessionManager {
             LOG.warning("Rejected " + toolName + " for " + userId + ": a chosen mount is not allowed");
             return null;
         }
-        mounts.addAll(datasetMounts(self, userId, plugin));
+        List<MountSpec> datasetMounts = datasetMounts(self, userId, plugin, chosen);
+        if (datasetMounts == null) {
+            LOG.warning("Rejected " + toolName + " for " + userId + ": the attached datasets could not be mounted");
+            return null;
+        }
+        mounts.addAll(datasetMounts);
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType,
             mounts,
-            withS3Access(self, userId, withSharedSettings(self, toolName, toolConfigEnv)));
+            withS3Access(self, userId, withSharedSettings(self, toolName, toolConfigEnv), chosen.s3()));
         Session actor = new Session(info, k8sClient, podUsage(self));
 
         // Create as child actor

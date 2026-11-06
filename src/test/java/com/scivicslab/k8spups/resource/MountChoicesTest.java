@@ -46,14 +46,25 @@ class MountChoicesTest {
     }
 
     @Test
-    void aRememberedDatasetChoiceIsDroppedWithoutBeingCounted() {
-        // The datasets are mounted by the controller now; a choice stored before that is neither offered nor reported.
-        String json = MountChoices.toJson("posix", List.of(
-            Map.of("value", "dataset:JGAD000001", "path", "/datasets/JGAD000001"),
-            Map.of("value", "dataset-files", "path", "/dataset-files")));
-        var r = MountChoices.remembered(json, MountChoices.of(STORAGE, Map.of()), STORAGE.keySet());
-        assertEquals(List.of(), r.mounts());
-        assertEquals(0, r.dropped());
+    void datasetsAreChoicesLikeGroupStorage() {
+        var c = MountChoices.of(STORAGE, Map.of("lab1", "ro"),
+            List.of(new MountChoices.Dataset("JGAD000003", false), new MountChoices.Dataset("JGAS000001", true)), true, "jga");
+        assertEquals(List.of("posix", "group:lab1", "dataset:JGAD000003", "s3:JGAS000001", "dataset-files"),
+            c.stream().map(MountChoices.Choice::value).toList());
+        assertEquals("/datasets/JGAD000003", c.get(2).path());
+        assertEquals("jga/JGAS000001/", c.get(3).path());
+        assertTrue(c.get(3).s3());
+        assertEquals("/home/pod-user/works/datasets/JGAD000003", MountChoices.pathOf("dataset:JGAD000003", "/home/pod-user/works"));
+        assertEquals("/home/pod-user/works/datasets/granted-files", MountChoices.pathOf("dataset-files", "/home/pod-user/works"));
+    }
+
+    @Test
+    void aRememberedDatasetIsKeptWhileTheUserMayReadItAndCountedWhenNot() {
+        String json = MountChoices.toJson("posix", List.of(Map.of("value", "dataset:JGAD000003"), Map.of("value", "s3:JGAS000009")));
+        var current = MountChoices.of(STORAGE, Map.of(), List.of(new MountChoices.Dataset("JGAD000003", false)), false, "jga");
+        var r = MountChoices.remembered(json, current, STORAGE.keySet());
+        assertEquals(List.of(Map.of("value", "dataset:JGAD000003")), r.mounts());
+        assertEquals(1, r.dropped());
     }
 
     @Test

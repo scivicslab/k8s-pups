@@ -87,6 +87,16 @@ public class DatasetService {
         return out;
     }
 
+    /** Whether files are granted to the user one by one (they are attached as one choice). */
+    public boolean hasGrantedFiles(String user) {
+        try {
+            return isAvailable() && !repository.activePaths(user).isEmpty();
+        } catch (Exception e) {
+            LOG.warning("Granted files of " + user + " could not be read: " + e.getMessage());
+            return false;
+        }
+    }
+
     /** The S3 access, for the endpoints that publish the keys of its tokens. */
     public Optional<S3Access> s3Access() {
         return s3;
@@ -268,9 +278,12 @@ public class DatasetService {
      * temporary credentials of the S3 server and the list of datasets they were made for. Empty when the S3 access is
      * off or no Visa grants a dataset.
      */
-    public Map<String, String> s3Env(String user) {
-        if (s3.isEmpty()) return Map.of();
-        return s3.get().env(user, visaDatasets(user));
+    /** Credentials of the S3 server for the datasets the user attached, among those the user's Visas grant. */
+    public Map<String, String> s3Env(String user, Set<String> chosen) {
+        if (s3.isEmpty() || chosen.isEmpty()) return Map.of();
+        Set<String> allowed = new java.util.TreeSet<>(chosen);
+        allowed.retainAll(visaDatasets(user));
+        return s3.get().env(user, allowed);
     }
 
     /** The two lists without duplicates, in order: the first list, then the new names of the second. */

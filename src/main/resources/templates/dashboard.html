@@ -400,21 +400,6 @@
     </div>
     {/if}
 
-    {#if !readableDatasets.isEmpty()}
-    <p class="section-label">Data you may read</p>
-    <div class="datasets-box" style="background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:12px 16px;margin-bottom:18px;font-size:0.9rem;">
-        <div style="color:#64748B;font-size:0.8rem;margin-bottom:6px;">Every tool you launch gets these; you do not attach them.</div>
-        <table style="border-collapse:collapse;">
-        {#for d in readableDatasets}
-            <tr>
-                <td style="padding:2px 16px 2px 0;font-weight:600;">{d.name}</td>
-                <td style="padding:2px 0;color:#334155;">{#if d.s3}S3 bucket <code>{s3Bucket}</code>, prefix <code>{d.name}/</code> (credentials are in the tool's environment){#else}files in <code>datasets/{d.name}</code> of the tool's folder{/if}</td>
-            </tr>
-        {/for}
-        </table>
-    </div>
-    {/if}
-
     <p class="section-label">Launch a Tool</p>
     {#if tools.isEmpty() && dynamicTools.isEmpty()}
     <div class="empty">
@@ -605,7 +590,7 @@
         setTimeout(pollSessionStatus, 3000);
     }
 
-    // Mounts the user can add (own storage, group storage), from the controller; the controller decides where each goes
+    // What the user can attach (own storage, group storage, datasets), from the controller; the controller decides where each goes
     var MOUNT_CHOICES = JSON.parse(document.getElementById('mount-choices').dataset.json || '[]');
     function choiceOf(value) {
         for (var i = 0; i < MOUNT_CHOICES.length; i++) if (MOUNT_CHOICES[i].value === value) return MOUNT_CHOICES[i];
@@ -645,7 +630,7 @@
         var form = btn.closest('form');
         function showWhere() {
             var c = choiceOf(typeSelect.value);
-            typeSelect.title = c ? 'Mounted at ' + mountPathOf(form, c) : '';
+            typeSelect.title = !c ? '' : c.s3 ? 'Read from S3: ' + c.path : 'Mounted at ' + mountPathOf(form, c);
         }
         showWhere();
         typeSelect.onchange = showWhere;
