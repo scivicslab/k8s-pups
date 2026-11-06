@@ -288,6 +288,9 @@ public class K8sPupsActorSystem {
         // Access to a dataset can expire; the sessions that still mount it are stopped
         scheduler.scheduleAtFixedRate("dataset-access-check", sessionManager,
             sm -> sm.enforceDatasetAccess(sessionManager), 60, 60, TimeUnit.SECONDS);
+        // The S3 credentials of a session expire; they are renewed before, in the Secret its Pod reads
+        scheduler.scheduleAtFixedRate("s3-credential-renewal", sessionManager,
+            sm -> sm.renewS3Credentials(sessionManager), 60, 60, TimeUnit.SECONDS);
         // Group storage: a member can be removed while a tool of the member mounts it
         scheduler.scheduleAtFixedRate("storage-access-check", sessionManager,
             sm -> sm.enforceStorageAccess(sessionManager), 60, 60, TimeUnit.SECONDS);

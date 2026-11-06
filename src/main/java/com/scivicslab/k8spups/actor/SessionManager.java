@@ -159,24 +159,20 @@ public class SessionManager {
     }
 
     /**
-     * Adds to the environment the credentials of the S3 server for the datasets of it that the user attached, when the
-     * S3 access is on. A Pod that gets them is stopped when the user loses one of these datasets, like a Pod that
+     * The credentials of the S3 server for the datasets of it that the user attached, when the S3 access is on; null
+     * when there are none. A Pod that gets them is stopped when the user loses one of these datasets, like a Pod that
      * mounts a dataset.
      */
-    private Map<String, String> withS3Access(ActorRef<SessionManager> self, String userId, Map<String, String> env,
-                                             java.util.Set<String> chosen) {
-        if (chosen.isEmpty()) return env;
+    private com.scivicslab.k8spups.passport.S3Access.Grant s3Grant(ActorRef<SessionManager> self, String userId,
+                                                                    java.util.Set<String> chosen) {
+        if (chosen.isEmpty()) return null;
         ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
-        if (datasets == null) return env;
+        if (datasets == null) return null;
         try {
-            Map<String, String> s3Env = datasets.ask(d -> d.s3Env(userId, chosen)).get();
-            if (s3Env.isEmpty()) return env;
-            Map<String, String> merged = new HashMap<>(env);
-            merged.putAll(s3Env);
-            return merged;
+            return datasets.ask(d -> d.s3Grant(userId, chosen)).get().orElse(null);
         } catch (Exception e) {
             LOG.warning("S3 access failed for " + userId + ": " + e.getMessage());
-            return env;
+            return null;
         }
     }
 
@@ -214,21 +210,23 @@ public class SessionManager {
         return mounts;
     }
 
-    /** Whether every dataset the user attached is one the user may read now, read the way it was attached. */
-    private boolean mayReadChosen(ActorRef<SessionManager> self, String userId, ChosenDatasets chosen) {
+    /**
+     * The datasets of the kinds the user attached, as the user may read them now. Null when they cannot be read while
+     * the user attached some, so the session is refused instead of starting without them.
+     */
+    private ChosenDatasets chooseDatasets(ActorRef<SessionManager> self, String userId, List<MountSpec> requested) {
+        boolean attached = requested != null && requested.stream().anyMatch(m ->
+            ChosenDatasets.LOCAL.equals(m.storageType()) || ChosenDatasets.S3.equals(m.storageType()));
+        if (!attached) return ChosenDatasets.split(requested, List.of(), false);
         ActorRef<DatasetService> datasets = self.system().getActor(DatasetService.ACTOR_NAME);
-        if (datasets == null) return false;
+        if (datasets == null) return null;
         try {
-            java.util.Set<String> files = new java.util.HashSet<>();
-            java.util.Set<String> s3 = new java.util.HashSet<>();
-            for (DatasetService.Readable r : datasets.ask(d -> d.readableDatasets(userId)).get()) {
-                (r.s3() ? s3 : files).add(r.name());
-            }
-            boolean grantedFiles = !chosen.grantedFiles() || datasets.ask(d -> d.hasGrantedFiles(userId)).get();
-            return files.containsAll(chosen.files()) && s3.containsAll(chosen.s3()) && grantedFiles;
+            List<DatasetService.Readable> readable = datasets.ask(d -> d.readableDatasets(userId)).get();
+            boolean grantedFiles = datasets.ask(d -> d.hasGrantedFiles(userId)).get();
+            return ChosenDatasets.split(requested, readable, grantedFiles);
         } catch (Exception e) {
-            LOG.warning("Datasets of " + userId + " could not be checked: " + e.getMessage());
-            return false;
+            LOG.warning("Datasets of " + userId + " could not be read: " + e.getMessage());
+            return null;
         }
     }
 
@@ -331,13 +329,14 @@ public class SessionManager {
                 + (refusal == LaunchRefusal.USER_LIMIT ? " (" + maxSessionsPerUser + " per user)" : " (" + maxSessions + " in all)"));
             return null;
         }
-        // The datasets the user attached, apart from the storage; each must be one the user may read now
-        ChosenDatasets chosen = ChosenDatasets.split(additionalMounts);
-        additionalMounts = chosen.storage();
-        if (chosen.any() && !mayReadChosen(self, userId, chosen)) {
-            LOG.warning("Rejected " + toolName + " for " + userId + ": an attached dataset is not one the user may read");
+        // The datasets the user attached, apart from the storage: every dataset of the attached kinds that the user may
+        // read now
+        ChosenDatasets chosen = chooseDatasets(self, userId, additionalMounts);
+        if (chosen == null) {
+            LOG.warning("Rejected " + toolName + " for " + userId + ": the datasets the user may read could not be read");
             return null;
         }
+        additionalMounts = chosen.storage();
 
         ToolPlugin plugin = plugins.get(toolName);
         Map<String, String> toolConfigEnv = Collections.emptyMap();
@@ -426,10 +425,24 @@ public class SessionManager {
             return null;
         }
         mounts.addAll(datasetMounts);
+        com.scivicslab.k8spups.passport.S3Access.Grant s3 = s3Grant(self, userId, chosen.s3());
+        Map<String, String> env = withSharedSettings(self, toolName, toolConfigEnv);
+        if (s3 != null) {
+            env = new HashMap<>(env);
+            env.putAll(s3.env());
+        }
         SessionInfo info = new SessionInfo(sessionId, userId, plugin, allowedProjects, labId, resourceProfile,
             userParams != null ? userParams : Collections.emptyMap(), storagePref, storageType,
-            mounts,
-            withS3Access(self, userId, withSharedSettings(self, toolName, toolConfigEnv), chosen.s3()));
+            mounts, env);
+        if (s3 != null) {
+            try {
+                k8sClient.writeS3Credentials(info.podName(), sessionId, s3.credentialsJson());
+                s3Expiry.put(info.podName(), s3.expiration());
+            } catch (Exception e) {
+                LOG.warning("Rejected " + toolName + " for " + userId + ": the S3 credentials could not be stored: " + e.getMessage());
+                return null;
+            }
+        }
         Session actor = new Session(info, k8sClient, podUsage(self));
 
         // Create as child actor
@@ -720,6 +733,44 @@ public class SessionManager {
             LOG.info("Stopping session " + entry.getKey() + ": its user lost access to a mounted dataset");
             destroySession(self, entry.getKey(), "access to a mounted dataset was taken away or expired");
         }
+    }
+
+    /** When the S3 credentials of each session's Pod expire, as last written; a Pod not listed is renewed at once. */
+    private final Map<String, java.time.Instant> s3Expiry = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Credentials are renewed this long before they expire: the kubelet needs a minute or two to update the Pod. */
+    static final java.time.Duration S3_RENEW_BEFORE = java.time.Duration.ofMinutes(6);
+
+    /**
+     * Renews the S3 credentials of the running sessions that read datasets of the S3 server, before they expire, for
+     * the datasets the session holds that the user's Visas still grant. A session whose user lost one of them is
+     * stopped by {@link #enforceDatasetAccess}; nothing here stops a session. Called periodically.
+     */
+    public void renewS3Credentials(ActorRef<SessionManager> self) {
+        java.time.Instant now = java.time.Instant.now();
+        Set<String> live = new HashSet<>();
+        for (ActorRef<Session> ref : sessions(self)) {
+            try {
+                SessionInfo info = ref.ask(Session::getInfo).get();
+                String names = info.toolConfigEnv() == null ? null
+                    : info.toolConfigEnv().get(com.scivicslab.k8spups.passport.S3Access.DATASETS_ENV);
+                if (names == null || names.isBlank()) continue;
+                live.add(info.podName());
+                if (!S3Renewal.due(s3Expiry.get(info.podName()), now, S3_RENEW_BEFORE)) continue;
+                Set<String> datasets = new java.util.TreeSet<>(List.of(names.split(",")));
+                com.scivicslab.k8spups.passport.S3Access.Grant grant = s3Grant(self, info.userId(), datasets);
+                if (grant == null) {
+                    LOG.warning("The S3 credentials of " + info.podName() + " could not be renewed");
+                    continue;
+                }
+                k8sClient.writeS3Credentials(info.podName(), info.sessionId(), grant.credentialsJson());
+                s3Expiry.put(info.podName(), grant.expiration());
+                LOG.info("S3 credentials of " + info.podName() + " renewed until " + grant.expiration());
+            } catch (Exception e) {
+                LOG.warning("S3 credential renewal failed for " + ref.getName() + ": " + e.getMessage());
+            }
+        }
+        s3Expiry.keySet().retainAll(live);
     }
 
     /**

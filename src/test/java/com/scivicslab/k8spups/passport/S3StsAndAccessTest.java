@@ -70,10 +70,17 @@ class S3StsAndAccessTest {
         List<String> forms = new ArrayList<>();
         S3Sts sts = new S3Sts("http://minio:9000/", (url, form) -> { forms.add(form); return RESPONSE; });
         S3Access access = new S3Access(tokens, sts, "http://minio:9000", "jga", "jga-read-", 900);
-        Map<String, String> env = access.env("e2eadmin", Set.of("JGAS000002", "JGAS000001"));
-        assertEquals("AKIA-TEST", env.get("AWS_ACCESS_KEY_ID"));
-        assertEquals("secret-test", env.get("AWS_SECRET_ACCESS_KEY"));
-        assertEquals("session-test", env.get("AWS_SESSION_TOKEN"));
+        S3Access.Grant grant = access.grant("e2eadmin", Set.of("JGAS000002", "JGAS000001")).orElseThrow();
+        // The credentials go into the Secret in the JSON of credential_process, not into the environment
+        assertEquals("{\"Version\":1,\"AccessKeyId\":\"AKIA-TEST\",\"SecretAccessKey\":\"secret-test\","
+            + "\"SessionToken\":\"session-test\",\"Expiration\":\"2026-10-26T11:26:34Z\"}", grant.credentialsJson());
+        assertEquals(java.time.Instant.parse("2026-10-26T11:26:34Z"), grant.expiration());
+        Map<String, String> env = grant.env();
+        assertFalse(env.containsKey("AWS_ACCESS_KEY_ID"));
+        assertFalse(env.containsKey("AWS_SECRET_ACCESS_KEY"));
+        assertFalse(env.containsKey("AWS_SESSION_TOKEN"));
+        assertEquals("/etc/k8s-pups-s3/config", env.get("AWS_CONFIG_FILE"));
+        assertTrue(S3Access.awsConfig().contains("credential_process = cat /etc/k8s-pups-s3/credentials.json"));
         // rclone reads the same credentials through its remote named datasets
         assertEquals("s3", env.get("RCLONE_CONFIG_DATASETS_TYPE"));
         assertEquals("true", env.get("RCLONE_CONFIG_DATASETS_ENV_AUTH"));
@@ -90,15 +97,13 @@ class S3StsAndAccessTest {
     @Test
     void withoutADatasetNoStsCallIsMade() {
         S3Sts sts = new S3Sts("http://minio:9000/", (url, form) -> { throw new AssertionError("no call expected"); });
-        assertTrue(new S3Access(tokens, sts, "http://minio:9000", "jga", "jga-read-", 900).env("u", Set.of()).isEmpty());
+        assertTrue(new S3Access(tokens, sts, "http://minio:9000", "jga", "jga-read-", 900).grant("u", Set.of()).isEmpty());
     }
 
     @Test
     void whenTheStsCallFailsThePodGetsNoCredentials() {
         S3Sts sts = new S3Sts("http://minio:9000/", (url, form) -> { throw new java.io.IOException("refused"); });
-        Map<String, String> env = new S3Access(tokens, sts, "http://minio:9000", "jga", "jga-read-", 900).env("u", Set.of("JGAS000001"));
-        assertFalse(env.containsKey("AWS_ACCESS_KEY_ID"));
-        assertTrue(env.isEmpty());
+        assertTrue(new S3Access(tokens, sts, "http://minio:9000", "jga", "jga-read-", 900).grant("u", Set.of("JGAS000001")).isEmpty());
     }
 
     @Test
@@ -111,9 +116,8 @@ class S3StsAndAccessTest {
             return RESPONSE;
         });
         S3Access access = new S3Access(tokens, sts, "http://minio:9000", "jga", "jga-read-", 900);
-        Map<String, String> env = access.env("u", Set.of("JGAS000002", "JGAS000099"));
-        assertEquals("JGAS000002", env.get(S3Access.DATASETS_ENV));
-        assertEquals("AKIA-TEST", env.get("AWS_ACCESS_KEY_ID"));
-        assertTrue(access.env("u", Set.of("JGAS000099")).isEmpty());
+        S3Access.Grant grant = access.grant("u", Set.of("JGAS000002", "JGAS000099")).orElseThrow();
+        assertEquals("JGAS000002", grant.env().get(S3Access.DATASETS_ENV));
+        assertTrue(access.grant("u", Set.of("JGAS000099")).isEmpty());
     }
 }

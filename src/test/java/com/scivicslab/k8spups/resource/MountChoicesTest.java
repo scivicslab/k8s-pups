@@ -46,25 +46,35 @@ class MountChoicesTest {
     }
 
     @Test
-    void datasetsAreChoicesLikeGroupStorage() {
+    void theDatasetsAreTwoChoicesTheLocalOnesAndThoseOfS3() {
         var c = MountChoices.of(STORAGE, Map.of("lab1", "ro"),
-            List.of(new MountChoices.Dataset("JGAD000003", false), new MountChoices.Dataset("JGAS000001", true)), true, "jga");
-        assertEquals(List.of("posix", "group:lab1", "dataset:JGAD000003", "s3:JGAS000001", "dataset-files"),
+            List.of(new MountChoices.Dataset("JGAD000003", false), new MountChoices.Dataset("JGAS000001", true)), false);
+        assertEquals(List.of("posix", "group:lab1", "datasets-local", "datasets-S3"),
             c.stream().map(MountChoices.Choice::value).toList());
-        assertEquals("/datasets/JGAD000003", c.get(2).path());
-        assertEquals("jga/JGAS000001/", c.get(3).path());
-        assertTrue(c.get(3).s3());
-        assertEquals("/home/pod-user/works/datasets/JGAD000003", MountChoices.pathOf("dataset:JGAD000003", "/home/pod-user/works"));
-        assertEquals("/home/pod-user/works/datasets/granted-files", MountChoices.pathOf("dataset-files", "/home/pod-user/works"));
+        assertEquals("/datasets-local", c.get(2).path());
+        assertEquals("/datasets-S3", c.get(3).path());
+        assertEquals("/home/pod-user/works/datasets-local", MountChoices.pathOf("datasets-local", "/home/pod-user/works"));
+        assertEquals("/home/pod-user/works/datasets-S3", MountChoices.pathOf("datasets-S3", "/home/pod-user/works"));
     }
 
     @Test
-    void aRememberedDatasetIsKeptWhileTheUserMayReadItAndCountedWhenNot() {
-        String json = MountChoices.toJson("posix", List.of(Map.of("value", "dataset:JGAD000003"), Map.of("value", "s3:JGAS000009")));
-        var current = MountChoices.of(STORAGE, Map.of(), List.of(new MountChoices.Dataset("JGAD000003", false)), false, "jga");
+    void aKindOfDatasetsIsOfferedOnlyWhenThereIsSomethingToAttach() {
+        assertEquals(List.of("posix", "datasets-local"), MountChoices.of(STORAGE, Map.of(), List.of(), true)
+            .stream().map(MountChoices.Choice::value).toList());
+        assertEquals(List.of("posix", "datasets-S3"), MountChoices.of(STORAGE, Map.of(),
+            List.of(new MountChoices.Dataset("JGAS000001", true)), false).stream().map(MountChoices.Choice::value).toList());
+        assertEquals(List.of("posix"), MountChoices.of(STORAGE, Map.of(), List.of(), false)
+            .stream().map(MountChoices.Choice::value).toList());
+    }
+
+    @Test
+    void aRememberedChoiceOfDatasetsIsKeptWhileOfferedAndCountedWhenNot() {
+        String json = MountChoices.toJson("posix", List.of(Map.of("value", "datasets-local"), Map.of("value", "datasets-S3"),
+            Map.of("value", "dataset:JGAD000003")));
+        var current = MountChoices.of(STORAGE, Map.of(), List.of(new MountChoices.Dataset("JGAD000003", false)), false);
         var r = MountChoices.remembered(json, current, STORAGE.keySet());
-        assertEquals(List.of(Map.of("value", "dataset:JGAD000003")), r.mounts());
-        assertEquals(1, r.dropped());
+        assertEquals(List.of(Map.of("value", "datasets-local")), r.mounts());
+        assertEquals(2, r.dropped());
     }
 
     @Test

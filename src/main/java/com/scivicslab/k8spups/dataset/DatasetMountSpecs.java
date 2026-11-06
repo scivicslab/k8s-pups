@@ -7,11 +7,11 @@ import com.scivicslab.k8spups.k8s.K8sApiClient;
 import com.scivicslab.k8spups.k8s.MountSpec;
 
 /**
- * Where the datasets that a user may read are mounted in a tool Pod. The controller mounts all of them at the start of
- * every tool, read-only; the user does not choose them. Each dataset is mounted at {@code <directory>/<dataset name>},
- * where the directory is {@code datasets} under the directory that the tool shows ({@code extraMountsUnder}: its home,
- * or {@code /srv} for File Browser), or {@code /datasets} for a tool that shows none. The files granted one by one
- * are mounted at {@code <directory>/granted-files}.
+ * Where the local datasets (those read as files) are mounted in a tool Pod when the user attached them, read-only.
+ * Each dataset is mounted at {@code <directory>/<dataset name>}, where the directory is {@code datasets-local} under
+ * the directory that the tool shows ({@code extraMountsUnder}: its home, or {@code /srv} for File Browser), or
+ * {@code /datasets-local} for a tool that shows none. The files granted one by one are mounted at
+ * {@code <directory>/granted-files}.
  */
 public final class DatasetMountSpecs {
 
@@ -23,7 +23,13 @@ public final class DatasetMountSpecs {
     /** The directory of the datasets of a tool that shows {@code mountsUnder} (null = it shows none). */
     public static String directory(String mountsUnder) {
         String base = mountsUnder == null ? "" : mountsUnder.replaceAll("/+$", "");
-        return base + "/datasets";
+        return base + "/datasets-local";
+    }
+
+    /** The directory where a tool that shows {@code mountsUnder} (null = none) sees the datasets of the S3 server. */
+    public static String s3Directory(String mountsUnder) {
+        String base = mountsUnder == null ? "" : mountsUnder.replaceAll("/+$", "");
+        return base + "/datasets-S3";
     }
 
     /**

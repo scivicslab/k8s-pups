@@ -989,8 +989,9 @@ public class DashboardResource {
     }
 
     /**
-     * What the user can attach at launch: own allocated storage, group storage, the datasets the user may read (from the
-     * catalog or a Visa) and the files granted one by one. A dataset is attached only when chosen.
+     * What the user can attach at launch: own allocated storage, group storage, and the datasets the user may read (from
+     * the catalog or a Visa) as two choices, the local ones (with the files granted one by one) and those of the S3
+     * server. Datasets are attached only when chosen.
      */
     private List<MountChoices.Choice> mountChoices(String userId, List<String> allocatedTypes) {
         Map<String, String> groups = Map.of();
@@ -1001,7 +1002,6 @@ public class DashboardResource {
         }
         List<MountChoices.Dataset> datasets = new ArrayList<>();
         boolean grantedFiles = false;
-        String bucket = "";
         try {
             ActorRef<com.scivicslab.k8spups.dataset.DatasetService> ds =
                 actorSystem.getSessionManager().system().getActor(com.scivicslab.k8spups.dataset.DatasetService.ACTOR_NAME);
@@ -1011,12 +1011,11 @@ public class DashboardResource {
                 ds.ask(d -> { d.supplyVisas(userId, visas); return null; }).get();
                 for (var r : ds.ask(d -> d.readableDatasets(userId)).get()) datasets.add(new MountChoices.Dataset(r.name(), r.s3()));
                 grantedFiles = ds.ask(d -> d.hasGrantedFiles(userId)).get();
-                bucket = ds.ask(d -> d.s3Access().map(com.scivicslab.k8spups.passport.S3Access::bucket).orElse("")).get();
             }
         } catch (Exception e) {
             LOG.warning("Datasets of " + userId + " could not be read: " + e.getMessage());
         }
-        return MountChoices.of(StorageTypes.names(allocatedTypes), groups, datasets, grantedFiles, bucket);
+        return MountChoices.of(StorageTypes.names(allocatedTypes), groups, datasets, grantedFiles);
     }
 
     private List<MountSpec> resolveAdditionalMounts(List<String> types, String under) {
@@ -1025,12 +1024,10 @@ public class DashboardResource {
             String path = MountChoices.pathOf(type, under);
             // The choice is checked when the session is created: own storage against the allocations, a group's
             // storage against the memberships, a dataset against what the user may read now
-            if (type.startsWith(MountChoices.DATASET)) {
-                mounts.add(new MountSpec(com.scivicslab.k8spups.actor.ChosenDatasets.DATASET, path, type.substring(MountChoices.DATASET.length())));
-            } else if (type.startsWith(MountChoices.S3)) {
-                mounts.add(new MountSpec(com.scivicslab.k8spups.actor.ChosenDatasets.S3_DATASET, "", type.substring(MountChoices.S3.length())));
-            } else if (type.equals(MountChoices.GRANTED_FILES)) {
-                mounts.add(new MountSpec(com.scivicslab.k8spups.actor.ChosenDatasets.GRANTED_FILES, path, null));
+            if (type.equals(MountChoices.DATASETS_LOCAL)) {
+                mounts.add(new MountSpec(com.scivicslab.k8spups.actor.ChosenDatasets.LOCAL, path, null));
+            } else if (type.equals(MountChoices.DATASETS_S3)) {
+                mounts.add(new MountSpec(com.scivicslab.k8spups.actor.ChosenDatasets.S3, path, null));
             } else if (type.startsWith(MountChoices.GROUP)) {
                 mounts.add(new MountSpec(K8sApiClient.GROUP_STORAGE_TYPE, path, type.substring(MountChoices.GROUP.length())));
             } else {

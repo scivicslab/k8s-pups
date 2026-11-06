@@ -1,9 +1,15 @@
-# Data the administrator has placed on the mounted storage, offered in the upload dialog (read-only).
+# Data the user attached at launch, offered in the upload dialog (read-only).
 - type: posix
-  id: datasets
-  label: Datasets
-  doc: Datasets that the administrator has approved for this site
-  root: /datasets
+  id: datasets_local
+  label: datasets-local
+  doc: Datasets you may read, attached as datasets-local
+  root: /datasets-local
+  writable: false
+- type: posix
+  id: datasets_s3
+  label: datasets-S3
+  doc: Datasets of the S3 server you may read, attached as datasets-S3
+  root: /datasets-S3
   writable: false
 - type: posix
   id: groups

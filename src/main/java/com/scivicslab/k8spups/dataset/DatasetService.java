@@ -278,12 +278,15 @@ public class DatasetService {
      * temporary credentials of the S3 server and the list of datasets they were made for. Empty when the S3 access is
      * off or no Visa grants a dataset.
      */
-    /** Credentials of the S3 server for the datasets the user attached, among those the user's Visas grant. */
-    public Map<String, String> s3Env(String user, Set<String> chosen) {
-        if (s3.isEmpty() || chosen.isEmpty()) return Map.of();
+    /**
+     * Credentials of the S3 server for the datasets the user attached, among those the user's Visas grant now. Asked
+     * at launch and again before the credentials of a running session expire.
+     */
+    public Optional<S3Access.Grant> s3Grant(String user, Set<String> chosen) {
+        if (s3.isEmpty() || chosen.isEmpty()) return Optional.empty();
         Set<String> allowed = new java.util.TreeSet<>(chosen);
         allowed.retainAll(visaDatasets(user));
-        return s3.get().env(user, allowed);
+        return s3.get().grant(user, allowed);
     }
 
     /** The two lists without duplicates, in order: the first list, then the new names of the second. */

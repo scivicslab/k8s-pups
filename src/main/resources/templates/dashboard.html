@@ -640,7 +640,7 @@
         var form = btn.closest('form');
         function showWhere() {
             var c = choiceOf(typeSelect.value);
-            typeSelect.title = !c ? '' : c.s3 ? 'Read from S3: ' + c.path : 'Mounted at ' + mountPathOf(form, c);
+            typeSelect.title = !c ? '' : 'Mounted at ' + mountPathOf(form, c);
         }
         showWhere();
         typeSelect.onchange = showWhere;

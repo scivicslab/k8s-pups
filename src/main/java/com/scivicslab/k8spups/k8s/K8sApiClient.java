@@ -87,6 +87,8 @@ public class K8sApiClient {
     private final Long toolPodGid;
     /** Image of the short-lived script Pods (the dataset views, the NFS directories); a cluster without internet names its own registry. */
     private final String scriptPodImage;
+    /** The image of the sidecar that mounts the S3 datasets of a session (see addS3Mount); blank = no sidecar. */
+    private final String s3MountImage;
     private final String datasetOriginalDir;
     private final String datasetViewDir;
     private final String datasetMountPath;
@@ -154,6 +156,7 @@ public class K8sApiClient {
         ToolPodIds.resolve(1000L, toolPodUid, toolPodGid);   // refuse to start when only one of the two is set
         this.scriptPodImage = cfg.getOptionalValue("k8spups.script-pod-image", String.class)
             .filter(v -> !v.isBlank()).orElse("busybox:1.36");
+        this.s3MountImage = cfg.getOptionalValue("k8spups.s3-mount.image", String.class).orElse("");
         this.datasetOriginalDir = cfg.getOptionalValue("k8spups.dataset.original-dir", String.class).orElse("original");
         this.datasetViewDir = cfg.getOptionalValue("k8spups.dataset.view-dir", String.class).orElse("view");
         this.datasetMountPath = cfg.getOptionalValue("k8spups.dataset.mount-path", String.class).orElse("/datasets");
@@ -219,6 +222,7 @@ public class K8sApiClient {
             Pod pod = buildPodSpec(info);
             Pod created = client.pods().inNamespace(userPodsNamespace).resource(pod).create();
             LOG.info("Pod created: " + created.getMetadata().getName());
+            ownS3Credentials(created);
             return created;
         });
     }
@@ -226,8 +230,55 @@ public class K8sApiClient {
     public CompletableFuture<Void> deletePod(String podName) {
         return CompletableFuture.runAsync(() -> {
             client.pods().inNamespace(userPodsNamespace).withName(podName).delete();
+            client.secrets().inNamespace(userPodsNamespace).withName(s3SecretName(podName)).delete();
             LOG.info("Pod deleted: " + podName);
         });
+    }
+
+    /** The Secret that holds the S3 credentials of the session whose Pod is {@code podName}. */
+    public static String s3SecretName(String podName) {
+        return podName + "-s3";
+    }
+
+    /**
+     * Writes the S3 credentials of a session into its Secret, at launch before the Pod is created and again before
+     * they expire. The containers read the file anew through credential_process; the kubelet brings a changed Secret
+     * into the running Pod within a minute or two.
+     */
+    public void writeS3Credentials(String podName, String sessionId, String credentialsJson) {
+        Map<String, String> data = Map.of(
+            com.scivicslab.k8spups.passport.S3Access.CONFIG_KEY, base64(com.scivicslab.k8spups.passport.S3Access.awsConfig()),
+            com.scivicslab.k8spups.passport.S3Access.CREDENTIALS_KEY, base64(credentialsJson));
+        String name = s3SecretName(podName);
+        Secret existing = client.secrets().inNamespace(userPodsNamespace).withName(name).get();
+        if (existing != null) {
+            existing.setData(new HashMap<>(data));
+            client.secrets().inNamespace(userPodsNamespace).resource(existing).update();
+        } else {
+            client.secrets().inNamespace(userPodsNamespace).resource(new SecretBuilder()
+                .withNewMetadata().withName(name).withNamespace(userPodsNamespace)
+                    .addToLabels("managed-by", "k8s-pups").addToLabels("session", sessionId).endMetadata()
+                .withType("Opaque").withData(data).build()).create();
+        }
+    }
+
+    /** Makes the Pod the owner of its credentials Secret, so that Kubernetes deletes the Secret with the Pod. */
+    private void ownS3Credentials(Pod pod) {
+        String name = s3SecretName(pod.getMetadata().getName());
+        try {
+            Secret secret = client.secrets().inNamespace(userPodsNamespace).withName(name).get();
+            if (secret == null) return;
+            secret.getMetadata().setOwnerReferences(List.of(new OwnerReferenceBuilder()
+                .withApiVersion("v1").withKind("Pod").withName(pod.getMetadata().getName())
+                .withUid(pod.getMetadata().getUid()).build()));
+            client.secrets().inNamespace(userPodsNamespace).resource(secret).update();
+        } catch (Exception e) {
+            LOG.warning("The S3 credentials of " + pod.getMetadata().getName() + " got no owner: " + e.getMessage());
+        }
+    }
+
+    private static String base64(String text) {
+        return Base64.getEncoder().encodeToString(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     /** Delete all pods with the given session label (used by orphan cleanup). */
@@ -235,6 +286,7 @@ public class K8sApiClient {
         client.pods().inNamespace(userPodsNamespace)
             .withLabel("session", sessionId)
             .delete();
+        client.secrets().inNamespace(userPodsNamespace).withLabel("session", sessionId).delete();
         LOG.info("Orphaned pod(s) deleted for session: " + sessionId);
     }
 
@@ -1628,7 +1680,7 @@ public class K8sApiClient {
         String prefix = home.endsWith("/") ? home : home + "/";
         // The default parents of the launch form are always cleaned: a session without extra mounts must not show the mount
         // points of the last one.
-        java.util.TreeSet<String> parents = new java.util.TreeSet<>(java.util.List.of("datasets", "groups"));
+        java.util.TreeSet<String> parents = new java.util.TreeSet<>(java.util.List.of("datasets", "datasets-local", "datasets-S3", "groups"));
         java.util.TreeSet<String> dirs = new java.util.TreeSet<>();
         for (String path : mountPaths) {
             if (!path.startsWith(prefix)) continue;
@@ -1863,6 +1915,19 @@ public class K8sApiClient {
         }
 
 
+        // The S3 datasets of the session (see addS3Mount): the tool sees them read-only at datasets-S3 of its folder.
+        String s3Path = s3MountPath(info, plugin);
+        if (s3Path != null) {
+            volumes.add(new VolumeBuilder().withName(S3_VOLUME)
+                .withNewEmptyDir().withSizeLimit(new Quantity("1Mi")).endEmptyDir().build());
+            volumes.add(new VolumeBuilder().withName(S3_CREDENTIALS_VOLUME)
+                .withNewSecret().withSecretName(s3SecretName(info.podName())).endSecret().build());
+            mounts.add(new VolumeMountBuilder().withName(S3_VOLUME).withMountPath(s3Path)
+                .withMountPropagation("HostToContainer").withReadOnly(true).build());
+            mounts.add(new VolumeMountBuilder().withName(S3_CREDENTIALS_VOLUME)
+                .withMountPath(com.scivicslab.k8spups.passport.S3Access.CREDENTIALS_DIR).withReadOnly(true).build());
+        }
+
         // Init container: seed PVC with /etc/skel if empty.
         // Runs as the pod-level UID (same as the main container).
         // NFS directory ownership is set to the tool Pod IDs at PVC creation time by
@@ -1878,8 +1943,9 @@ public class K8sApiClient {
             // A tool with a data directory of its own (userDataSubPath) needs that directory, not the skeleton of a home.
             if (plugin.userDataSubPath() != null) seedCmd = "mkdir -p '/mnt/pvc/" + plugin.userDataSubPath() + "'";
             else if (plugin.extraMountsUnder() != null) {
-                java.util.List<String> extraPaths = info.additionalMounts() == null ? java.util.List.of()
-                    : info.additionalMounts().stream().map(MountSpec::mountPath).toList();
+                java.util.List<String> extraPaths = new java.util.ArrayList<>(info.additionalMounts() == null ? java.util.List.of()
+                    : info.additionalMounts().stream().map(MountSpec::mountPath).toList());
+                if (s3Path != null) extraPaths.add(s3Path);
                 seedCmd = seedCmd + "; " + mountPointPrep(plugin.userDataMountPath(), extraPaths);
             }
             initContainers.add(new io.fabric8.kubernetes.api.model.ContainerBuilder()
@@ -1965,8 +2031,65 @@ public class K8sApiClient {
         if (!initContainers.isEmpty()) {
             podBuilder.editSpec().withInitContainers(initContainers).endSpec();
         }
+        if (s3Path != null) {
+            podBuilder.editSpec().addToContainers(s3MountContainer(info)).endSpec();
+        }
 
         return podBuilder.build();
+    }
+
+    static final String S3_VOLUME = "s3-datasets";
+    static final String S3_CREDENTIALS_VOLUME = "s3-credentials";
+    /** Where the sidecar mounts the S3 datasets, one directory per dataset. */
+    static final String S3_MOUNT_ROOT = "/mnt/s3";
+
+    /**
+     * Where the tool sees the S3 datasets of the session: {@code datasets-S3} of the folder it shows. Null when the
+     * session has no S3 dataset or no sidecar image is configured (the tool then reads them with the AWS CLI or rclone).
+     */
+    String s3MountPath(SessionInfo info, ToolPlugin plugin) {
+        String datasets = info.toolConfigEnv() == null ? null
+            : info.toolConfigEnv().get(com.scivicslab.k8spups.passport.S3Access.DATASETS_ENV);
+        if (datasets == null || datasets.isBlank() || s3MountImage.isBlank()) return null;
+        return com.scivicslab.k8spups.dataset.DatasetMountSpecs.s3Directory(plugin.extraMountsUnder());
+    }
+
+    /**
+     * The sidecar that mounts the S3 datasets with FUSE, read-only, into the directory it shares with the tool; the
+     * mounts reach the tool through mount propagation. It is the only container of the Pod with the rights FUSE needs
+     * (privileged, which Bidirectional propagation requires); the tool container keeps none. It unmounts on SIGTERM,
+     * since a FUSE mount left on the node keeps the kubelet from removing the Pod.
+     */
+    private io.fabric8.kubernetes.api.model.Container s3MountContainer(SessionInfo info) {
+        List<EnvVar> env = new ArrayList<>();
+        info.toolConfigEnv().forEach((k, v) -> {
+            if (k.startsWith("K8SPUPS_S3_") || k.startsWith("RCLONE_CONFIG_DATASETS_") || k.equals("AWS_CONFIG_FILE")
+                    || k.equals("AWS_ENDPOINT_URL") || k.equals("AWS_DEFAULT_REGION")) {
+                env.add(new EnvVarBuilder().withName(k).withValue(v).build());
+            }
+        });
+        env.add(new EnvVarBuilder().withName("MOUNT_ROOT").withValue(S3_MOUNT_ROOT).build());
+        return new io.fabric8.kubernetes.api.model.ContainerBuilder()
+            .withName("s3-mount")
+            .withImage(s3MountImage)
+            .withEnv(env)
+            .withVolumeMounts(
+                new VolumeMountBuilder().withName(S3_VOLUME).withMountPath(S3_MOUNT_ROOT)
+                    .withMountPropagation("Bidirectional").build(),
+                new VolumeMountBuilder().withName(S3_CREDENTIALS_VOLUME)
+                    .withMountPath(com.scivicslab.k8spups.passport.S3Access.CREDENTIALS_DIR).withReadOnly(true).build())
+            .withNewSecurityContext()
+                .withPrivileged(true)
+                .withRunAsUser(0L)
+                .withRunAsNonRoot(false)
+            .endSecurityContext()
+            .withNewResources()
+                .addToRequests("cpu", new Quantity("50m"))
+                .addToRequests("memory", new Quantity("64Mi"))
+                .addToLimits("cpu", new Quantity("1"))
+                .addToLimits("memory", new Quantity("512Mi"))
+            .endResources()
+            .build();
     }
 
     private Affinity buildNodeAffinity() {

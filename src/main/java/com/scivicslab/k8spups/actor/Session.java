@@ -376,6 +376,11 @@ public class Session {
         return info.userId();
     }
 
+    /** What the session was started with. */
+    public SessionInfo getInfo() {
+        return info;
+    }
+
     /** Set a user-provided memo for this session. Persists to Pod annotation. */
     public void setMemo(String text) {
         this.memo = text != null ? text : "";

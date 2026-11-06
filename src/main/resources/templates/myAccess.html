@@ -57,11 +57,11 @@
         {#for d in datasets}
         <tr>
             <td>{d.name}</td>
-            <td>{#if d.s3}S3 bucket <code>{s3Bucket}</code>, prefix <code>{d.name}/</code>; the tool gets credentials for it{#else}files in <code>datasets/{d.name}</code> of the tool's folder{/if}</td>
+            <td>{#if d.s3}files in <code>datasets-S3/{d.name}</code> of the tool's folder, read from the S3 bucket <code>{s3Bucket}</code>, when you attach datasets-S3{#else}files in <code>datasets-local/{d.name}</code> of the tool's folder, when you attach datasets-local{/if}</td>
         </tr>
         {/for}
         {#if grantedFiles}
-        <tr><td>Files granted to you</td><td>files in <code>datasets/granted-files</code> of the tool's folder</td></tr>
+        <tr><td>Files granted to you</td><td>files in <code>datasets-local/granted-files</code> of the tool's folder, when you attach datasets-local</td></tr>
         {/if}
     </table>
     {/if}
