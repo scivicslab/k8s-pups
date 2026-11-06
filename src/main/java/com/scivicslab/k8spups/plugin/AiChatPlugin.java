@@ -92,6 +92,12 @@ public class AiChatPlugin implements ToolPlugin {
     }
 
     @Override
+    public String extraMountsUnder() {
+        // Its own storage is this directory: the attached datasets and group storage are put under it, as for the other tools.
+        return userDataMountPath();
+    }
+
+    @Override
     public boolean readOnlyRootFilesystem() {
         return false;
     }

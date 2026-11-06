@@ -95,6 +95,12 @@ public class ChatUiAuditTrailLocalLlmPlugin implements ToolPlugin {
     }
 
     @Override
+    public String extraMountsUnder() {
+        // The agent works in this directory: the attached datasets and group storage are found under it.
+        return userDataMountPath();
+    }
+
+    @Override
     public boolean readOnlyRootFilesystem() {
         return false;
     }

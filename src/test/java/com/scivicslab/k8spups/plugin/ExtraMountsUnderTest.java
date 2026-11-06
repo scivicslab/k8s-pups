@@ -18,6 +18,8 @@ class ExtraMountsUnderTest {
         assertEquals("/home/user", new GuacamolePlugin().extraMountsUnder());
         assertEquals("/srv", new FileBrowserPlugin().extraMountsUnder());
         assertEquals("/home/pod-user/works", new CodeServerPlugin().extraMountsUnder(), "the editor opens the workspace");
+        assertEquals("/home/pod-user/works", new ChatUiAuditTrailLocalLlmPlugin().extraMountsUnder(), "the agent works in its works directory");
+        assertEquals("/home/pod-user/works", new AiChatPlugin().extraMountsUnder(), "AI Chat's own storage");
     }
 
     @Test
