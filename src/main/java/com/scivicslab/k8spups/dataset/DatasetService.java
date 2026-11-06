@@ -68,6 +68,25 @@ public class DatasetService {
         passport.ifPresent(p -> p.supply(user, visas));
     }
 
+    /** A dataset a user may read, and whether it is read from S3 (else it is mounted as files). */
+    public record Readable(String name, boolean s3) {
+    }
+
+    /**
+     * The datasets the user may read now and how: the ones in the catalog are mounted as files under
+     * {@code datasets/} of the tool's folder; the others that Visas grant are read from the S3 bucket, when there is
+     * one. Both are given to every tool the user starts, without being chosen.
+     */
+    public List<Readable> readableDatasets(String user) {
+        List<String> files = activeDatasets(user);
+        List<Readable> out = new java.util.ArrayList<>();
+        files.forEach(d -> out.add(new Readable(d, false)));
+        if (s3.isPresent()) {
+            visaDatasets(user).stream().filter(d -> !files.contains(d)).sorted().forEach(d -> out.add(new Readable(d, true)));
+        }
+        return out;
+    }
+
     /** The S3 access, for the endpoints that publish the keys of its tokens. */
     public Optional<S3Access> s3Access() {
         return s3;

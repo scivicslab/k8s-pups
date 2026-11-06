@@ -322,6 +322,23 @@ public class DashboardResource {
         } catch (Exception e) {
             LOG.warning("Could not read the session limit of " + userId + ": " + e.getMessage());
         }
+        // The datasets the user may read: each tool gets them all at launch, so the page says which and where they are
+        List<com.scivicslab.k8spups.dataset.DatasetService.Readable> readable = List.of();
+        String s3Bucket = "";
+        try {
+            ActorRef<com.scivicslab.k8spups.dataset.DatasetService> datasets =
+                sm.system().getActor(com.scivicslab.k8spups.dataset.DatasetService.ACTOR_NAME);
+            if (datasets != null) {
+                List<String> visas = currentVisas();
+                datasets.tell(d -> d.supplyVisas(userId, visas));
+                readable = datasets.ask(d -> d.readableDatasets(userId)).get();
+                s3Bucket = datasets.ask(d -> d.s3Access().map(com.scivicslab.k8spups.passport.S3Access::bucket).orElse("")).get();
+            }
+        } catch (Exception e) {
+            LOG.warning("Could not read the datasets of " + userId + ": " + e.getMessage());
+        }
+        data.put("readableDatasets", readable);
+        data.put("s3Bucket", s3Bucket);
         data.put("launchRefused", refusal != null);
         data.put("launchRefusedReason", refusal == SessionManager.LaunchRefusal.USER_LIMIT
             ? "You can have up to " + perUser + " tools open at a time. Stop one to launch another."

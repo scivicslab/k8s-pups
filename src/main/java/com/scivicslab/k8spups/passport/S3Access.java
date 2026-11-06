@@ -27,6 +27,11 @@ public final class S3Access {
     private final String policyPrefix;
     private final int durationSeconds;
 
+    /** The bucket the datasets are read from, each under its name. */
+    public String bucket() {
+        return bucket;
+    }
+
     public S3Access(S3Tokens tokens, S3Sts sts, String endpoint, String bucket, String policyPrefix, int durationSeconds) {
         this.tokens = tokens;
         this.sts = sts;
