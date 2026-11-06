@@ -65,6 +65,9 @@ public class DashboardResource {
     @Inject
     Template dashboard;
 
+    @Inject
+    Template myAccess;
+
     @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/pups")
     String basePath;
 
@@ -329,6 +332,84 @@ public class DashboardResource {
                 ? "The system has no room for another tool right now. Try again later." : "");
 
         return dashboard.data(data).render();
+    }
+
+    /** One Visa as the user's page shows it: what it grants, who gave it, and whether it was accepted and why. */
+    public record VisaRow(String where, String grants, String by, String source, String issuer, boolean accepted, String reason) {
+        static VisaRow of(String where, com.scivicslab.k8spups.passport.PassportGrants.Decision d) {
+            String grants = "", by = "", source = "", issuer = "";
+            String[] parts = d.visa().split(" \\| ");
+            if (parts.length > 0) grants = parts[0];
+            for (int i = 1; i < parts.length; i++) {
+                String p = parts[i];
+                if (p.startsWith("by ")) by = p.substring(3);
+                else if (p.startsWith("source ")) source = p.substring(7);
+                else if (p.startsWith("issuer ")) issuer = p.substring(7);
+            }
+            return new VisaRow(where, grants, by, source, issuer, d.accepted(), d.reason());
+        }
+    }
+
+    /** One storage the user has: own storage of a type, or a group's storage and the user's mode in it. */
+    public record StorageRow(String name, String detail) {
+    }
+
+    /**
+     * What the logged-in user may read and use: the Visas of the login and of the Visa issuer with the decision about
+     * each, the datasets they allow and how each is read, and the user's own and groups' storage. Only the user's own;
+     * nothing can be changed here.
+     */
+    @GET
+    @Path("/my-access")
+    @Authenticated
+    @Produces(MediaType.TEXT_HTML)
+    public String showMyAccess() {
+        String userId = getCurrentUsername();
+        Map<String, Object> data = new HashMap<>();
+        data.put("userId", userId);
+        List<VisaRow> visas = new ArrayList<>();
+        List<com.scivicslab.k8spups.dataset.DatasetService.Readable> readable = List.of();
+        boolean grantedFiles = false;
+        boolean passportOn = false;
+        String bucket = "";
+        try {
+            ActorRef<com.scivicslab.k8spups.dataset.DatasetService> ds =
+                actorSystem.getSessionManager().system().getActor(com.scivicslab.k8spups.dataset.DatasetService.ACTOR_NAME);
+            if (ds != null) {
+                List<String> loginVisas = currentVisas();
+                ds.ask(d -> { d.supplyVisas(userId, loginVisas); return null; }).get();
+                var login = ds.ask(d -> d.passportDiagnosis(userId)).get();
+                var issuer = ds.ask(d -> d.passportPreview(userId)).get();
+                passportOn = login.isPresent() || issuer.isPresent();
+                login.ifPresent(diag -> diag.decisions().forEach(dec -> visas.add(VisaRow.of(diag.how(), dec))));
+                if (issuer.isPresent() && (login.isEmpty() || !issuer.get().how().equals(login.get().how()))) {
+                    issuer.get().decisions().forEach(dec -> visas.add(VisaRow.of(issuer.get().how(), dec)));
+                }
+                readable = ds.ask(d -> d.readableDatasets(userId)).get();
+                grantedFiles = ds.ask(d -> d.hasGrantedFiles(userId)).get();
+                bucket = ds.ask(d -> d.s3Access().map(com.scivicslab.k8spups.passport.S3Access::bucket).orElse("")).get();
+            }
+        } catch (Exception e) {
+            LOG.warning("The access of " + userId + " could not be read: " + e.getMessage());
+        }
+        List<StorageRow> storage = new ArrayList<>();
+        try {
+            Map<String, String> own = actorSystem.getStorageAllocations().ask(a -> a.activeTypes(userId)).get();
+            Map<String, String> names = StorageTypes.names(new ArrayList<>(own.keySet()));
+            own.forEach((type, size) -> storage.add(new StorageRow(names.getOrDefault(type, type), "your own storage, " + size)));
+            Map<String, String> groups = actorSystem.getStorageAllocations().ask(a -> a.memberships(userId)).get();
+            groups.forEach((g, mode) -> storage.add(new StorageRow("Group storage " + g,
+                "ro".equals(mode) ? "you may read it" : "you may read and write it")));
+        } catch (Exception e) {
+            LOG.warning("The storage of " + userId + " could not be read: " + e.getMessage());
+        }
+        data.put("passportOn", passportOn);
+        data.put("visas", visas);
+        data.put("datasets", readable);
+        data.put("grantedFiles", grantedFiles);
+        data.put("s3Bucket", bucket);
+        data.put("storage", storage);
+        return myAccess.data(data).render();
     }
 
     @POST

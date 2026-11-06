@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My Access</title>
+<style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #F8FAFC; color: #0F172A; margin: 0; }
+    main { max-width: 960px; margin: 0 auto; padding: 28px 24px 60px; }
+    h1 { font-size: 1.5rem; margin: 0 0 4px; }
+    h2 { font-size: 1.1rem; margin: 32px 0 8px; }
+    .lead { color: #64748B; font-size: 0.9rem; margin: 0 0 8px; }
+    table { border-collapse: collapse; width: 100%; background: #fff; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 0.88rem; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #F1F5F9; vertical-align: top; }
+    th { background: #F1F5F9; font-weight: 600; color: #334155; }
+    .ok { color: #15803D; font-weight: 600; }
+    .no { color: #B91C1C; font-weight: 600; }
+    .none { color: #64748B; background: #fff; border: 1px solid #E2E8F0; border-radius: 8px; padding: 12px 14px; font-size: 0.9rem; }
+    code { font-size: 0.85em; background: #F1F5F9; padding: 1px 4px; border-radius: 4px; }
+    a.back { color: #4F46E5; text-decoration: none; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<main>
+    <a class="back" href="dashboard">&larr; Dashboard</a>
+    <h1 id="my-access-title">My Access</h1>
+    <p class="lead">What you, <strong>{userId}</strong>, may read and use now. To change it, ask an administrator.</p>
+
+    <h2>Your Visas</h2>
+    {#if !passportOn}
+    <div class="none" id="no-passport">This system does not use Visas.</div>
+    {#else if visas.isEmpty()}
+    <div class="none" id="no-visas">Your Passport has no Visa now.</div>
+    {#else}
+    <p class="lead">A Visa is a signed statement that a committee allows you a dataset. Only an accepted Visa lets you read it.</p>
+    <table id="visas">
+        <tr><th>Dataset</th><th>Given by</th><th>Committee</th><th>Accepted</th><th>Why</th><th>Seen in</th></tr>
+        {#for v in visas}
+        <tr>
+            <td>{v.grants}</td>
+            <td>{v.by}</td>
+            <td>{v.source}</td>
+            <td>{#if v.accepted}<span class="ok">yes</span>{#else}<span class="no">no</span>{/if}</td>
+            <td>{v.reason}</td>
+            <td>{v.where}</td>
+        </tr>
+        {/for}
+    </table>
+    {/if}
+
+    <h2>Datasets you may read</h2>
+    {#if datasets.isEmpty() && !grantedFiles}
+    <div class="none" id="no-datasets">You may read no dataset now.</div>
+    {#else}
+    <p class="lead">Attach them with <strong>+ Attach storage</strong> when you launch a tool. All are read-only.</p>
+    <table id="datasets">
+        <tr><th>Dataset</th><th>Where the tool finds it</th></tr>
+        {#for d in datasets}
+        <tr>
+            <td>{d.name}</td>
+            <td>{#if d.s3}S3 bucket <code>{s3Bucket}</code>, prefix <code>{d.name}/</code>; the tool gets credentials for it{#else}files in <code>datasets/{d.name}</code> of the tool's folder{/if}</td>
+        </tr>
+        {/for}
+        {#if grantedFiles}
+        <tr><td>Files granted to you</td><td>files in <code>datasets/granted-files</code> of the tool's folder</td></tr>
+        {/if}
+    </table>
+    {/if}
+
+    <h2>Your storage</h2>
+    {#if storage.isEmpty()}
+    <div class="none" id="no-storage">You have no storage now.</div>
+    {#else}
+    <table id="storage">
+        <tr><th>Storage</th><th></th></tr>
+        {#for s in storage}
+        <tr><td>{s.name}</td><td>{s.detail}</td></tr>
+        {/for}
+    </table>
+    {/if}
+</main>
+</body>
+</html>
