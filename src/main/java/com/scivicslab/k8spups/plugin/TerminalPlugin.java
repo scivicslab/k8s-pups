@@ -37,7 +37,7 @@ public class TerminalPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/terminal:24.04-2611060615";
+        return "${REGISTRY}/terminal:24.04-2611061029";
     }
 
     @Override

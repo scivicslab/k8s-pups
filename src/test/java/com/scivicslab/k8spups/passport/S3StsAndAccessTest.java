@@ -74,6 +74,10 @@ class S3StsAndAccessTest {
         assertEquals("AKIA-TEST", env.get("AWS_ACCESS_KEY_ID"));
         assertEquals("secret-test", env.get("AWS_SECRET_ACCESS_KEY"));
         assertEquals("session-test", env.get("AWS_SESSION_TOKEN"));
+        // rclone reads the same credentials through its remote named datasets
+        assertEquals("s3", env.get("RCLONE_CONFIG_DATASETS_TYPE"));
+        assertEquals("true", env.get("RCLONE_CONFIG_DATASETS_ENV_AUTH"));
+        assertEquals("http://minio:9000", env.get("RCLONE_CONFIG_DATASETS_ENDPOINT"));
         assertEquals("http://minio:9000", env.get("AWS_ENDPOINT_URL"));
         assertEquals("jga", env.get("K8SPUPS_S3_BUCKET"));
         assertEquals("JGAS000001,JGAS000002", env.get(S3Access.DATASETS_ENV));

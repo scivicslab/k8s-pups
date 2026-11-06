@@ -38,7 +38,7 @@ public class ChatUiAuditTrailLocalLlmPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/chat-ui-with-audit-trail:2.1.0-2611060629";
+        return "${REGISTRY}/chat-ui-with-audit-trail:2.1.0-2611061033";
     }
 
     @Override

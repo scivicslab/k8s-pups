@@ -37,7 +37,7 @@ public class CodeServerPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/code-server:4.141.0-2611060614";
+        return "${REGISTRY}/code-server:4.141.0-2611061031";
     }
 
     @Override

@@ -95,6 +95,11 @@ public final class S3Access {
         env.put("AWS_DEFAULT_REGION", "us-east-1");
         env.put("K8SPUPS_S3_BUCKET", bucket);
         env.put(DATASETS_ENV, String.join(",", sorted));
+        // An rclone remote named datasets, on the same server and credentials: rclone ls datasets:<bucket>/<dataset>
+        env.put("RCLONE_CONFIG_DATASETS_TYPE", "s3");
+        env.put("RCLONE_CONFIG_DATASETS_PROVIDER", "Other");
+        env.put("RCLONE_CONFIG_DATASETS_ENV_AUTH", "true");
+        env.put("RCLONE_CONFIG_DATASETS_ENDPOINT", endpoint);
         return env;
     }
 }

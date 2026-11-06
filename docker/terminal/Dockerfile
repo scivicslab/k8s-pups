@@ -26,6 +26,14 @@ ENV PATH=/home/pod-user/.local/bin:${PATH}
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY motd.txt /etc/motd-terminal
 
+USER root
+# S3 clients for the datasets of an S3 server that the user attaches: the Pod gets credentials for them in AWS_* and an
+# rclone remote named datasets, read with `aws s3`, `rclone` or a program.
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip ca-certificates && rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip && \
+    unzip -q /tmp/awscliv2.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscliv2.zip && \
+    curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip && \
+    unzip -q /tmp/rclone.zip -d /tmp && install -m 755 /tmp/rclone-*-linux-amd64/rclone /usr/local/bin/rclone && rm -rf /tmp/rclone*
 USER 1000
 WORKDIR /home/pod-user/works
 EXPOSE 8080

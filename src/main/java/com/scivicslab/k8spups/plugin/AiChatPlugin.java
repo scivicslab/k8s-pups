@@ -35,7 +35,7 @@ public class AiChatPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/ai-chat:1.0.0-2611060627";
+        return "${REGISTRY}/ai-chat:1.0.0-2611061032";
     }
 
     @Override
