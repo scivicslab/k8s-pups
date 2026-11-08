@@ -17,12 +17,11 @@ export HTML_SAURUS_BASE_PATH="${HTML_SAURUS_BASE_PATH:-${PUPS_SESSION_PATH:-}}"
 mkdir -p "$PORTAL"
 count=0
 list="$(mktemp)"
-# A Docusaurus project has docs/ and docusaurus.config.js or docusaurus.config.ts (what html-saurus looks for too).
-find "$SOURCE" -maxdepth 3 \( -name node_modules -o -name .git -o -name build \) -prune -o \
-     -type f \( -name 'docusaurus.config.js' -o -name 'docusaurus.config.ts' \) -print 2>/dev/null | sort > "$list"
-while IFS= read -r config; do
-  project="$(dirname "$config")"
-  [ -d "$project/docs" ] || continue
+# Which folders are projects: those that match the patterns the user entered in the launch form (PORTAL_PROJECTS, for
+# example ~/works/doc_*), or, with none entered, every project near the top of the storage.
+. /usr/local/bin/projects.sh
+list_projects "$SOURCE" "${PORTAL_PROJECTS:-}" | sort -u > "$list"
+while IFS= read -r project; do
   name="$(basename "$project")"
   target="$PORTAL/$name"
   n=2
@@ -35,6 +34,10 @@ while IFS= read -r config; do
   count=$((count + 1))
 done < "$list"
 rm -f "$list"
-echo "portal: $count project(s) found under $SOURCE"
+if [ -n "${PORTAL_PROJECTS:-}" ]; then
+  echo "portal: $count project(s) found under $SOURCE for the folders [$PORTAL_PROJECTS]"
+else
+  echo "portal: $count project(s) found under $SOURCE"
+fi
 
 exec java -jar /opt/html-saurus/html-saurus-portal-server.jar serve -d "$PORTAL" -p "$PORT" -t "${PORTAL_THREADS:-2}"

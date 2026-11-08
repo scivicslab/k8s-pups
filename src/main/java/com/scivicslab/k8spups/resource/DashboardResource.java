@@ -439,6 +439,18 @@ public class DashboardResource {
         Map<String, String> userParams = resolveUserParams(
             toolName, userParam0, userParam1, userParam2);
 
+        // A value the tool does not accept never reaches a Pod; the user is told on the dashboard
+        try {
+            String invalid = sm.ask(mgr -> mgr.invalidUserParameter(toolName, userParams)).get();
+            if (invalid != null) {
+                LOG.warning("Session start refused: " + userId + " entered a value that " + toolName + " does not accept: " + invalid);
+                return Response.seeOther(URI.create("/dashboard?error=invalid_parameter")).build();
+            }
+        } catch (Exception e) {
+            LOG.warning("Could not check the form values of " + userId + " for " + toolName + ": " + e.getMessage());
+            return Response.seeOther(URI.create("/dashboard?error=start_failed")).build();
+        }
+
         // The additional mounts: what the user chose; where each goes is the controller's (MountChoices.pathOf)
         List<String> extraTypes = MountChoices.distinctValues(extraType0, extraType1, extraType2);
         List<MountSpec> additionalMounts = resolveAdditionalMounts(extraTypes, extraMountsUnderOf(sm, toolName));

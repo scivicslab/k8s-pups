@@ -529,7 +529,8 @@
         var messages = {
             session_limit: 'You have reached the number of tools you can have open at a time. Stop one to launch another.',
             cluster_full: 'The system has no room for another tool right now. Try again later.',
-            forbidden: 'You may not use this tool.'
+            forbidden: 'You may not use this tool.',
+            invalid_parameter: 'A value you entered in the form of the tool is not accepted. Check it and try again.'
         };
         var banner = document.getElementById('error-banner');
         if (messages[errorCode]) banner.textContent = messages[errorCode];

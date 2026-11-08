@@ -208,6 +208,19 @@ public interface ToolPlugin {
     }
 
     /**
+     * Checks one value the user entered for a parameter in {@link #userParameters()}. The controller calls it before the
+     * Pod is created and refuses the launch when it returns a message: a value that reaches the Pod must be one the tool
+     * accepts, so the check is the controller's, not the image's. Default: every value is accepted.
+     *
+     * @param envVarName the {@link UserParameter#envVarName()} of the parameter
+     * @param value      what the user entered (not blank)
+     * @return null when the value is accepted, otherwise why it is not (for the log, not for the browser)
+     */
+    default String checkUserParameter(String envVarName, String value) {
+        return null;
+    }
+
+    /**
      * Whether only one instance per user is allowed.
      * When true, creating a second session for the same user and tool is rejected.
      * Default false (multiple instances allowed).

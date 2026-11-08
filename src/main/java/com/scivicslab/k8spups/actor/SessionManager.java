@@ -288,6 +288,26 @@ public class SessionManager {
             overrideStorageType, additionalMounts, false);
     }
 
+    /**
+     * Why the values the user entered in the launch form are not accepted by the tool, or null when they are
+     * ({@link ToolPlugin#checkUserParameter}). Asked before the launch so that the user is told, and again by
+     * createSession so that nothing unchecked reaches a Pod.
+     */
+    public String invalidUserParameter(String toolName, Map<String, String> userParams) {
+        ToolPlugin plugin = plugins.get(toolName);
+        return plugin == null ? null : invalidUserParameter(plugin, userParams);
+    }
+
+    private static String invalidUserParameter(ToolPlugin plugin, Map<String, String> userParams) {
+        if (userParams == null) return null;
+        for (var entry : userParams.entrySet()) {
+            if (entry.getValue() == null || entry.getValue().isBlank()) continue;
+            String why = plugin.checkUserParameter(entry.getKey(), entry.getValue());
+            if (why != null) return entry.getKey() + ": " + why;
+        }
+        return null;
+    }
+
     /** Why the user may not start another session now, or null when they may. */
     public enum LaunchRefusal { USER_LIMIT, CLUSTER_FULL }
 
@@ -353,6 +373,12 @@ public class SessionManager {
             }
             plugin = DynamicToolPlugin.from(registryEntry);
             toolConfigEnv = k8sClient.getToolConfig(controllerNamespace, toolName);
+        }
+
+        String invalid = invalidUserParameter(plugin, userParams);
+        if (invalid != null) {
+            LOG.warning("Rejected " + toolName + " for " + userId + ": " + invalid);
+            return null;
         }
 
         // Reject duplicate if plugin is single-instance

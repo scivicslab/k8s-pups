@@ -29,8 +29,8 @@ LABEL org.opencontainers.image.revision.html-saurus=${HTML_SAURUS_COMMIT}
 RUN mkdir -p /opt/html-saurus
 COPY html-saurus-portal-server.jar /opt/html-saurus/html-saurus-portal-server.jar
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 755 /usr/local/bin/entrypoint.sh \
+COPY entrypoint.sh projects.sh /usr/local/bin/
+RUN chmod 755 /usr/local/bin/entrypoint.sh /usr/local/bin/projects.sh \
  && mkdir -p /home/devteam/works /home/devteam/portal \
  && chown -R 1000:1000 /home/devteam
 

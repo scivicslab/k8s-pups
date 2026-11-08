@@ -28,4 +28,17 @@ class HtmlSaurusPluginTest {
         assertFalse(p.passthroughPath(), "the gateway removes the session path; the portal is told the prefix instead");
         assertTrue(p.containerImage().startsWith("${REGISTRY}/html-saurus:"), p.containerImage());
     }
+
+    @Test
+    void theFormAsksForTheDocumentFoldersAndTheControllerChecksThem() {
+        var p = new HtmlSaurusPlugin();
+        assertEquals(1, p.userParameters().size());
+        var param = p.userParameters().get(0);
+        assertEquals("PORTAL_PROJECTS", param.envVarName());
+        assertFalse(param.required(), "left empty, the portal looks three levels down");
+        assertFalse(param.secret());
+        assertNull(p.checkUserParameter("PORTAL_PROJECTS", "~/works/doc_*"));
+        assertNotNull(p.checkUserParameter("PORTAL_PROJECTS", "../*"));
+        assertNull(p.checkUserParameter("SOMETHING_ELSE", "../*"), "only its own parameter is checked here");
+    }
 }

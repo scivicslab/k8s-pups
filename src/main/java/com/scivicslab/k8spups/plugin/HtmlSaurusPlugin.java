@@ -84,6 +84,23 @@ public class HtmlSaurusPlugin implements ToolPlugin {
         return Map.of("cpu", "2", "memory", "4Gi");
     }
 
+    /** Name of the variable that carries the folder patterns to the image; the entrypoint reads it. */
+    static final String PROJECTS_ENV = "PORTAL_PROJECTS";
+
+    /**
+     * Which folders of the storage are Docusaurus projects. Left empty, the image looks for projects near the top of
+     * {@code ~/works} (at most two folders down); with patterns, it reads only the folders that match.
+     */
+    @Override
+    public List<UserParameter> userParameters() {
+        return List.of(new UserParameter(PROJECTS_ENV, "Document folders, e.g. ~/works/doc_*", "~/works/doc_*", false, false));
+    }
+
+    @Override
+    public String checkUserParameter(String envVarName, String value) {
+        return PROJECTS_ENV.equals(envVarName) ? DocumentFolderPatterns.check(value) : null;
+    }
+
     /** The copy of the projects, with what the portal builds from it; it lasts as long as the session. */
     @Override
     public List<String> writablePaths() {
