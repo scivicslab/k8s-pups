@@ -20,6 +20,9 @@ list="$(mktemp)"
 # Which folders are projects: those that match the patterns the user entered in the launch form (PORTAL_PROJECTS, for
 # example ~/works/doc_*), or, with none entered, every project near the top of the storage.
 . /usr/local/bin/projects.sh
+# What the reader needs to know about the patterns that found nothing is collected here, then shown on the portal page
+NOTICE_LINES_FILE="$(mktemp)"
+export NOTICE_LINES_FILE
 list_projects "$SOURCE" "${PORTAL_PROJECTS:-}" | sort -u > "$list"
 while IFS= read -r project; do
   name="$(basename "$project")"
@@ -39,5 +42,11 @@ if [ -n "${PORTAL_PROJECTS:-}" ]; then
 else
   echo "portal: $count project(s) found under $SOURCE"
 fi
+
+# The notice of the portal page (HTML_SAURUS_NOTICE_FILE): written only when there is something to say
+NOTICE_FILE="${HTML_SAURUS_NOTICE_FILE:-${TMPDIR:-/tmp}/portal-notice.txt}"
+write_notice "$NOTICE_LINES_FILE" "$count" "$NOTICE_FILE"
+rm -f "$NOTICE_LINES_FILE"
+export HTML_SAURUS_NOTICE_FILE="$NOTICE_FILE"
 
 exec java -jar /opt/html-saurus/html-saurus-portal-server.jar serve -d "$PORTAL" -p "$PORT" -t "${PORTAL_THREADS:-2}"

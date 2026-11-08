@@ -54,6 +54,73 @@ class HtmlSaurusProjectsScriptTest {
         return new Result(lines, err);
     }
 
+    /** The notice the portal page shows for the patterns, as the image writes it: what list_projects collects, then write_notice. */
+    private String notice(String patterns) throws Exception {
+        Path lines = Files.createTempFile("notice-lines", ".txt");
+        Path out = Files.createTempFile("notice", ".txt");
+        try {
+            var pb = new ProcessBuilder("sh", "-c",
+                ". \"$1\"; NOTICE_LINES_FILE=\"$4\"; export NOTICE_LINES_FILE; n=$(list_projects \"$2\" \"$3\" 2>/dev/null | wc -l); write_notice \"$4\" \"$n\" \"$5\"",
+                "sh", SCRIPT.toString(), storage.toString(), patterns, lines.toString(), out.toString());
+            Process p = pb.start();
+            String err = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertEquals(0, p.waitFor(), err);
+            return Files.readString(out);
+        } finally {
+            Files.deleteIfExists(lines);
+            Files.deleteIfExists(out);
+        }
+    }
+
+    @Test
+    void noPatternMatchesAnything_thePageSaysSoAndWhatToDo() throws Exception {
+        String n = notice("~/works/nothing_*");
+        assertEquals("No folder matches `~/works/nothing_*`.\nStart Documents again with another pattern.\n", n);
+    }
+
+    @Test
+    void aMatchingFolderThatIsNotAProject_isSaidApart() throws Exception {
+        Files.createDirectories(storage.resolve("only_plain/docs"));
+        String n = notice("only_plain");
+        assertTrue(n.contains("`only_plain` matches folders, but none of them is a Docusaurus project"), n);
+        assertTrue(n.endsWith("Start Documents again with another pattern.\n"), n);
+    }
+
+    @Test
+    void onlySomePatternsMatch_thePageNamesTheOnesThatDidNot() throws Exception {
+        String n = notice("~/works/doc_*, ~/works/missing_a, ~/works/missing_b");
+        assertTrue(n.contains("No folder matches `~/works/missing_a`.") && n.contains("No folder matches `~/works/missing_b`."), n);
+        assertFalse(n.contains("doc_"), "the pattern that matched is not mentioned: " + n);
+        assertTrue(n.endsWith("The other folders were read as usual. To change the folders, start Documents again with other patterns.\n"), n);
+    }
+
+    @Test
+    void everyPatternMatches_thereIsNothingToSay() throws Exception {
+        assertEquals("", notice("~/works/doc_*,notes"));
+    }
+
+    @Test
+    void aPatternThatIsRefusedIsSaidToo() throws Exception {
+        String n = notice("~/works/../etc,doc_*");
+        assertTrue(n.contains("is not accepted as a folder pattern."), n);
+    }
+
+    @Test
+    void noPatternAndNoProject_thePageAsksForTheFolders() throws Exception {
+        Path empty = Files.createTempDirectory("emptystorage");
+        Path lines = Files.createTempFile("notice-lines", ".txt");
+        Path out = Files.createTempFile("notice", ".txt");
+        try {
+            var pb = new ProcessBuilder("sh", "-c", ". \"$1\"; write_notice \"$2\" 0 \"$3\"", "sh", SCRIPT.toString(), lines.toString(), out.toString());
+            assertEquals(0, pb.start().waitFor());
+            assertTrue(Files.readString(out).contains("enter the folders that hold documents, for example `~/works/doc_*`"));
+        } finally {
+            Files.deleteIfExists(lines);
+            Files.deleteIfExists(out);
+            Files.deleteIfExists(empty);
+        }
+    }
+
     @Test
     void thePatternSelectsOnlyTheMatchingProjects() throws Exception {
         var r = list("~/works/doc_*");
@@ -71,7 +138,7 @@ class HtmlSaurusProjectsScriptTest {
     void noMatchIsSaidAndNothingIsServed() throws Exception {
         var r = list("~/works/nothing_*");
         assertEquals(List.of(), r.out());
-        assertTrue(r.err().contains("no Docusaurus project matches nothing_*"), r.err());
+        assertTrue(r.err().contains("No folder matches ~/works/nothing_*"), r.err());
     }
 
     @Test
