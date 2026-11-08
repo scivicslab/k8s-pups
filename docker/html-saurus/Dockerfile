@@ -20,11 +20,14 @@ RUN curl -fsSL "https://github.com/graalvm/graalvm-ce-builds/releases/download/j
 ENV JAVA_HOME=/opt/graalvm
 ENV PATH=${JAVA_HOME}/bin:${PATH}
 
-# The portal server of html-saurus: the jar that serves every Docusaurus project under one directory.
-ENV HTML_SAURUS_VERSION=2.6.0
-RUN mkdir -p /opt/html-saurus \
- && curl -fsSL "https://github.com/scivicslab/html-saurus/releases/download/v${HTML_SAURUS_VERSION}/html-saurus-portal-server-${HTML_SAURUS_VERSION}.jar" \
-      -o /opt/html-saurus/html-saurus-portal-server.jar
+# The portal server of html-saurus: the jar that serves every Docusaurus project under one directory. The jar is built from
+# the html-saurus source (mvn install in html-saurus-portal-server; the -shaded jar) and put in the build context under this
+# name before the image is built. It must be a build that reads HTML_SAURUS_BASE_PATH (html-saurus 2.7.0 and later), as the
+# Pod serves the portal below the session path of the tool. HTML_SAURUS_COMMIT records which source the jar came from.
+ARG HTML_SAURUS_COMMIT=unknown
+LABEL org.opencontainers.image.revision.html-saurus=${HTML_SAURUS_COMMIT}
+RUN mkdir -p /opt/html-saurus
+COPY html-saurus-portal-server.jar /opt/html-saurus/html-saurus-portal-server.jar
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 755 /usr/local/bin/entrypoint.sh \

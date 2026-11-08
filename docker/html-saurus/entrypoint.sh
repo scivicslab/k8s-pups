@@ -10,6 +10,10 @@ SOURCE="${PORTAL_SOURCE:-/home/devteam/works}"
 PORTAL="${PORTAL_DIR:-/home/devteam/portal}"
 PORT="${PORTAL_PORT:-8080}"
 
+# The controller publishes the tool below the session path (/<prefix>/session/<id>/) and removes it before forwarding, so
+# the portal writes every URL of its pages below it. Run outside a session, the variable is unset and the portal serves at the root.
+export HTML_SAURUS_BASE_PATH="${HTML_SAURUS_BASE_PATH:-${PUPS_SESSION_PATH:-}}"
+
 mkdir -p "$PORTAL"
 count=0
 list="$(mktemp)"
