@@ -18,7 +18,8 @@ match_folders() {
   seg="${rest%%/*}"
   if [ "$seg" = "$rest" ]; then next=""; else next="${rest#*/}"; fi
   find "$base" -mindepth 1 -maxdepth 1 -type d -name "$seg" ! -name '.*' 2>/dev/null | sort | while IFS= read -r d; do
-    if [ -z "$next" ]; then printf '%s\n' "$d"; else match_folders "$d" "$next"; fi
+    # A subshell, so that the recursion does not overwrite the variables of this level (sh has no local variables)
+    if [ -z "$next" ]; then printf '%s\n' "$d"; else (match_folders "$d" "$next"); fi
   done
 }
 

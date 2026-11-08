@@ -38,6 +38,8 @@ class HtmlSaurusProjectsScriptTest {
         project("notes");
         Files.createDirectories(storage.resolve("doc_plain/docs"));      // matches doc_* but has no config
         project("groups/lab/doc_G");
+        project("groups/lab2/doc_G2");
+        project("groups/lab3/doc_G3");
         project("deep/er/est/p");
         project(".hidden/doc_H");
     }
@@ -61,7 +63,8 @@ class HtmlSaurusProjectsScriptTest {
 
     @Test
     void severalPatternsAndTheGroupStorage() throws Exception {
-        assertEquals(List.of("doc_A", "groups/lab/doc_G", "notes"), list("~/works/doc_A, ~/works/groups/*/doc_*,notes").out());
+        assertEquals(List.of("doc_A", "groups/lab/doc_G", "groups/lab2/doc_G2", "groups/lab3/doc_G3", "notes"),
+            list("~/works/doc_A, ~/works/groups/*/doc_*,notes").out(), "every group is walked, not only the first");
     }
 
     @Test
