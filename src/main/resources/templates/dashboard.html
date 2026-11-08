@@ -451,7 +451,7 @@
         </div>
         {/for}
         {#for ss in sharedServices}
-        <div class="tool-card shared-card" style="order: {otherCardOrder}">
+        <div class="tool-card shared-card" style="order: {cardOrder.get(ss.service.displayName) ?: otherCardOrder}">
             <div class="tool-icon"><img src="icons/{ss.service.name}.png" alt="{ss.service.displayName}" onerror="this.style.display='none'"></div>
             <div class="tool-name">{ss.service.displayName} <span class="badge badge-{ss.badge}">{ss.state}</span></div>
             <div class="tool-desc">{ss.service.description}<br>
@@ -477,7 +477,7 @@
         </div>
         {/for}
         {#for dt in dynamicTools}
-        <div class="tool-card" style="order: {otherCardOrder}">
+        <div class="tool-card" style="order: {cardOrder.get(dt.name) ?: otherCardOrder}">
             <div class="tool-icon"><img src="icons/default-tool.png" alt="{dt.name}" onerror="this.style.display='none'"></div>
             <div class="tool-name">{dt.name}</div>
             <div class="tool-desc">{#if dt.descriptor != null}{dt.descriptor.description}{/if}</div>

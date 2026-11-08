@@ -28,8 +28,4 @@ class CodeServerPluginTest {
         assertTrue(p.containerImage().startsWith("${REGISTRY}/code-server:"), p.containerImage());
     }
 
-    @Test
-    void theCardHasAPlaceInTheLaunchGrid() {
-        assertTrue(com.scivicslab.k8spups.resource.ToolCardOrder.rank("Code Editor") < com.scivicslab.k8spups.resource.ToolCardOrder.OTHER);
-    }
 }

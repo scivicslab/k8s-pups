@@ -25,8 +25,4 @@ class TerminalPluginTest {
         assertTrue(p.containerImage().startsWith("${REGISTRY}/terminal:"), p.containerImage());
     }
 
-    @Test
-    void theCardHasAPlaceInTheLaunchGrid() {
-        assertTrue(com.scivicslab.k8spups.resource.ToolCardOrder.rank("Terminal") < com.scivicslab.k8spups.resource.ToolCardOrder.OTHER);
-    }
 }

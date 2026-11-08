@@ -273,7 +273,6 @@ public class DashboardResource {
         data.put("userId", userId);
         data.put("userRoles", userRoles);
         data.put("tools", tools);
-        data.put("cardOrder", ToolCardOrder.ranks());
         data.put("otherCardOrder", ToolCardOrder.OTHER);
         data.put("dynamicTools", dynamicTools);
         data.put("sessions", userSessions);
@@ -327,6 +326,12 @@ public class DashboardResource {
                 actorSystem.getK8sClient().sharedServiceState(svc.namespace(), svc.deployment())));
         }
         data.put("sharedServices", sharedServices);
+        // The cards are in alphabetical order of the names they show, whichever kind of card they are
+        List<String> cardTitles = new ArrayList<>();
+        for (ToolPlugin t : tools) cardTitles.add(t.displayName());
+        for (SharedServiceView s : sharedServices) cardTitles.add(s.service().displayName());
+        for (ToolMetadata d : dynamicTools) cardTitles.add(d.name());
+        data.put("cardOrder", ToolCardOrder.ranks(cardTitles));
         boolean admin = actorSystem.isAdmin(userId, userRoles);
         data.put("isAdmin", admin);
         // A user at the limit is not offered Launch: the page says why instead
