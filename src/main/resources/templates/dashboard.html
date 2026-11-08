@@ -425,6 +425,7 @@
                 {#for param in tool.userParameters}
                 <input type="{#if param.secret}password{#else}text{/if}"
                        name="userParam_{param_index}"
+                       value="{rememberedParams.get(tool.name).get(param_index)}"
                        placeholder="{param.label}"
                        class="profile-select"
                        style="margin-top:6px;font-size:0.85rem;"

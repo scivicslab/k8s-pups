@@ -301,6 +301,19 @@ public class DashboardResource {
             data.put("mountChoicesJson", "[]");
         }
         data.put("rememberedMounts", remembered);
+        // What the user typed into the fields of each tool's form the last time, in the order of its fields
+        Map<String, List<String>> rememberedParams = new HashMap<>();
+        for (ToolPlugin t : tools) {
+            if (t.userParameters().isEmpty()) continue;
+            try {
+                String json = actorSystem.getStorageAllocations().ask(a -> a.formPreference(userId, t.name())).get();
+                rememberedParams.put(t.name(), FormValues.initial(t.userParameters(), FormValues.fromJson(json)));
+            } catch (Exception e) {
+                LOG.warning("Form values of " + userId + " for " + t.name() + " could not be read: " + e.getMessage());
+                rememberedParams.put(t.name(), FormValues.initial(t.userParameters(), Map.of()));
+            }
+        }
+        data.put("rememberedParams", rememberedParams);
         data.put("currentStorageSize", storageInfo.getOrDefault("longhorn.size",
             storageInfo.getOrDefault("storageSize", actorSystem.getDefaultStorageSize())));
         data.put("pvcInfo", allPvcInfo);
@@ -486,6 +499,12 @@ public class DashboardResource {
             for (String type : extraTypes) chosen.add(Map.of("value", type));
             String json = MountChoices.toJson(storageType, chosen);
             actorSystem.getStorageAllocations().tell(a -> a.saveMountPreference(userId, toolName, json));
+            // And the values typed into the tool's own fields (not the secret ones), a blank one replacing the earlier value
+            ToolPlugin launched = pluginOf(sm, toolName);
+            if (launched != null && !launched.userParameters().isEmpty()) {
+                String formJson = FormValues.toJson(FormValues.toStore(launched.userParameters(), userParams));
+                actorSystem.getStorageAllocations().tell(a -> a.saveFormPreference(userId, toolName, formJson));
+            }
         } catch (Exception e) {
             LOG.severe("Failed to start session: " + e.getMessage());
             return Response.seeOther(URI.create("/dashboard?error=start_failed")).build();
@@ -963,6 +982,18 @@ public class DashboardResource {
         result.put("pvcInfo", pvcInfo);
         result.put("activeSessions", activeSessions);
         return Response.ok(result).build();
+    }
+
+    /** The plugin of the tool, or null when the tool is unknown. */
+    private ToolPlugin pluginOf(ActorRef<SessionManager> sm, String toolName) {
+        try {
+            for (ToolPlugin t : sm.ask(SessionManager::listAvailableTools).get()) {
+                if (t.name().equals(toolName)) return t;
+            }
+        } catch (Exception e) {
+            LOG.warning("Could not look up the tool " + toolName + ": " + e.getMessage());
+        }
+        return null;
     }
 
     /**

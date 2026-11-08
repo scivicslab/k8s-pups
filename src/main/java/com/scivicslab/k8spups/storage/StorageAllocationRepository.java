@@ -246,6 +246,19 @@ public class StorageAllocationRepository {
         return rows.isEmpty() ? "[]" : rows.get(0);
     }
 
+    /** What the user typed into the launch form of the tool the last time, as stored (a JSON object); "{}" when none. */
+    public String formPreference(String user, String tool) {
+        List<String> rows = query("SELECT params::text FROM tool_form_preference WHERE user_name = ? AND tool = ?",
+            ps -> { ps.setString(1, user); ps.setString(2, tool); }, rs -> rs.getString(1));
+        return rows.isEmpty() ? "{}" : rows.get(0);
+    }
+
+    public void saveFormPreference(String user, String tool, String paramsJson) {
+        execute("INSERT INTO tool_form_preference (user_name, tool, params, updated_at) VALUES (?, ?, ?::jsonb, now()) "
+            + "ON CONFLICT (user_name, tool) DO UPDATE SET params = EXCLUDED.params, updated_at = now()",
+            ps -> { ps.setString(1, user); ps.setString(2, tool); ps.setString(3, paramsJson); });
+    }
+
     public void saveMountPreference(String user, String tool, String mountsJson) {
         execute("INSERT INTO tool_mount_preference (user_name, tool, mounts, updated_at) VALUES (?, ?, ?::jsonb, now()) "
             + "ON CONFLICT (user_name, tool) DO UPDATE SET mounts = EXCLUDED.mounts, updated_at = now()",

@@ -316,6 +316,14 @@ public class StorageAllocationService {
         return repository.mountPreference(user, tool);
     }
 
+    public String formPreference(String user, String tool) {
+        return repository.formPreference(user, tool);
+    }
+
+    public void saveFormPreference(String user, String tool, String paramsJson) {
+        repository.saveFormPreference(user, tool, paramsJson);
+    }
+
     public void saveMountPreference(String user, String tool, String mountsJson) {
         repository.saveMountPreference(user, tool, mountsJson);
     }
