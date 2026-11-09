@@ -33,6 +33,10 @@ RUN mkdir -p /galaxy/gtn && \
     curl -fsSL https://depot.galaxyproject.org/chatgxy/gtn_search.db -o /galaxy/gtn/gtn_search.db && \
     chmod -R a+rX /galaxy/gtn && \
     echo '    gtn_database_path: /galaxy/gtn/gtn_search.db' >> /galaxy/server/config/galaxy.yml
+# The AI agents must not send "strict" tool definitions to the OpenAI-compatible server of the deployment: see the script.
+# (The image galaxy-bio-patch applies the same script to an image that was built before it was here.)
+COPY patch_agent_model.py /tmp/patch_agent_model.py
+RUN python3 /tmp/patch_agent_model.py && /galaxy/server/.venv/bin/python -m compileall -q /galaxy/server/lib/galaxy/agents/base.py && rm /tmp/patch_agent_model.py
 COPY entrypoint.sh /entrypoint.sh
 USER galaxy
 ENTRYPOINT ["tini", "--", "/entrypoint.sh"]
