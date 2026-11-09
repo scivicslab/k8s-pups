@@ -33,6 +33,9 @@ if base and model:
 json.dump(cfg, open("/tmp/jupyter-config/jupyter_jupyter_ai_config.json", "w"))
 PY
 
+# A chat model that the user chose earlier and that the server no longer offers is replaced by the default; see keep_model.py
+python3 /usr/local/bin/keep_model.py || true
+
 export JUPYTER_CONFIG_PATH="$CONF_DIR"
 exec jupyter lab \
     --ip=0.0.0.0 \

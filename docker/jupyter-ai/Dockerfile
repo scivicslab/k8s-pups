@@ -39,7 +39,7 @@ ENV PATH=/opt/conda/bin:$PATH
 RUN chmod -R a+rX /opt/conda
 RUN chmod 666 /etc/passwd /etc/group
 
-COPY --chown=root:root entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=root:root entrypoint.sh keep_model.py /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER jovyan

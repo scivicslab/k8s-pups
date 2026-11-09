@@ -154,6 +154,8 @@
           <systemPropertyVariables>
             <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
             <maven.home>${maven.home}</maven.home>
+            <!-- as the controller's Dockerfile: the relay sets the Host header of the request it makes to a tool -->
+            <jdk.httpclient.allowRestrictedHeaders>host</jdk.httpclient.allowRestrictedHeaders>
           </systemPropertyVariables>
         </configuration>
       </plugin>

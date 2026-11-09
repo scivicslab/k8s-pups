@@ -49,4 +49,5 @@ USER 185
 ENTRYPOINT ["java", \
   "-Dquarkus.http.host=0.0.0.0", \
   "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", \
+  "-Djdk.httpclient.allowRestrictedHeaders=host", \
   "-jar", "/deployments/quarkus-run.jar"]

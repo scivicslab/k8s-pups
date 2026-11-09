@@ -795,6 +795,9 @@ public class DashboardResource {
             if (browserHost != null && !inHeaders.getRequestHeaders().containsKey("X-Forwarded-Host")) {
                 rb.header("X-Forwarded-Host", browserHost);
             }
+            // And as the Host itself: a tool that compares the Origin of a POST with the Host (Jupyter Server) otherwise sees
+            // the name of its Service and refuses. The WebSocket relay does the same.
+            UpstreamHost.apply(rb, browserHost);
 
             // Stream the response body via StreamingOutput with explicit flush() on each chunk.
             // Returning InputStream directly risks Vert.x write-buffer batching, which delays
