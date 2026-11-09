@@ -49,4 +49,6 @@ write_notice "$NOTICE_LINES_FILE" "$count" "$NOTICE_FILE"
 rm -f "$NOTICE_LINES_FILE"
 export HTML_SAURUS_NOTICE_FILE="$NOTICE_FILE"
 
-exec java -jar /opt/html-saurus/html-saurus-portal-server.jar serve -d "$PORTAL" -p "$PORT" -t "${PORTAL_THREADS:-2}"
+# --no-mcp: the /mcp endpoint reads and writes files and rebuilds projects without a credential; nothing in k8s-pups uses it
+# (search is the REST API), so it is not offered to the people who reach this Pod.
+exec java -jar /opt/html-saurus/html-saurus-portal-server.jar serve -d "$PORTAL" -p "$PORT" -t "${PORTAL_THREADS:-2}" --no-mcp
