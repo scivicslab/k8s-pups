@@ -45,7 +45,7 @@ public class HtmlSaurusPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/html-saurus:2.7.0-2611081638";
+        return "${REGISTRY}/html-saurus:2.7.0-2611091209";
     }
 
     @Override
