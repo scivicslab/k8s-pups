@@ -36,7 +36,7 @@ public class JupyterAiPlugin implements ToolPlugin {
 
     @Override
     public String containerImage() {
-        return "${REGISTRY}/jupyter-ai:1.0.0-2610190508";
+        return "${REGISTRY}/jupyter-ai:1.0.0-2611091102";
     }
 
     @Override
