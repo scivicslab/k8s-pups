@@ -173,6 +173,74 @@ class WebSocketRelayTest {
         assertTrue(uncaught.isEmpty(), "uncaught " + uncaught.size() + ", the first: " + stackOf(uncaught));
     }
 
+    /**
+     * A second relay in front of the same tool, with the egress limit of the session: what the tool sends to the browser
+     * is added to {@code sentToBrowser}, and the relay closes both sides once it is over {@code limit} bytes.
+     */
+    private int relayWithLimit(LongAdder sentToBrowser, long limit) throws Exception {
+        HttpServer limited = vertx.createHttpServer().webSocketHandler(browserSide -> {
+            browserSide.pause();
+            client.connect(toolServer.actualPort(), "localhost", "/").onSuccess(tool -> {
+                WebSocketRelay.connect(browserSide, tool, new LongAdder(), new LongAdder(), frame -> true,
+                    sentToBrowser, () -> sentToBrowser.sum() > limit);
+                browserSide.resume();
+            });
+        });
+        return limited.listen(0).toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS).actualPort();
+    }
+
+    /** SessionEgress: a session that has sent its limit to the browser is cut with 1008, and the message over it is not delivered. */
+    @Test
+    void whatTheToolSendsOverTheLimitClosesBothSidesWith1008() throws Exception {
+        LongAdder sentToBrowser = new LongAdder();
+        int port = relayWithLimit(sentToBrowser, 100);
+        WebSocket browser = client.connect(port, "localhost", "/")
+            .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        CountDownLatch answered = new CountDownLatch(1);
+        CountDownLatch browserSawClose = new CountDownLatch(1);
+        AtomicReference<Short> browserStatus = new AtomicReference<>();
+        browser.textMessageHandler(m -> {
+            received.add(m);
+            answered.countDown();
+        });
+        browser.closeHandler(v -> {
+            browserStatus.set(browser.closeStatusCode());
+            browserSawClose.countDown();
+        });
+
+        browser.writeTextMessage("hi");                 // the relay is connected end to end once this is answered
+        assertTrue(answered.await(5, TimeUnit.SECONDS));
+        assertEquals("echo:hi".length(), sentToBrowser.sum(), "only what goes to the browser is counted");
+
+        String fifty = "a".repeat(50);
+        toolSide.writeTextMessage(fifty);               // 57 bytes in all: under the limit, delivered
+        toolSide.writeTextMessage(fifty);               // 107 bytes in all: over the limit, not delivered
+        assertTrue(browserSawClose.await(5, TimeUnit.SECONDS));
+        assertTrue(toolSawClose.await(5, TimeUnit.SECONDS));
+
+        assertEquals((short) 1008, browserStatus.get());
+        assertEquals((short) 1008, toolSawCloseStatus.get());
+        assertEquals(java.util.List.of("echo:hi", fifty), received);
+    }
+
+    /** Without a limit reached, the relay with the egress check passes everything, as the plain relay does. */
+    @Test
+    void underTheLimitTheToolsMessagesAreRelayedAndCounted() throws Exception {
+        LongAdder sentToBrowser = new LongAdder();
+        int port = relayWithLimit(sentToBrowser, 1_000_000);
+        WebSocket browser = client.connect(port, "localhost", "/")
+            .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        CountDownLatch answered = new CountDownLatch(3);
+        browser.textMessageHandler(m -> answered.countDown());
+        browser.writeTextMessage("one");
+        browser.writeTextMessage("two");
+        browser.writeTextMessage("three");
+        assertTrue(answered.await(5, TimeUnit.SECONDS));
+        assertEquals("echo:one".length() + "echo:two".length() + "echo:three".length(), sentToBrowser.sum());
+        assertEquals(1L, toolSawClose.getCount(), "nothing was closed");
+    }
+
     private static String stackOf(java.util.List<Throwable> uncaught) {
         if (uncaught.isEmpty()) {
             return "";

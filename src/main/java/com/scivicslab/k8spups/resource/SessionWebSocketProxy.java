@@ -82,6 +82,9 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
     @Inject
     Vertx vertx;
 
+    @Inject
+    SessionEgress egress;
+
     @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/pups")
     String basePath;
 
@@ -166,6 +169,11 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
                 reject(ctx, 403, "You do not own this session");
                 return;
             }
+            if (egress.overSessionLimit(resolution.sessionId())) {
+                egress.recordRefusal(user, resolution.sessionId(), resolution.tool(), "the session has already sent its limit; a WebSocket is not opened");
+                reject(ctx, 403, "The session has reached its data export limit");
+                return;
+            }
             open(ctx, resolution, UpstreamHeaders.of(inHeaders, browserHost));
         }).onFailure(e -> {
             LOG.severe("WebSocket session lookup failed: [" + e.getClass().getSimpleName() + "] " + e);
@@ -191,8 +199,10 @@ public class SessionWebSocketProxy implements HttpServerOptionsCustomizer {
             LongAdder counter = relayedBytes.computeIfAbsent(target.sessionId(), id -> new LongAdder());
             LongAdder fromBrowser = new LongAdder();
             String toolName = target.tool();
+            String sessionId = target.sessionId();
             WebSocketRelay.connect(browser, tool, counter, fromBrowser, frame -> UseRules.webSocketIsUse(toolName,
-                frame.isText() ? frame.textData() : null, frame.isBinary() ? frame.binaryData().getBytes() : null));
+                frame.isText() ? frame.textData() : null, frame.isBinary() ? frame.binaryData().getBytes() : null),
+                egress.counter(sessionId), () -> egress.overSessionLimit(sessionId));
             // The relay owns the close handlers (a close of one side closes the other), so the timer stops itself
             long[] seen = {0};
             vertx.setPeriodic(TOUCH_INTERVAL_MS, id -> {

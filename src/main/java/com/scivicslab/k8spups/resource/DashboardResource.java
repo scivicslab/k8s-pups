@@ -68,6 +68,9 @@ public class DashboardResource {
     @Inject
     Template myAccess;
 
+    @Inject
+    SessionEgress egress;
+
     @ConfigProperty(name = "quarkus.http.root-path", defaultValue = "/pups")
     String basePath;
 
@@ -734,7 +737,7 @@ public class DashboardResource {
             sm.tell(mgr -> mgr.touchSession(sm, target.sessionId()));
         }
 
-        return forward(target.url(), method, body, inHeaders, target.what());
+        return forward(target.url(), method, body, inHeaders, target.what(), userId, target.sessionId(), target.tool());
     }
 
     /**
@@ -774,6 +777,15 @@ public class DashboardResource {
      * proxy and the shared-service proxy; {@code what} names the target in the log.
      */
     private Response forward(String targetUrl, String method, byte[] body, HttpHeaders inHeaders, String what) {
+        return forward(targetUrl, method, body, inHeaders, what, null, null, null);
+    }
+
+    /**
+     * As above. With a {@code sessionId} the answer is a tool session's, and {@link SessionEgress} limits what is sent to
+     * the browser: a file download and an over-large response are refused, and the bytes count toward the session's total.
+     */
+    private Response forward(String targetUrl, String method, byte[] body, HttpHeaders inHeaders, String what,
+                             String user, String sessionId, String tool) {
         try {
             HttpRequest.Builder rb = HttpRequest.newBuilder().uri(URI.create(targetUrl));
             HttpRequest.BodyPublisher publisher = (body != null && body.length > 0)
@@ -807,6 +819,18 @@ public class DashboardResource {
             HttpResponse<InputStream> resp = SESSION_HTTP_CLIENT.send(
                 rb.build(), HttpResponse.BodyHandlers.ofInputStream());
 
+            if (sessionId != null) {
+                String reason = egress.refusalFor(sessionId, resp.headers().firstValue("content-disposition").orElse(null),
+                    resp.headers().firstValueAsLong("content-length").orElse(-1),
+                    isEventStream(resp.headers().firstValue("content-type").orElse("")));
+                if (reason != null) {
+                    resp.body().close();
+                    egress.recordRefusal(user, sessionId, tool, reason);
+                    return Response.status(Response.Status.FORBIDDEN).type(MediaType.TEXT_PLAIN)
+                        .entity("Refused by the data export limits of this system: " + reason).build();
+                }
+            }
+
             Response.ResponseBuilder responseBuilder = Response.status(resp.statusCode());
             resp.headers().map().forEach((name, vals) -> {
                 if (!HOP_BY_HOP.contains(name.toLowerCase(Locale.ROOT)) && !":status".equals(name)) {
@@ -827,7 +851,17 @@ public class DashboardResource {
                         output.write(SSE_OPEN_COMMENT);
                         output.flush();
                     }
+                    long thisResponse = 0;
                     while ((n = bodyStream.read(buf)) != -1) {
+                        if (sessionId != null) {
+                            egress.counter(sessionId).add(n);
+                            thisResponse += n;
+                            if (egress.overResponseLimit(thisResponse, eventStream) || egress.overSessionLimit(sessionId)) {
+                                egress.recordRefusal(user, sessionId, tool, "the response was stopped after " + thisResponse
+                                    + " bytes; the session has sent " + egress.counter(sessionId).sum() + " bytes");
+                                throw new java.io.IOException("Data export limit of the session reached");
+                            }
+                        }
                         output.write(buf, 0, n);
                         output.flush();
                     }

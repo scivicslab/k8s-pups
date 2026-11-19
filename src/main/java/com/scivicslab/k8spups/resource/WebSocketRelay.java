@@ -40,10 +40,20 @@ final class WebSocketRelay {
      */
     static void connect(WebSocketBase browser, WebSocketBase tool, LongAdder counter, LongAdder fromBrowser,
                         java.util.function.Predicate<WebSocketFrame> isUse) {
+        connect(browser, tool, counter, fromBrowser, isUse, new LongAdder(), () -> false);
+    }
+
+    /**
+     * As above; the bytes of every message from the tool to the browser are also added to {@code sentToBrowser}, and the
+     * connection is closed (status 1008) as soon as {@code overLimit} says that what the session sent is too much.
+     */
+    static void connect(WebSocketBase browser, WebSocketBase tool, LongAdder counter, LongAdder fromBrowser,
+                        java.util.function.Predicate<WebSocketFrame> isUse, LongAdder sentToBrowser,
+                        java.util.function.BooleanSupplier overLimit) {
         AtomicBoolean closing = new AtomicBoolean();
         try {
-            pipe(browser, tool, counter, fromBrowser, isUse);
-            pipe(tool, browser, counter, new LongAdder(), frame -> false);
+            pipe(browser, tool, counter, fromBrowser, isUse, new LongAdder(), () -> false);
+            pipe(tool, browser, counter, new LongAdder(), frame -> false, sentToBrowser, overLimit);
             browser.closeHandler(v -> closeOther(browser, tool, closing));
             tool.closeHandler(v -> closeOther(tool, browser, closing));
             browser.exceptionHandler(e -> closeOther(browser, tool, closing));
@@ -75,7 +85,8 @@ final class WebSocketRelay {
     }
 
     private static void pipe(WebSocketBase from, WebSocketBase to, LongAdder counter, LongAdder messages,
-                             java.util.function.Predicate<WebSocketFrame> isUse) {
+                             java.util.function.Predicate<WebSocketFrame> isUse, LongAdder sent,
+                             java.util.function.BooleanSupplier overLimit) {
         from.frameHandler(frame -> {
             // Each side answers the other's ping by itself; relaying them would answer twice.
             if (frame.isPing() || frame.type() == WebSocketFrameType.PONG) {
@@ -87,7 +98,14 @@ final class WebSocketRelay {
                     return;
                 }
                 counter.add(frame.binaryData().length());
+                sent.add(frame.binaryData().length());
                 if ((frame.isText() || frame.isBinary()) && isUse.test(frame)) messages.increment();
+                if (overLimit.getAsBoolean()) {
+                    // 1008: the message violates a policy. Neither side gets this message.
+                    to.close((short) 1008, "Data export limit of the session reached");
+                    from.close((short) 1008, "Data export limit of the session reached");
+                    return;
+                }
                 to.writeFrame(copyOf(frame));
                 if (!to.isClosed() && to.writeQueueFull()) {
                     from.pause();
