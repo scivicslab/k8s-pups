@@ -16,6 +16,42 @@
       onsubmit="return confirm('Take this group\'s storage away? Its files stay and it can be given back later.')">
     <button type="submit">Take away</button>
 </form>
+<form class="inline" method="post" action="{basePath}/storage-admin/g/{name}/shrink" id="shrink"
+      onsubmit="return confirm('Make this group\'s storage smaller? It is taken away until you have lowered the Lustre quota on a007 and continue.')">
+    <input class="size" name="size" placeholder="50Gi" required>
+    <button type="submit">Make smaller</button>
+</form>
+<p class="note">Making the storage smaller takes it away first: stop the tools that use it. The size is a Lustre
+    project quota that only an administrator of the file system can lower; this page shows the commands.</p>
+{#else if shrinkTo}
+<p id="group-storage">Taken away to be made smaller: {storageSize} &rarr; {shrinkTo} ({revoked}).</p>
+<div id="shrink-pending">
+{#if shrinkCommands}
+<p>Run these on a007 as an administrator of the file system. The controller can neither run them nor check the
+    result.</p>
+<ol>
+    <li>Check the space used: <code>{shrinkCommands.check}</code><br>
+        The value under "kbytes" must not be more than {shrinkCommands.newLimitKib} (= {shrinkTo}). If it is, do not
+        go on: ask the group to delete files, or cancel.</li>
+    <li>Lower the limit: <code>{shrinkCommands.lower}</code><br>
+        Run the first command again: "blimit" must now show {shrinkCommands.newLimitKib}.</li>
+    <li>Press <b>Continue</b>: the storage is given back at {shrinkTo}.</li>
+</ol>
+{#else}
+<p class="error">The recorded PV has no Lustre project quota; the commands cannot be shown. Cancel the shrink.</p>
+{/if}
+<form class="inline" method="post" action="{basePath}/storage-admin/g/{name}/shrink/continue"
+      onsubmit="return confirm('Did you lower the Lustre quota to {shrinkTo} on a007? The controller cannot check it.')">
+    <button type="submit">Continue</button>
+</form>
+<form class="inline" method="post" action="{basePath}/storage-admin/g/{name}/shrink/cancel"
+      onsubmit="return confirm('Cancel the shrink? The storage stays taken away at {storageSize} and can be given back.')">
+    <button type="submit">Cancel shrink</button>
+</form>
+{#if shrinkCommands}
+<p class="note">If you already lowered the limit and cancel, set it back first: <code>{shrinkCommands.undo}</code></p>
+{/if}
+</div>
 {#else}
 <p id="group-storage">Taken away ({revoked}).</p>
 {#if restorable}

@@ -947,7 +947,40 @@ public class K8sApiClient {
         restorePvc(groupPvc(group, rec.storageClass(), rec.capacity()), rec);
     }
 
+    /**
+     * {@link #restoreGroupPvc} at another size: the PV gets {@code size} as its capacity (in the same update that
+     * removes its old claim) and the new PVC requests {@code size}. Used to finish making a group's storage smaller,
+     * after an administrator lowered the Lustre project quota; Kubernetes does not change the quota itself.
+     */
+    public void restoreGroupPvc(String group, com.scivicslab.k8spups.storage.PvRecord rec, String size) {
+        var sized = new com.scivicslab.k8spups.storage.PvRecord(rec.name(), rec.storageClass(), size, rec.csiDriver(),
+            rec.volumeHandle(), rec.volumeAttributes());
+        restorePvc(groupPvc(group, rec.storageClass(), size), sized, size);
+    }
+
+    /** {@link #restorePvc(PersistentVolumeClaim, com.scivicslab.k8spups.storage.PvRecord, String)} keeping the PV's capacity. */
     private void restorePvc(PersistentVolumeClaim pvc, com.scivicslab.k8spups.storage.PvRecord rec) {
+        restorePvc(pvc, rec, null);
+    }
+
+    /**
+     * The capacity to write into an existing PV that is given back, or null to leave it as it is. Only a shrink passes
+     * {@code newCapacity}; with null (an ordinary give-back) the PV is never resized. Also null when the PV already
+     * has that capacity.
+     */
+    static Quantity capacityToWrite(Quantity current, String newCapacity) {
+        if (newCapacity == null) return null;
+        Quantity wanted = new Quantity(newCapacity);
+        if (current != null && compareSizeGi(wanted, current) == 0) return null;
+        return wanted;
+    }
+
+    /**
+     * Binds {@code pvc} to the PV of the record: writes the PV again if it was deleted, otherwise removes its old
+     * claim. {@code newCapacity} is null except when a group's storage is made smaller; then the PV's capacity is set
+     * to it in the same update.
+     */
+    private void restorePvc(PersistentVolumeClaim pvc, com.scivicslab.k8spups.storage.PvRecord rec, String newCapacity) {
         String pvcName = pvc.getMetadata().getName();
         if (client.persistentVolumeClaims().inNamespace(userPodsNamespace).withName(pvcName).get() != null) {
             throw new IllegalStateException("PVC already exists: " + pvcName);
@@ -970,14 +1003,31 @@ public class K8sApiClient {
                 .endSpec().build();
             client.persistentVolumes().resource(pv).create();
             LOG.info("PV written again from its record: " + rec.name());
-        } else if (pv.getSpec().getClaimRef() != null) {
-            String phase = pv.getStatus() != null ? pv.getStatus().getPhase() : "";
-            if (!"Released".equals(phase)) {
-                throw new IllegalStateException("PV " + rec.name() + " is " + phase + ", not Released");
+        } else {
+            boolean claimed = pv.getSpec().getClaimRef() != null;
+            if (claimed) {
+                String phase = pv.getStatus() != null ? pv.getStatus().getPhase() : "";
+                if (!"Released".equals(phase)) {
+                    throw new IllegalStateException("PV " + rec.name() + " is " + phase + ", not Released");
+                }
+                pv.getSpec().setClaimRef(null);
             }
-            pv.getSpec().setClaimRef(null);
-            client.persistentVolumes().resource(pv).update();
-            LOG.info("Old claim removed from PV " + rec.name());
+            // Only a shrink passes a new capacity; an ordinary give-back leaves the PV's capacity as it is, even when
+            // the record says otherwise (a record kept from an older allocation of the same PV may be smaller)
+            Quantity current = pv.getSpec().getCapacity() != null ? pv.getSpec().getCapacity().get("storage") : null;
+            Quantity wanted = capacityToWrite(current, newCapacity);
+            boolean resized = wanted != null;
+            if (resized) {
+                Map<String, Quantity> capacity = new HashMap<>(
+                    pv.getSpec().getCapacity() != null ? pv.getSpec().getCapacity() : Map.of());
+                capacity.put("storage", wanted);
+                pv.getSpec().setCapacity(capacity);
+            }
+            if (claimed || resized) {
+                client.persistentVolumes().resource(pv).update();
+                if (claimed) LOG.info("Old claim removed from PV " + rec.name());
+                if (resized) LOG.info("PV capacity set: " + rec.name() + " " + current + " -> " + wanted);
+            }
         }
         pvc.getSpec().setVolumeName(rec.name());
         client.persistentVolumeClaims().inNamespace(userPodsNamespace).resource(pvc).create();
@@ -1642,7 +1692,7 @@ public class K8sApiClient {
      * Compares two Quantity values in GiB.
      * Returns positive if a > b, negative if a < b, zero if equal.
      */
-    private int compareSizeGi(Quantity a, Quantity b) {
+    private static int compareSizeGi(Quantity a, Quantity b) {
         return Double.compare(
             a.getNumericalAmount().doubleValue(),
             b.getNumericalAmount().doubleValue()

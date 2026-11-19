@@ -104,9 +104,12 @@ public class StorageAllocationRepository {
 
     // ── Group storage (storage_group, storage_group_member) ──────────────────
 
-    /** One row of {@code storage_group}; {@code pv} is empty until its storage is taken away. */
+    /**
+     * One row of {@code storage_group}; {@code pv} is empty until its storage is taken away; {@code shrinkTo} is the
+     * size of a pending shrink (see {@link GroupShrink}), or null.
+     */
     public record Group(String name, String type, String size, String state, String createdBy, Instant createdAt,
-                        String revokedBy, Instant revokedAt, Optional<PvRecord> pv) {
+                        String revokedBy, Instant revokedAt, Optional<PvRecord> pv, String shrinkTo) {
         public boolean active() { return "active".equals(state); }
     }
 
@@ -122,7 +125,8 @@ public class StorageAllocationRepository {
     }
 
     private static final String GROUP_COLUMNS = "name, storage_type, size, state, created_by, created_at, revoked_by, "
-        + "revoked_at, pv_name, pv_storage_class, pv_capacity, pv_csi_driver, pv_volume_handle, pv_volume_attributes::text";
+        + "revoked_at, pv_name, pv_storage_class, pv_capacity, pv_csi_driver, pv_volume_handle, pv_volume_attributes::text, "
+        + "shrink_to";
 
     public List<Group> groups() {
         return query("SELECT " + GROUP_COLUMNS + " FROM storage_group ORDER BY name", ps -> {},
@@ -146,9 +150,21 @@ public class StorageAllocationRepository {
 
     /** Marks the group's storage taken away and keeps the PV it was bound to. */
     public void revokeGroup(String name, String by, Optional<PvRecord> pv) {
+        revokeGroup(name, by, pv, null);
+    }
+
+    /**
+     * Takes the group's storage away to make it smaller: as {@link #revokeGroup(String, String, Optional)}, and
+     * remembers the size it gets when the shrink is continued. One UPDATE, so the billing trigger records it once.
+     */
+    public void prepareGroupShrink(String name, String by, PvRecord pv, String shrinkTo) {
+        revokeGroup(name, by, Optional.of(pv), shrinkTo);
+    }
+
+    private void revokeGroup(String name, String by, Optional<PvRecord> pv, String shrinkTo) {
         execute("UPDATE storage_group SET state = 'revoked', revoked_by = ?, revoked_at = now(), pv_name = ?, "
             + "pv_storage_class = ?, pv_capacity = ?, pv_csi_driver = ?, pv_volume_handle = ?, "
-            + "pv_volume_attributes = ?::jsonb WHERE name = ? AND state = 'active'", ps -> {
+            + "pv_volume_attributes = ?::jsonb, shrink_to = ? WHERE name = ? AND state = 'active'", ps -> {
                 ps.setString(1, by);
                 PvRecord r = pv.orElse(null);
                 ps.setString(2, r != null ? r.name() : null);
@@ -157,13 +173,30 @@ public class StorageAllocationRepository {
                 ps.setString(5, r != null ? r.csiDriver() : null);
                 ps.setString(6, r != null ? r.volumeHandle() : null);
                 ps.setString(7, r != null ? toJson(r.volumeAttributes()) : null);
-                ps.setString(8, name);
+                ps.setString(8, shrinkTo);
+                ps.setString(9, name);
             });
     }
 
     /** Gives the group its storage back (the history stays in the audit trail). */
     public void reactivateGroup(String name) {
         execute("UPDATE storage_group SET state = 'active', revoked_by = NULL, revoked_at = NULL WHERE name = ?",
+            ps -> ps.setString(1, name));
+    }
+
+    /**
+     * Gives the group its storage back at the size of the pending shrink. Size and state change in one UPDATE, so the
+     * billing trigger writes one 'restore' row with the new size and no separate 'resize' row.
+     */
+    public void finishGroupShrink(String name) {
+        execute("UPDATE storage_group SET size = shrink_to, shrink_to = NULL, state = 'active', revoked_by = NULL, "
+            + "revoked_at = NULL WHERE name = ? AND state = 'revoked' AND shrink_to IS NOT NULL",
+            ps -> ps.setString(1, name));
+    }
+
+    /** Forgets a pending shrink; the storage stays taken away at its old size. */
+    public void cancelGroupShrink(String name) {
+        execute("UPDATE storage_group SET shrink_to = NULL WHERE name = ? AND state = 'revoked'",
             ps -> ps.setString(1, name));
     }
 
@@ -236,7 +269,7 @@ public class StorageAllocationRepository {
         Optional<PvRecord> pv = pvName == null ? Optional.empty() : Optional.of(new PvRecord(pvName, rs.getString(10),
             rs.getString(11), rs.getString(12), rs.getString(13), fromJson(rs.getString(14))));
         return new Group(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
-            instant(rs.getTimestamp(6)), rs.getString(7), instant(rs.getTimestamp(8)), pv);
+            instant(rs.getTimestamp(6)), rs.getString(7), instant(rs.getTimestamp(8)), pv, rs.getString(15));
     }
 
     /** The mounts the user chose for the tool the last time, as stored (a JSON array); "[]" when none. */

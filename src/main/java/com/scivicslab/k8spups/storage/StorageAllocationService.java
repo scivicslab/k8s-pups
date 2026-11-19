@@ -278,6 +278,8 @@ public class StorageAllocationService {
     public String restoreGroup(String admin, String name) {
         var g = repository.group(name).filter(x -> !x.active()).orElse(null);
         if (g == null) return "No such group whose storage was taken away";
+        String pending = GroupShrink.refuseRestore(g.shrinkTo());
+        if (pending != null) return pending;
         if (!k8sClient.posixUsesNfs() && g.pv().isEmpty()) return "No PV was recorded when this group's storage was taken away";
         try {
             // nfs backend: the directory on the NFS server is named after the group, so a new PV and PVC find it again
@@ -288,6 +290,81 @@ public class StorageAllocationService {
         }
         repository.reactivateGroup(name);
         audit.addAudit("group.restore", admin, null, null, null, null, null, name + " " + g.size());
+        return null;
+    }
+
+    /**
+     * The first step of making a group's storage smaller (see {@link GroupShrink}): takes the storage away as
+     * {@link #revokeGroup} does and remembers the new size. The Lustre project quota is not changed: the administrator
+     * lowers it on a007 with the commands of {@link #shrinkCommands}, then calls {@link #continueGroupShrink}.
+     * Returns an error message, or null when done.
+     */
+    public String prepareGroupShrink(String admin, String name, String size) {
+        var g = repository.group(name).orElse(null);
+        if (g == null) return "No such group with storage";
+        String refused = GroupShrink.refusePrepare(g.active(), g.shrinkTo(), g.size(), size);
+        if (refused != null) return refused;
+        if (k8sClient.posixUsesNfs()) return "Group storage on an NFS server has no quota to lower; it cannot be made smaller here";
+        if (!k8sClient.podsUsingGroupPvc(name).isEmpty()) return "A tool is using this group's storage; stop it first";
+        PvRecord pv = k8sClient.boundPvOf(k8sClient.groupPvcName(name)).orElse(null);
+        if (pv == null) return "The group's PVC is not bound to a PV; it cannot be made smaller";
+        if (GroupShrink.LustreQuota.of(pv.volumeAttributes()).isEmpty()) {
+            return "The PV " + pv.name() + " has no Lustre project quota (projectId, exaFS); it cannot be made smaller here";
+        }
+        if (!k8sClient.deleteGroupPvc(name)) return "The PVC could not be deleted";
+        repository.prepareGroupShrink(name, admin, pv, size);
+        audit.addAudit("group.shrink.prepare", admin, null, null, null, null, null,
+            name + " " + g.size() + " -> " + size + " pv " + pv.name());
+        LOG.info("Group storage shrink prepared: " + name + " " + g.size() + " -> " + size + " (pv " + pv.name() + ")");
+        return null;
+    }
+
+    /**
+     * The commands that lower the Lustre quota of the group's pending shrink, built from the PV recorded when the
+     * shrink was prepared; empty when no shrink is pending.
+     */
+    public Optional<GroupShrink.Commands> shrinkCommands(String name) {
+        var g = repository.group(name).orElse(null);
+        if (g == null || g.shrinkTo() == null || g.pv().isEmpty()) return Optional.empty();
+        return GroupShrink.LustreQuota.of(g.pv().get().volumeAttributes())
+            .map(q -> GroupShrink.commands(q, g.size(), g.shrinkTo()));
+    }
+
+    /**
+     * The second step: after the administrator lowered the quota, gives the storage back at the new size (the PV's
+     * capacity and the new PVC's request) and makes it the group's size. The controller cannot check that the quota
+     * was lowered. Returns an error message, or null when done.
+     */
+    public String continueGroupShrink(String admin, String name) {
+        var g = repository.group(name).orElse(null);
+        if (g == null) return "No such group with storage";
+        String refused = GroupShrink.refuseContinue(g.active(), g.shrinkTo());
+        if (refused != null) return refused;
+        if (g.pv().isEmpty()) return "No PV was recorded when the shrink was prepared";
+        try {
+            k8sClient.restoreGroupPvc(name, g.pv().get(), g.shrinkTo());
+        } catch (Exception e) {
+            return "The storage could not be given back at " + g.shrinkTo() + ": " + e.getMessage();
+        }
+        repository.finishGroupShrink(name);
+        audit.addAudit("group.shrink", admin, null, null, null, null, null,
+            name + " " + g.size() + " -> " + g.shrinkTo() + " pv " + g.pv().get().name());
+        LOG.info("Group storage made smaller: " + name + " " + g.size() + " -> " + g.shrinkTo());
+        return null;
+    }
+
+    /**
+     * Forgets a pending shrink: the storage stays taken away at its old size and can be given back as usual. If the
+     * quota was already lowered, the administrator sets it back first (the undo command of {@link #shrinkCommands}).
+     */
+    public String cancelGroupShrink(String admin, String name) {
+        var g = repository.group(name).orElse(null);
+        if (g == null) return "No such group with storage";
+        String refused = GroupShrink.refuseContinue(g.active(), g.shrinkTo());
+        if (refused != null) return refused;
+        repository.cancelGroupShrink(name);
+        audit.addAudit("group.shrink.cancel", admin, null, null, null, null, null,
+            name + " " + g.size() + " -> " + g.shrinkTo() + " cancelled");
         return null;
     }
 

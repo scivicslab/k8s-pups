@@ -28,8 +28,8 @@ import java.util.function.Function;
 import java.util.logging.Logger;
 
 /**
- * Administrator pages for the storage shared by a group: the list of groups, and one page per group to enlarge, take
- * away and give back its storage and to choose its members. The storage of one user is given on the page of that user
+ * Administrator pages for the storage shared by a group: the list of groups, and one page per group to enlarge, make
+ * smaller, take away and give back its storage and to choose its members. The storage of one user is given on the page of that user
  * (see {@link UsersAdminResource}); users cannot create storage themselves.
  */
 @Path("/storage-admin")
@@ -67,7 +67,7 @@ public class StorageAdminResource {
             Map<String, Object> row = new HashMap<>();
             row.put("name", g.name());
             row.put("storageSize", g.size());
-            row.put("state", g.active() ? "active" : "taken away");
+            row.put("state", g.active() ? "active" : g.shrinkTo() != null ? "shrink to " + g.shrinkTo() + " pending" : "taken away");
             row.put("memberCount", call(x -> x.members(g.name())).size());
             rows.add(row);
         }
@@ -105,7 +105,9 @@ public class StorageAdminResource {
         data.put("name", g.name());
         data.put("storageSize", g.size());
         data.put("active", g.active());
-        data.put("restorable", !g.active() && g.pv().isPresent());
+        data.put("restorable", !g.active() && g.pv().isPresent() && g.shrinkTo() == null);
+        data.put("shrinkTo", g.shrinkTo());
+        data.put("shrinkCommands", g.shrinkTo() == null ? null : call(x -> x.shrinkCommands(name)).orElse(null));
         data.put("revoked", g.active() ? "" : g.revokedBy() + ", " + (g.revokedAt() == null ? ""
             : g.revokedAt().toString().substring(0, 16).replace('T', ' ')));
         String pvcName = actorSystem.getK8sClient().groupPvcName(g.name());
@@ -161,6 +163,38 @@ public class StorageAdminResource {
         String admin = currentUser();
         String sz = size == null ? "" : size.trim();
         return backToGroup(name, call(x -> x.resizeGroup(admin, name, sz)), "Storage made larger");
+    }
+
+    /** First step of making the storage smaller: takes it away and shows the commands that lower the Lustre quota. */
+    @POST
+    @Path("/g/{name}/shrink")
+    public Response prepareShrink(@PathParam("name") String name, @FormParam("size") String size) {
+        Response denied = requireAdmin();
+        if (denied != null) return denied;
+        String admin = currentUser();
+        String sz = size == null ? "" : size.trim();
+        return backToGroup(name, call(x -> x.prepareGroupShrink(admin, name, sz)),
+            "Storage taken away to be made smaller; run the commands below on a007, then continue");
+    }
+
+    /** Second step: the administrator ran the commands; the storage is given back at the new size. */
+    @POST
+    @Path("/g/{name}/shrink/continue")
+    public Response continueShrink(@PathParam("name") String name) {
+        Response denied = requireAdmin();
+        if (denied != null) return denied;
+        String admin = currentUser();
+        return backToGroup(name, call(x -> x.continueGroupShrink(admin, name)), "Storage given back at its new size");
+    }
+
+    @POST
+    @Path("/g/{name}/shrink/cancel")
+    public Response cancelShrink(@PathParam("name") String name) {
+        Response denied = requireAdmin();
+        if (denied != null) return denied;
+        String admin = currentUser();
+        return backToGroup(name, call(x -> x.cancelGroupShrink(admin, name)),
+            "Shrink cancelled; the storage stays taken away at its old size");
     }
 
     @POST
