@@ -1,0 +1,4 @@
+# The broker image with only the jar replaced: the GraalVM layer comes from the previous image, for when
+# the GraalVM download from GitHub fails during a build (504 on 2026-11-09).
+FROM 192.168.5.13:32000/quarkus-gpu-broker:1.2.0-2611072153
+COPY target/quarkus-gpu-broker-*.jar /app/quarkus-gpu-broker.jar
